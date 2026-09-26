@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import type { TaskRow } from "../lib/ipc";
@@ -103,5 +103,16 @@ describe("TaskManager", () => {
     render(<TaskManager />);
     const name = await screen.findByRole("button", { name: long });
     expect(name.getAttribute("title")).toBe(long);
+  });
+
+  it("says why it could not measure instead of Measuring… for ever, and retries", async () => {
+    vi.spyOn(ipc, "tasksList").mockRejectedValueOnce(new Error("host busy"));
+    useBrowser.setState({ open: { ...initial.open, tasks: true } });
+    render(<TaskManager />);
+    expect(await screen.findByText(/Could not measure the tabs: host busy/)).toBeTruthy();
+    expect(screen.queryByText("Measuring…")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("A sleeping page")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

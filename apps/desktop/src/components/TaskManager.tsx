@@ -1,4 +1,4 @@
-import { Moon, Volume2, X } from "lucide-react";
+import { Moon, RotateCw, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { TaskRow } from "../lib/ipc";
@@ -6,6 +6,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { errorMessage } from "../lib/errors";
 
 /** How often the table is measured while it is open. */
 export const SAMPLE_MS = 2000;
@@ -49,6 +50,12 @@ export function TaskManager() {
   const closeTab = useBrowser((s) => s.closeTab);
   const [rows, setRows] = useState<TaskRow[]>([]);
   const [cpu, setCpu] = useState<Record<string, number | null>>({});
+  // A failed read said "Measuring…" for ever. Whether a read has come back,
+  // and why the last one did not, are kept apart so an empty table can say
+  // which it is; `attempt` lets Retry ask again at once.
+  const [measuredOnce, setMeasuredOnce] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const previous = useRef<Record<string, { seconds: number; at: number }>>({});
   const root = useRef<HTMLDivElement>(null);
   useCoversContent(open);
@@ -61,8 +68,16 @@ export function TaskManager() {
     }
     let alive = true;
     const sample = async () => {
-      const measured = await ipc.tasksList().catch(() => null);
-      if (!alive || !measured) return;
+      let measured: TaskRow[];
+      try {
+        measured = await ipc.tasksList();
+      } catch (e) {
+        if (alive) setFailure(errorMessage(e));
+        return;
+      }
+      if (!alive) return;
+      setFailure(null);
+      setMeasuredOnce(true);
       const at = Date.now();
       const rates: Record<string, number | null> = {};
       for (const row of measured) {
@@ -78,7 +93,7 @@ export function TaskManager() {
       alive = false;
       clearInterval(timer);
     };
-  }, [open]);
+  }, [open, attempt]);
 
   if (!open) return null;
   const total = rows.reduce((sum, row) => sum + (row.memory_bytes ?? 0), 0);
@@ -96,7 +111,7 @@ export function TaskManager() {
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <h2 className="text-sm font-semibold">Task manager</h2>
           <span className="text-[11px] text-ink-3">{holders > 0 ? `${formatMemory(total)} of JavaScript in ${holders} ${holders === 1 ? "tab" : "tabs"} across this profile` : "No JavaScript heap reported"}</span>
-          <button type="button" aria-label="Close" onClick={() => toggle("tasks", false)} className="ml-auto grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
+          <button type="button" aria-label="Close task manager" title="Close task manager" onClick={() => toggle("tasks", false)} className="ml-auto grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
             <Icon icon={X} size={12} />
           </button>
         </div>
@@ -133,7 +148,20 @@ export function TaskManager() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-ink-3">Measuring…</td>
+                  <td colSpan={5} className="px-3 py-6 text-center text-ink-3">
+                    {failure ? (
+                      <span role="alert" className="inline-flex flex-wrap items-center justify-center gap-2">
+                        <span className="text-danger">Could not measure the tabs: {failure}</span>
+                        <button type="button" onClick={() => setAttempt((n) => n + 1)} className="inline-flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-2">
+                          <Icon icon={RotateCw} size={11} /> Retry
+                        </button>
+                      </span>
+                    ) : measuredOnce ? (
+                      "No tabs are open in this profile."
+                    ) : (
+                      <span role="status">Measuring…</span>
+                    )}
+                  </td>
                 </tr>
               )}
             </tbody>

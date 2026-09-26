@@ -3,19 +3,27 @@ import { ipc } from "../../lib/ipc";
 import type { Command } from "../../lib/ipc";
 import { COMMAND_TITLES, SHORTCUTS, chordsByCommand, formatChord } from "../../lib/commands";
 import { Group } from "../SettingsFields";
+import { errorMessage } from "../../lib/errors";
 
 /** Settings › Shortcuts: every bound command, plus the chords the chrome owns. */
 export function Shortcuts() {
-  const [cmds, setCmds] = useState<Command[]>([]);
+  // null until the host answers: an empty list at first flashed "No
+  // commands registered." on every visit, and a failed read said the same.
+  const [cmds, setCmds] = useState<Command[] | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
-    void ipc.commandsList().then((list) => alive && setCmds(list)).catch(() => alive && setCmds([]));
+    void ipc
+      .commandsList()
+      .then((list) => alive && (setCmds(list), setFailure(null)))
+      .catch((e: unknown) => alive && setFailure(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, []);
-  const bound = cmds.filter((c) => c.keybinding);
-  const chrome = chromeChords(cmds);
+  }, [attempt]);
+  const bound = (cmds ?? []).filter((c) => c.keybinding);
+  const chrome = chromeChords(cmds ?? []);
   const palette = formatChord(chordsByCommand()["palette.open"] ?? "mod+k");
   return (
     <Group title="Keyboard" description={`The palette (${palette}) searches tabs, history, bookmarks, local servers and commands that apply here.`}>
@@ -25,7 +33,16 @@ export function Shortcuts() {
           <kbd className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{chord(c.keybinding ?? "")}</kbd>
         </div>
       ))}
-      {bound.length === 0 && <p className="py-3 text-xs text-ink-3">No commands registered.</p>}
+      {cmds === null && failure && (
+        <p role="alert" className="flex flex-wrap items-center gap-2 py-3 text-xs text-danger">
+          Could not read the host's commands: {failure}
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="h-6 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-2">
+            Retry
+          </button>
+        </p>
+      )}
+      {cmds === null && !failure && <p role="status" className="py-3 text-xs text-ink-3">Loading…</p>}
+      {cmds !== null && bound.length === 0 && <p className="py-3 text-xs text-ink-3">No commands registered.</p>}
       {/* Chords the chrome owns outright: they never reach the host, so the
           command registry does not know about them. */}
       {chrome.map((c) => (

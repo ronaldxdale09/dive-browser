@@ -218,6 +218,48 @@ describe("Library dialog", () => {
     expect(clip?.getAttribute("title")).toBe("a-very-long-clip.mov");
   });
 
+  it("says a list could not be read instead of calling it empty, and retries", async () => {
+    vi.spyOn(ipc, "bookmarksSearch").mockRejectedValueOnce(new Error("store locked"));
+    render(<Library />);
+    expect(await screen.findByText("Could not load bookmarks")).toBeTruthy();
+    expect(screen.getByText("store locked")).toBeTruthy();
+    expect(screen.queryByText("No bookmarks yet")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Example docs")).toBeTruthy();
+  });
+
+  it("brings a history row back and says why when removing it fails", async () => {
+    vi.spyOn(ipc, "historyRemove").mockRejectedValue(new Error("history is busy"));
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    await waitFor(() => expect(screen.getByText("A")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Remove A from history" }));
+    await waitFor(() => expect(useBrowser.getState().error).toBe("history is busy"));
+    expect(screen.getByText("A")).toBeTruthy();
+  });
+
+  it("words a download's state and opens a saved file from its row", async () => {
+    const open = vi.spyOn(ipc, "downloadsOpen").mockResolvedValue(null);
+    const reveal = vi.spyOn(ipc, "downloadsReveal").mockResolvedValue(null);
+    useDownloads.setState({
+      items: [
+        { name: "report.json", path: "/tmp/report.json", url: "http://a.dev/report.json", status: "finished", at: Date.now(), startedAt: Date.now() },
+        { name: "big.iso", path: null, url: "http://a.dev/big.iso", status: "started", at: Date.now(), startedAt: Date.now() },
+        { name: "gone.zip", path: null, url: "http://a.dev/gone.zip", status: "failed", at: Date.now(), startedAt: Date.now() },
+      ],
+    });
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Downloads" }));
+    expect(screen.getByText("Saved")).toBeTruthy();
+    expect(screen.getByText("Downloading…")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.queryByText("finished")).toBeNull();
+    fireEvent.click(screen.getByText("report.json"));
+    expect(open).toHaveBeenCalledWith("/tmp/report.json");
+    expect(reveal).not.toHaveBeenCalled();
+    expect((screen.getByText("gone.zip").closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("closes on Escape and releases the page", async () => {
     render(<Library />);
     fireEvent.keyDown(screen.getByLabelText("Filter bookmarks"), { key: "Escape" });

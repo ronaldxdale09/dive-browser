@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
 import { chromeChords, Shortcuts } from "./Shortcuts";
@@ -13,6 +13,22 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   if (platform) Object.defineProperty(navigator, "platform", platform);
+});
+
+describe("Settings › Shortcuts loading", () => {
+  it("does not claim there are no commands before the host has answered, and says when it could not", async () => {
+    let fail!: (e: Error) => void;
+    vi.spyOn(ipc, "commandsList").mockReturnValue(new Promise((_, reject) => (fail = reject)));
+    render(<Shortcuts />);
+    expect(screen.queryByText("No commands registered.")).toBeNull();
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    await act(async () => fail(new Error("host gone")));
+    expect(screen.getByRole("alert").textContent).toContain("host gone");
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([{ id: "tab.new", title: "New tab", keybinding: "mod+t", scope: "workspace" }]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("New tab")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
 
 describe("Settings › Shortcuts chrome rows", () => {

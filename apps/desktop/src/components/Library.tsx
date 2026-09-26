@@ -1,5 +1,5 @@
 import { titleOf } from "../lib/omnibox";
-import { AppWindow, Clapperboard, Download, FolderOpen, History, LayoutGrid, Search, Star, Trash2, Wand2, X } from "lucide-react";
+import { AlertTriangle, AppWindow, Clapperboard, Download, FolderOpen, History, LayoutGrid, Search, Star, Trash2, Wand2, X } from "lucide-react";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import type { WebApp } from "../lib/ipc";
@@ -19,6 +19,9 @@ import { isPrivateWindow } from "../lib/privateMode";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
 import { OpenVideoButton } from "../screen/OpenVideoButton";
 import { EmptyState } from "./EmptyState";
+import { errorMessage } from "../lib/errors";
+import { fileUrl, opensInTab } from "../lib/paths";
+import type { DownloadStatus } from "../store/downloads";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 
@@ -94,7 +97,7 @@ export function Library() {
           <IconButton icon={X} label="Close library" onClick={close} />
         </header>
         <div key={tab} ref={panelRef} role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
-          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} scrollRef={panelRef} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
+          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} scrollRef={panelRef} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} onOpened={close} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
         </div>
       </div>
     </div>
@@ -150,6 +153,7 @@ function BookmarkRow({
       <button
         type="button"
         aria-label={`Remove bookmark ${titleOf(b)}`}
+        title="Remove bookmark"
         onClick={() => onRemove(b.url)}
         className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
       >
@@ -161,18 +165,20 @@ function BookmarkRow({
 
 function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: () => void; scrollRef?: React.RefObject<HTMLDivElement | null> }) {
   const [items, setItems] = useState<Bookmark[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const localScrollRef = useRef<HTMLDivElement>(null);
   const targetScrollRef = scrollRef ?? localScrollRef;
   useEffect(() => {
     let alive = true;
     ipc
       .bookmarksSearch("", LIBRARY_LIMIT)
-      .then((b) => alive && setItems(b))
-      .catch(() => alive && setItems([]));
+      .then((b) => alive && (setItems(b), setLoadError(null)))
+      .catch((e: unknown) => alive && setLoadError(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
   const open = useOpenRow(onOpened);
   const shown = useMemo(() => (items ?? []).filter((b) => matches(query, b.title, b.url)), [items, query]);
   const remove = (url: string) => {
@@ -196,6 +202,7 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
     getItemKey: (i) => shown[i]?.url ?? i,
   });
 
+  if (items === null && loadError) return <LoadFailed what="bookmarks" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />;
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
   if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Star} title="No bookmarks yet" hint={`Press ${displayChord("⌘D")} on a page to keep it here`} /> : <NoMatch />;
 
@@ -278,33 +285,37 @@ export function groupByDay(entries: HistoryEntry[], now: Date = new Date()): { d
 
 function HistoryList({ query, onOpened }: { query: string; onOpened: () => void }) {
   const [items, setItems] = useState<HistoryEntry[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const openSettings = useBrowser((s) => s.openSettings);
   useEffect(() => {
     let alive = true;
     ipc
       .historySearch("", LIBRARY_LIMIT)
-      .then((h) => alive && setItems(h))
-      .catch(() => alive && setItems([]));
+      .then((h) => alive && (setItems(h), setLoadError(null)))
+      .catch((e: unknown) => alive && setLoadError(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
   const open = useOpenRow(onOpened);
-  // The row goes at once; a failed removal brings it back.
+  // The row goes at once; a failed removal brings it back and says why --
+  // a row that silently reappears looks like a click that missed.
   const remove = async (url: string) => {
     const before = items;
     setItems((list) => (list ?? []).filter((h) => h.url !== url));
     try {
       await ipc.historyRemove(url);
-    } catch {
+    } catch (e) {
       setItems(before);
+      useBrowser.setState({ error: errorMessage(e) });
     }
   };
   const groups = useMemo(() => groupByDay((items ?? []).filter((h) => matches(query, h.title, h.url))), [items, query]);
   return (
     <>
       <div className="flex items-center justify-between px-2.5 pt-1 pb-2">
-        <span className="text-[11px] text-ink-3">{items === null ? "Loading…" : `${items.length} ${items.length === 1 ? "page" : "pages"}`}</span>
+        <span className="text-[11px] text-ink-3">{items === null ? (loadError ? "" : "Loading…") : `${items.length} ${items.length === 1 ? "page" : "pages"}`}</span>
         <button
           type="button"
           onClick={() => {
@@ -316,6 +327,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           Clear browsing data…
         </button>
       </div>
+      {items === null && loadError && <LoadFailed what="history" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
       {items !== null && groups.length === 0 && (items.length === 0 ? <EmptyState icon={History} title="No history yet" hint="Pages you visit show up here" /> : <NoMatch />)}
       {groups.map((g) => (
         <section key={g.day} aria-label={g.day} className="mb-2">
@@ -334,6 +346,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
                 <button
                   type="button"
                   aria-label={`Remove ${titleOf(h)} from history`}
+                  title="Remove from history"
                   onClick={() => void remove(h.url)}
                   className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
                 >
@@ -353,9 +366,35 @@ function NoMatch() {
   return <EmptyState icon={Search} title="Nothing matches" hint="Try a shorter filter" />;
 }
 
+/**
+ * A list that could not be read. It used to show the empty state ("No
+ * bookmarks yet"), which told someone with a thousand bookmarks they had
+ * none; this says what happened and offers to ask again.
+ */
+function LoadFailed({ what, error, onRetry }: { what: string; error: string; onRetry: () => void }) {
+  return (
+    <div role="alert">
+      <EmptyState icon={AlertTriangle} title={`Could not load ${what}`} hint={error} action={{ label: "Retry", onClick: onRetry }} />
+    </div>
+  );
+}
+
+/** A download's state as the row says it. */
+export function downloadStatusLabel(status: DownloadStatus): string {
+  switch (status) {
+    case "started":
+      return "Downloading…";
+    case "finished":
+      return "Saved";
+    default:
+      return "Failed";
+  }
+}
+
 /** This session's downloads, newest first, with a way to the file. */
-function DownloadsList({ query }: { query: string }) {
+function DownloadsList({ query, onOpened }: { query: string; onOpened: () => void }) {
   const items = useDownloads((s) => s.items);
+  const openTab = useBrowser((s) => s.openTab);
   const shown = items.filter((d) => matches(query, d.name, d.url));
   if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Download} title="Nothing downloaded yet" hint="Files you save this session show up here" /> : <NoMatch />;
   const reveal = (path: string | null) => {
@@ -363,20 +402,38 @@ function DownloadsList({ query }: { query: string }) {
       useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
     });
   };
+  // A row opens its file, as a row in the downloads menu does; showing it in
+  // the file manager is the folder button's job. A PDF opens in a tab, the
+  // rest in the system's app. Only a saved file has anything to open.
+  const openFile = (path: string) => {
+    if (opensInTab(path)) {
+      onOpened();
+      void openTab(fileUrl(path));
+      return;
+    }
+    void ipc.downloadsOpen(path).catch((err) => {
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
+  };
   return (
     <ul className="flex flex-col">
-      {shown.map((d) => (
+      {shown.map((d) => {
+        const saved = d.status === "finished" && d.path !== null;
+        return (
         <li key={`${d.url}-${d.at}`} className="group flex items-center gap-1">
-          <button type="button" title={d.name} onClick={() => reveal(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+          <button type="button" title={d.name} disabled={!saved} onClick={() => d.path && openFile(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs enabled:hover:bg-surface-2">
             <Icon icon={Download} size={14} className="shrink-0 text-ink-3" />
             <span className="truncate text-ink">{d.name}</span>
-            <span className="ml-auto shrink-0 pl-3 text-[11px] text-ink-3">{d.status}</span>
+            <span className={`ml-auto shrink-0 pl-3 text-[11px] ${d.status === "failed" ? "text-danger" : "text-ink-3"}`}>{downloadStatusLabel(d.status)}</span>
           </button>
-          <button type="button" aria-label={`Show ${d.name} in ${fileManagerName()}`} onClick={() => reveal(d.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+          {saved && (
+          <button type="button" aria-label={`Show ${d.name} in ${fileManagerName()}`} title={`Show in ${fileManagerName()}`} onClick={() => reveal(d.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
             <Icon icon={FolderOpen} size={13} />
           </button>
+          )}
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
@@ -388,16 +445,18 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   const [confirming, setConfirming] = useState<string | null>(null);
   const openTab = useBrowser((s) => s.openTab);
   const importing = useImportVideo((s) => s.busy);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
     ipc
       .recordingsList()
-      .then((r) => alive && setItems(r))
-      .catch(() => alive && setItems([]));
+      .then((r) => alive && (setItems(r), setLoadError(null)))
+      .catch((e: unknown) => alive && setLoadError(errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
   const remove = (path: string) => {
     const prev = items;
     setConfirming(null);
@@ -424,12 +483,19 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   const header = (
     <div className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-2">
       <span className="min-w-0 truncate text-[11px] text-ink-3">
-        {importing ? IMPORT_BUSY : items === null ? "Loading…" : `${items.length} ${items.length === 1 ? "recording" : "recordings"}`}
+        {importing ? IMPORT_BUSY : items === null ? (loadError ? "" : "Loading…") : `${items.length} ${items.length === 1 ? "recording" : "recordings"}`}
       </span>
       <OpenVideoButton onOpened={onOpened} className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60" />
     </div>
   );
-  if (items === null) return header;
+  if (items === null) {
+    return (
+      <>
+        {header}
+        {loadError && <LoadFailed what="recordings" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
+      </>
+    );
+  }
   if (shown.length === 0) {
     return (
       <>
@@ -480,10 +546,10 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
                   <Icon icon={Wand2} size={13} />
                 </button>
               )}
-              <button type="button" aria-label={`Show ${r.name} in ${fileManagerName()}`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+              <button type="button" aria-label={`Show ${r.name} in ${fileManagerName()}`} title={`Show in ${fileManagerName()}`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
                 <Icon icon={FolderOpen} size={13} />
               </button>
-              <button type="button" aria-label={`Delete ${r.name}`} onClick={() => setConfirming(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
+              <button type="button" aria-label={`Delete ${r.name}`} title="Delete recording" onClick={() => setConfirming(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
                 <Icon icon={Trash2} size={13} />
               </button>
             </>
@@ -541,6 +607,7 @@ function AppRow({ app, onOpen, onRemove }: { app: WebApp; onOpen: () => void; on
       <button
         type="button"
         aria-label={`Uninstall ${app.name}`}
+        title="Uninstall"
         onClick={onRemove}
         className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
       >
