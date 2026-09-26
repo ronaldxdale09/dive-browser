@@ -708,6 +708,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_for_url,
             passwords_save,
             passwords_reveal,
+            passwords_copy,
+            passwords_edit,
+            passwords_export,
             passwords_delete,
             passwords_used,
             addresses_list,
@@ -840,6 +843,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             prefs_set,
             pages_scheme,
             clipboard_write_text,
+            clipboard_write_secret,
             tab_scroll_position,
             tab_restore_scroll,
             browsing_data_clear,
@@ -2609,25 +2613,133 @@ pub(crate) fn passwords_for_url(
     crate::passwords::for_url(&state, profile.id, &url)
 }
 
-/// Save a login for the site of `url` in the active profile.
+/// Run `work` against the app state on a blocking thread. Keychain reads
+/// and writes wait on the OS, and the owner check waits on the person, so
+/// neither may hold up the main thread or an async runtime worker.
+async fn with_state_blocking<T: Send + 'static>(
+    app: AppHandle<Runtime>,
+    work: impl FnOnce(&AppState) -> AppResult<T> + Send + 'static,
+) -> AppResult<T> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager as _;
+        work(&app.state::<AppState>())
+    })
+    .await
+    .map_err(AppError::new)?
+}
+
+fn active_profile_id(state: &AppState) -> AppResult<dive_core::ProfileId> {
+    Ok(active_profile(&lock(&state.store), *lock(&state.active_workspace))?.id)
+}
+
+/// Add a login typed into Settings for the site of `url` in the active
+/// profile. One already kept for that site and username is only written
+/// over when `replace` says the person agreed to it.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn passwords_save(
-    state: State<'_, AppState>,
+pub(crate) async fn passwords_save(
+    app: AppHandle<Runtime>,
     url: String,
     username: String,
     password: String,
-) -> AppResult<dive_core::Credential> {
-    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
-    crate::passwords::save(&state, profile.id, &url, &username, &password)
+    replace: bool,
+) -> AppResult<crate::passwords::LoginSave> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::passwords::add(state, profile, &url, &username, &password, replace)
+    })
+    .await
 }
 
-/// The password behind a saved login.
+/// Change a saved login's username and, when `password` is not empty, its
+/// password.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppResult<String> {
-    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
-    crate::passwords::reveal(&state, profile.id, &id)
+pub(crate) async fn passwords_edit(
+    app: AppHandle<Runtime>,
+    id: String,
+    username: String,
+    password: String,
+) -> AppResult<dive_core::Credential> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::passwords::edit(state, profile, &id, &username, &password)
+    })
+    .await
+}
+
+/// The password behind a saved login, once the OS has confirmed the owner
+/// is at the keyboard. `None` when the person cancelled that check.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn passwords_reveal(
+    app: AppHandle<Runtime>,
+    id: String,
+) -> AppResult<Option<String>> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::passwords::owned(state, profile, &id)?;
+        if !crate::user_presence::confirm("show a saved password")? {
+            return Ok(None);
+        }
+        crate::passwords::reveal(state, profile, &id).map(Some)
+    })
+    .await
+}
+
+/// Copy a saved login's password to the clipboard, concealed from clipboard
+/// history and cleared again shortly, after the same owner check as showing
+/// it. The password never passes through the chrome. False when the person
+/// cancelled the check.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn passwords_copy(app: AppHandle<Runtime>, id: String) -> AppResult<bool> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::passwords::owned(state, profile, &id)?;
+        if !crate::user_presence::confirm("copy a saved password")? {
+            return Ok(false);
+        }
+        let password = crate::passwords::reveal(state, profile, &id)?;
+        crate::clipboard_secret::write(&password)?;
+        Ok(true)
+    })
+    .await
+}
+
+/// Write every login in the active profile, passwords in the clear, to a
+/// CSV the person chooses, in the columns Chrome exports. Asks the OS to
+/// confirm the owner first. `None` when that check or the save dialog was
+/// cancelled.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn passwords_export(
+    app: AppHandle<Runtime>,
+) -> AppResult<Option<crate::passwords::PasswordExport>> {
+    if !crate::user_presence::confirm_async("export your saved passwords").await? {
+        return Ok(None);
+    }
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Export saved passwords")
+        .set_file_name("Dive Passwords.csv")
+        .add_filter("CSV", &["csv"])
+        .save_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    let path = file.path().to_owned();
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        let (text, exported, failed) = crate::passwords::export_csv(state, profile)?;
+        crate::passwords::write_private_file(&path, &text)?;
+        Ok(Some(crate::passwords::PasswordExport {
+            path: path.to_string_lossy().into_owned(),
+            exported,
+            failed,
+        }))
+    })
+    .await
 }
 
 /// Note that a saved login was just filled, so the site's most used login
@@ -3067,22 +3179,27 @@ pub(crate) async fn passwords_pick_csv() -> Option<String> {
 /// Import the logins in a CSV export into the active profile.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn passwords_import_csv(
-    state: State<'_, AppState>,
+pub(crate) async fn passwords_import_csv(
+    app: AppHandle<Runtime>,
     path: String,
 ) -> AppResult<crate::passwords::CsvImportSummary> {
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| AppError::new(format!("could not read {path}: {e}")))?;
-    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
-    crate::passwords::import_csv(&state, profile.id, &text)
+    with_state_blocking(app, move |state| {
+        let text = crate::passwords::read_csv_file(std::path::Path::new(&path))?;
+        let profile = active_profile_id(state)?;
+        crate::passwords::import_csv(state, profile, &text)
+    })
+    .await
 }
 
 /// Forget a saved login.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn passwords_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
-    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
-    crate::passwords::delete(&state, profile.id, &id)
+pub(crate) async fn passwords_delete(app: AppHandle<Runtime>, id: String) -> AppResult<bool> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::passwords::delete(state, profile, &id)
+    })
+    .await
 }
 
 /// Every form entry remembered in the active profile.
@@ -3466,6 +3583,16 @@ pub(crate) fn clipboard_write_text(text: String) -> AppResult<()> {
         .map_err(AppError::new)?
         .set_text(text)
         .map_err(AppError::new)
+}
+
+/// Put a secret on the system clipboard, hidden from clipboard history and
+/// cleared again after half a minute unless something else was copied.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn clipboard_write_secret(text: String) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::clipboard_secret::write(&text))
+        .await
+        .map_err(AppError::new)?
 }
 
 /// Put PNG bytes on the system clipboard as an image.

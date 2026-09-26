@@ -153,7 +153,7 @@ export function General() {
       <Group title="Backup">
         <Row
           label="Save a backup"
-          hint={`Bookmarks, history, form entries, preferences and every workspace's tabs, in one file. Saved passwords are not included — they stay in ${credentialStoreName()}; export those from Settings › Passwords if you need them.`}
+          hint={`Bookmarks, history, form entries, preferences and every workspace's tabs, in one file. Saved passwords are not included — they stay in ${credentialStoreName()}. To take them elsewhere, use Export passwords in Settings › Passwords, which writes them to a CSV file.`}
           control={<Button onClick={() => void saveBackup()}>Save…</Button>}
         />
         <Row

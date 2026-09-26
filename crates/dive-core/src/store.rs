@@ -1102,11 +1102,16 @@ impl Store {
         Ok(())
     }
 
-    /// Saved logins for `profile`, by site then username.
+    /// Saved logins for `profile`, by site then username. The site sorts by
+    /// its host, the way the list shows it: ordered by the whole origin, every
+    /// `http://` login came before every `https://` one, so a local server
+    /// sat above sites it should have sorted after.
     pub fn credentials(&self, profile: ProfileId) -> Result<Vec<Credential>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
-             FROM credentials WHERE profile_id = ?1 ORDER BY origin, username",
+             FROM credentials WHERE profile_id = ?1
+             ORDER BY substr(origin, instr(origin, '://') + 3), origin,
+                      username COLLATE NOCASE, username",
         )?;
         let rows = stmt.query_map([profile.to_string()], credential_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -1142,6 +1147,22 @@ impl Store {
             "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
              FROM credentials WHERE profile_id = ?1 AND origin = ?2 AND username = ?3",
             params![profile.to_string(), origin, username],
+            credential_row,
+        )?)
+    }
+
+    /// Give login `id` a new username, keeping its id (and so its keychain
+    /// item). Fails when the site already has a login by that name, which
+    /// the unique index enforces.
+    pub fn rename_credential(&self, id: &str, username: &str) -> Result<Credential> {
+        self.conn.execute(
+            "UPDATE credentials SET username = ?2 WHERE id = ?1",
+            params![id, username],
+        )?;
+        Ok(self.conn.query_row(
+            "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
+             FROM credentials WHERE id = ?1",
+            [id],
             credential_row,
         )?)
     }
@@ -2285,6 +2306,49 @@ mod tests {
         assert!(store.remove_credential("id-1").unwrap());
         assert!(!store.remove_credential("id-1").unwrap());
         assert_eq!(store.credentials(profile.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn credentials_sort_by_the_host_shown_not_the_scheme() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let now = Timestamp::now();
+        for (id, origin, username) in [
+            ("a", "https://github.com", "dale"),
+            ("b", "http://localhost:3000", "dev"),
+            ("c", "https://accounts.example.com", "Zoe"),
+            ("d", "https://accounts.example.com", "amy"),
+        ] {
+            store
+                .upsert_credential(id, profile.id, origin, username, now)
+                .unwrap();
+        }
+        let order: Vec<_> = store
+            .credentials(profile.id)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(order, ["d", "c", "a", "b"]);
+    }
+
+    #[test]
+    fn a_renamed_login_keeps_its_id_and_cannot_take_a_used_name() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let now = Timestamp::now();
+        store
+            .upsert_credential("id-1", profile.id, "https://x.test", "dale", now)
+            .unwrap();
+        store
+            .upsert_credential("id-2", profile.id, "https://x.test", "eve", now)
+            .unwrap();
+        let renamed = store.rename_credential("id-1", "dale@x.test").unwrap();
+        assert_eq!(
+            (renamed.id.as_str(), renamed.username.as_str()),
+            ("id-1", "dale@x.test")
+        );
+        assert!(store.rename_credential("id-1", "eve").is_err());
     }
 
     use super::*;

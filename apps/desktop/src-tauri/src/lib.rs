@@ -18,6 +18,7 @@ mod browser_import;
 mod buffers;
 mod capture_scope;
 mod cdp_feed;
+mod clipboard_secret;
 mod color;
 mod commands;
 mod console;
@@ -97,6 +98,7 @@ mod titlebar;
 mod translate;
 #[cfg(feature = "cef")]
 mod ui_probe;
+mod user_presence;
 mod vitals;
 mod webapp;
 

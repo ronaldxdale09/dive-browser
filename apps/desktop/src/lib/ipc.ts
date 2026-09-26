@@ -23,7 +23,7 @@ export const events = {
   },
 };
 export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary } from "../generated/bindings";
-export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
+export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, LoginSave, PasswordExport, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
 export type { StackReport, Detection, Category, Palette, PaletteEntry, ColorFormats } from "../generated/bindings";
@@ -191,6 +191,7 @@ export const ipc = {
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),
   pagesScheme: async (scheme: "dark" | "light") => unwrap(await commands.pagesScheme(scheme)),
   clipboardWriteText: async (text: string) => unwrap(await commands.clipboardWriteText(text)),
+  clipboardWriteSecret: async (text: string) => unwrap(await commands.clipboardWriteSecret(text)),
   browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
   downloadsReveal: async (path: string | null) => unwrap(await commands.downloadsReveal(path)),
   downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),
@@ -254,8 +255,14 @@ export const ipc = {
   tabAudioState: async (id: string) => commands.tabAudioState(id),
   externalLinkOpen: async (token: string, always: boolean) => unwrap(await commands.externalLinkOpen(token, always)),
   externalLinkDismiss: async (token: string) => commands.externalLinkDismiss(token),
-  passwordsSave: async (url: string, username: string, password: string) => unwrap(await commands.passwordsSave(url, username, password)),
+  /** Add a login from Settings; one already kept for that site and username is replaced only with `replace`. */
+  passwordsSave: async (url: string, username: string, password: string, replace = false) => unwrap(await commands.passwordsSave(url, username, password, replace)),
+  passwordsEdit: async (id: string, username: string, password: string) => unwrap(await commands.passwordsEdit(id, username, password)),
+  /** The password, after the OS confirms the owner; `null` when they cancelled that check. */
   passwordsReveal: async (id: string) => unwrap(await commands.passwordsReveal(id)),
+  /** Copy the password (concealed, cleared after 30 s) without it passing through the chrome; false when cancelled. */
+  passwordsCopy: async (id: string) => unwrap(await commands.passwordsCopy(id)),
+  passwordsExport: async () => unwrap(await commands.passwordsExport()),
   passwordsDelete: async (id: string) => unwrap(await commands.passwordsDelete(id)),
   passwordsUsed: async (id: string) => unwrap(await commands.passwordsUsed(id)),
   passwordsAnswer: async (token: string, save: boolean) => unwrap(await commands.passwordsAnswer(token, save)),

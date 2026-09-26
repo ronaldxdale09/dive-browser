@@ -246,10 +246,43 @@ export const commands = {
 	passwordsList: () => typedError<Credential[], AppError>(__TAURI_INVOKE("passwords_list")),
 	/**  Logins saved for the site of `url`, most used first. */
 	passwordsForUrl: (url: string) => typedError<Credential[], AppError>(__TAURI_INVOKE("passwords_for_url", { url })),
-	/**  Save a login for the site of `url` in the active profile. */
-	passwordsSave: (url: string, username: string, password: string) => typedError<Credential, AppError>(__TAURI_INVOKE("passwords_save", { url, username, password })),
-	/**  The password behind a saved login. */
-	passwordsReveal: (id: string) => typedError<string, AppError>(__TAURI_INVOKE("passwords_reveal", { id })),
+	/**
+	 *  Add a login typed into Settings for the site of `url` in the active
+	 *  profile. One already kept for that site and username is only written
+	 *  over when `replace` says the person agreed to it.
+	 */
+	passwordsSave: (url: string, username: string, password: string, replace: boolean) => typedError<LoginSave, AppError>(__TAURI_INVOKE("passwords_save", { url, username, password, replace })),
+	/**
+	 *  The password behind a saved login, once the OS has confirmed the owner
+	 *  is at the keyboard. `None` when the person cancelled that check.
+	 */
+	passwordsReveal: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("passwords_reveal", { id })),
+	/**
+	 *  Copy a saved login's password to the clipboard, concealed from clipboard
+	 *  history and cleared again shortly, after the same owner check as showing
+	 *  it. The password never passes through the chrome. False when the person
+	 *  cancelled the check.
+	 */
+	passwordsCopy: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("passwords_copy", { id })),
+	/**
+	 *  Change a saved login's username and, when `password` is not empty, its
+	 *  password.
+	 */
+	passwordsEdit: (id: string, username: string, password: string) => typedError<Credential, AppError>(__TAURI_INVOKE("passwords_edit", { id, username, password })),
+	/**
+	 *  Write every login in the active profile, passwords in the clear, to a
+	 *  CSV the person chooses, in the columns Chrome exports. Asks the OS to
+	 *  confirm the owner first. `None` when that check or the save dialog was
+	 *  cancelled.
+	 */
+	passwordsExport: () => typedError<{
+	/**  Where the file went. */
+	path: string,
+	/**  Logins written to it. */
+	exported: number,
+	/**  Logins left out because the OS store would not hand their password over. */
+	failed: number,
+} | null, AppError>(__TAURI_INVOKE("passwords_export")),
 	/**  Forget a saved login. */
 	passwordsDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("passwords_delete", { id })),
 	/**
@@ -688,6 +721,11 @@ export const commands = {
 	 *  focused one (the person may have just clicked the page).
 	 */
 	clipboardWriteText: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_text", { text })),
+	/**
+	 *  Put a secret on the system clipboard, hidden from clipboard history and
+	 *  cleared again after half a minute unless something else was copied.
+	 */
+	clipboardWriteSecret: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_secret", { text })),
 	/**
 	 *  Where a tab's page is scrolled, for remembering a tab about to close.
 	 *  `None` when the page cannot say in time.
@@ -1329,6 +1367,13 @@ export type CsvImportSummary = {
 	skipped: number,
 	/**  Rows without a usable site, username or password. */
 	unreadable: number,
+	/**
+	 *  Rows the OS store refused to keep. Counted apart from unreadable
+	 *  ones: the file was fine, and trying again may work.
+	 */
+	failed: number,
+	/**  Why the first refused row was refused, to show with the count. */
+	failure: string | null,
 };
 
 /**  What the person decided for one origin and kind. */
@@ -1819,6 +1864,19 @@ export type LoadPhase =
 /**  The document request itself failed (DNS, refused, offline). */
 "failed";
 
+/**  What adding a login from Settings did. */
+export type LoginSave =
+/**
+ *  Saved; `replaced` when it took the place of a password already kept
+ *  for that site and username.
+ */
+{ kind: "saved"; credential: Credential; replaced: boolean } |
+/**
+ *  The site already has a password for that username, and nothing was
+ *  written: the person is asked before it is replaced.
+ */
+{ kind: "exists"; origin: string };
+
 /**  A recording's facts the editor needs before it can draw anything. */
 export type MediaInfo = {
 	duration_ms: number | null,
@@ -2064,6 +2122,16 @@ export type PaneBounds = {
 	tab: TabId,
 	/**  Its rectangle, relative to the main window. */
 	bounds: Bounds,
+};
+
+/**  What a password export wrote. */
+export type PasswordExport = {
+	/**  Where the file went. */
+	path: string,
+	/**  Logins written to it. */
+	exported: number,
+	/**  Logins left out because the OS store would not hand their password over. */
+	failed: number,
 };
 
 /**  A page asked for something no decision covers yet. */
