@@ -14,18 +14,22 @@
 //! whatever its tier. Sleeping tabs keep their place, their scroll and their
 //! history, and wake when clicked.
 
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::AppHandle;
 
 use crate::Runtime;
+#[cfg(any(target_os = "macos", test))]
 use crate::housekeeping::Reach;
 
 /// One pressure sweep at a time: the system repeats its notice while the
 /// pressure lasts, and overlapping sweeps would only race each other.
+#[cfg(target_os = "macos")]
 static SWEEPING: AtomicBool = AtomicBool::new(false);
 
 /// Run the sweep `reach` asks for, unless one is already going.
+#[cfg(target_os = "macos")]
 fn relieve(app: &AppHandle<Runtime>, reach: Reach) {
     if SWEEPING.swap(true, Ordering::AcqRel) {
         return;
@@ -41,6 +45,7 @@ fn relieve(app: &AppHandle<Runtime>, reach: Reach) {
 }
 
 /// What the system's pressure level asks of the sweep, if anything.
+#[cfg(any(target_os = "macos", test))]
 fn reach_for(level: usize) -> Option<Reach> {
     if level & platform::CRITICAL != 0 {
         Some(Reach::Critical)
@@ -151,7 +156,9 @@ mod platform {
 
     use crate::Runtime;
 
+    #[cfg(test)]
     pub(super) const WARN: usize = 0x2;
+    #[cfg(test)]
     pub(super) const CRITICAL: usize = 0x4;
 
     /// No system notice to listen to here; the regular sweep and the live

@@ -22,6 +22,7 @@ const SESSION_WAIT_STEP: Duration = Duration::from_millis(100);
 const SESSION_WAIT_TRIES: u32 = 50;
 /// How long a `Today` tab may sit unfocused once the system says memory is
 /// getting short: minutes rather than the usual hour.
+#[cfg(any(target_os = "macos", test))]
 pub const WARN_IDLE: time::Duration = time::Duration::minutes(5);
 /// Live page views kept at most. Each is a renderer, and past a few dozen
 /// the machine is paging for tabs nobody is looking at; the oldest hidden
@@ -39,6 +40,7 @@ pub enum Reach {
     Idle,
     /// The system warned that memory is short: `Today` tabs idle past
     /// [`WARN_IDLE`].
+    #[cfg(any(target_os = "macos", test))]
     Warn,
     /// The system is about to kill processes: every hidden tab that nothing
     /// protects, of any tier, however recently it was used.
@@ -53,6 +55,7 @@ impl Reach {
     pub fn idle(self) -> time::Duration {
         match self {
             Self::Idle => max_idle(),
+            #[cfg(any(target_os = "macos", test))]
             Self::Warn => WARN_IDLE,
             Self::Critical | Self::OverCap => time::Duration::ZERO,
         }
