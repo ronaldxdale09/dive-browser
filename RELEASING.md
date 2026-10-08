@@ -11,6 +11,11 @@ A run that fails leaves nothing behind — no tag, no commit, no half-release.
 
 ## Cutting a release
 
+Local, CI, and release builds use Rust 1.98.0, pinned in
+`rust-toolchain.toml` and the workflow actions. Update those pins together
+when qualifying a newer compiler so a release uses the same compiler and
+Clippy rules on every platform.
+
 ### From GitHub (the normal way)
 
 **Actions → `release` → Run workflow**, pick a bump, run it.
