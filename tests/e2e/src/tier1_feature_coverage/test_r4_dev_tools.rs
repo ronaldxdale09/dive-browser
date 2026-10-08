@@ -191,11 +191,11 @@ async fn test_mcp_server_bearer_auth() {
                 .unwrap();
             assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 
-            // 3. Valid Bearer token + trusted origin -> 200 or 400 (if empty body), not 401/403
+            // 3. A native client with a valid bearer token reaches the MCP
+            // handler. Web-page Origin headers are deliberately rejected.
             let resp = client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", token))
-                .header("Origin", "http://localhost:3000")
                 .body("{}")
                 .send()
                 .await
@@ -258,7 +258,6 @@ async fn test_mcp_concurrency_50_parallel_requests() {
                         .post(&url)
                         .header("Content-Type", "application/json")
                         .header("Accept", "application/json, text/event-stream")
-                        .header("Origin", "http://localhost:5173")
                         .body(body.to_string())
                         .send()
                         .await

@@ -148,7 +148,9 @@ export function visibleOverlayRegions() {
   // escapes its parent is the whole reason this list is not pruned by
   // ancestry.
   return measured
-    .filter(({ rect }) => !measured.some((other) => within(rect, other.rect)))
+    .filter(({ rect }, index) => !measured.some((other, otherIndex) =>
+      within(rect, other.rect) && (!within(other.rect, rect) || otherIndex < index),
+    ))
     .map(({ element, rect }) => {
       const { x, y, width, height } = rect;
       // Floating chrome surfaces use uniform circular corners. Carry their
@@ -231,6 +233,8 @@ function beginLive() {
   // The cache can predate the overlay that just asked to be shown.
   matched = null;
   let frame = 0;
+  let frameDeadline = 0;
+  let hiddenFlush = false;
   let last = "";
   let stopped = false;
   let motionUntil = 0;
@@ -242,13 +246,36 @@ function beginLive() {
     if (key !== last) { last = key; sendLive(regions, true, modal, focus); }
   };
   const onFrame = () => {
+    cancelAnimationFrame(frame);
     frame = 0;
+    clearTimeout(frameDeadline);
+    frameDeadline = 0;
     if (stopped) return;
     measure();
-    if (performance.now() < motionUntil) frame = requestAnimationFrame(onFrame);
+    if (performance.now() < motionUntil) followFrame();
   };
-  // At most one measurement per frame, however many events ask for it.
-  const schedule = () => { if (!frame && !stopped) frame = requestAnimationFrame(onFrame); };
+  // CEF can mark chrome hidden beneath native page views while its window
+  // stays visible. It then pauses rAF, so a removed dialog would retain its
+  // native input mask and focus indefinitely. One bounded timer per pending
+  // measurement keeps cleanup independent of renderer visibility.
+  const followFrame = () => {
+    if (frame || stopped) return;
+    frame = requestAnimationFrame(onFrame);
+    frameDeadline = window.setTimeout(onFrame, 100);
+  };
+  const schedule = () => {
+    if (stopped) return;
+    followFrame();
+    // A hidden renderer also throttles timers. Flush DOM-driven changes in
+    // a microtask; motion following remains bounded and never spins here.
+    if (frame && !hiddenFlush && document.visibilityState === "hidden") {
+      hiddenFlush = true;
+      queueMicrotask(() => {
+        hiddenFlush = false;
+        if (frame && !stopped) onFrame();
+      });
+    }
+  };
   // Only motion that can move an overlay: one inside it, or on something
   // that holds it. A spinner in the tab strip or a count badge re-keying on
   // every blocked tracker otherwise kept this measuring every frame.
@@ -288,6 +315,7 @@ function beginLive() {
   });
   mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: MOTION_ATTRIBUTES });
   window.addEventListener("resize", schedule);
+  document.addEventListener("visibilitychange", schedule);
   document.addEventListener("scroll", schedule, true);
   for (const type of ["transitionstart", "animationstart"]) document.addEventListener(type, onMotionStart, true);
   for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) document.addEventListener(type, onMotionEnd, true);
@@ -297,9 +325,11 @@ function beginLive() {
   return () => {
     stopped = true;
     cancelAnimationFrame(frame);
+    clearTimeout(frameDeadline);
     resizer.disconnect();
     mutations.disconnect();
     window.removeEventListener("resize", schedule);
+    document.removeEventListener("visibilitychange", schedule);
     document.removeEventListener("scroll", schedule, true);
     for (const type of ["transitionstart", "animationstart"]) document.removeEventListener(type, onMotionStart, true);
     for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) document.removeEventListener(type, onMotionEnd, true);

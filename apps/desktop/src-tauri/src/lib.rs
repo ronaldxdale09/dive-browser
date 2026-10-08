@@ -184,6 +184,12 @@ fn reopen_window(app: &tauri::AppHandle<Runtime>) {
 #[serde(deny_unknown_fields)]
 struct StartupMilestonePayload {
     milestone: String,
+    /// `chrome_timeline` only: the renderer's clock at send time and its
+    /// boot marks on that clock.
+    #[serde(default)]
+    now: Option<f64>,
+    #[serde(default)]
+    marks: Option<std::collections::HashMap<String, f64>>,
 }
 
 fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
@@ -201,11 +207,21 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
     match payload {
         Ok(data) => {
             let webview = message.webview();
-            match startup::observe_renderer_milestone(
-                webview.label(),
-                webview.window().label(),
-                &data.milestone,
-            ) {
+            let observed = if data.milestone == "chrome_timeline" {
+                startup::observe_renderer_timeline(
+                    webview.label(),
+                    webview.window().label(),
+                    data.now.unwrap_or(f64::NAN),
+                    &data.marks.unwrap_or_default(),
+                )
+            } else {
+                startup::observe_renderer_milestone(
+                    webview.label(),
+                    webview.window().label(),
+                    &data.milestone,
+                )
+            };
+            match observed {
                 Ok(()) => resolver.resolve(()),
                 Err(error) => resolver.reject(error),
             }
@@ -419,6 +435,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // CEF is initialized and its context is up by the time setup runs.
+            startup::record_milestone("engine_ready");
             specta.mount_events(app);
             #[cfg(feature = "cef")]
             if private_session::is_private() && cef::crash_reporting_enabled() != 0 {
@@ -444,6 +462,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move { handle.exit(1) });
                 return Ok(());
             }
+            startup::record_milestone("db_opened");
             if !private_session::is_private() {
                 use tauri::Manager as _;
                 let state = app.state::<state::AppState>();

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { bootTimeline } from "./bootMarks";
 
 interface StartupObservation {
   observeControls(): { rendered(): void; cancel(): void };
@@ -25,9 +26,15 @@ export function startStartupTelemetry(): () => void {
   const flushControls = () => {
     if (disposed || !paintAcknowledged || !controlsRendered || controlsSent) return;
     controlsSent = true;
-    void invoke("report_startup_milestone", { milestone: "controls_ready" }).catch((error: unknown) => {
-      console.warn("Could not report startup controls readiness", error);
-    });
+    // The boot timeline goes first: a startup benchmark ends at controls
+    // readiness, and the steps that led there belong in the same report.
+    const timeline = bootTimeline();
+    void invoke("report_startup_milestone", { milestone: "chrome_timeline", now: performance.now(), marks: timeline })
+      .catch((error: unknown) => console.warn("Could not report the startup timeline", error))
+      .then(() => invoke("report_startup_milestone", { milestone: "controls_ready" }))
+      .catch((error: unknown) => {
+        console.warn("Could not report startup controls readiness", error);
+      });
   };
   const observation: StartupObservation = {
     observeControls() {

@@ -565,11 +565,15 @@ enum ActionOutcome {
 }
 
 /// Chromium removes interception jobs on navigation/cancellation. A late
-/// answer to such a job must not stop the *new* document's load.
+/// answer to such a job must not stop the *new* document's load. Chromium
+/// also returns "Invalid state" when the interception is no longer waiting
+/// for resolution (including a successful action whose reply arrived late).
 fn request_is_gone(error: &dive_cdp::CdpError) -> bool {
     matches!(error, dive_cdp::CdpError::Closed)
         || matches!(error, dive_cdp::CdpError::Protocol { code: -32602, message }
             if message == "Invalid InterceptionId.")
+        || matches!(error, dive_cdp::CdpError::Protocol { code: -32000, message }
+            if message == "Invalid state for continueInterceptedRequest")
 }
 
 #[derive(Default)]
@@ -1183,6 +1187,7 @@ mod tests {
         Ok,
         ProtocolError,
         RequestGone,
+        AlreadyResolved,
         PinnedFetchContract,
     }
 
@@ -1246,6 +1251,9 @@ mod tests {
                 Reply::ProtocolError => {
                     json!({"id": id, "error": {"code": -32000, "message": "injected"}})
                 }
+                Reply::AlreadyResolved => {
+                    json!({"id": id, "error": {"code": -32000, "message": "Invalid state for continueInterceptedRequest"}})
+                }
                 Reply::RequestGone => {
                     json!({"id": id, "error": {"code": -32602, "message": "Invalid InterceptionId."}})
                 }
@@ -1291,6 +1299,22 @@ mod tests {
             .await;
             assert_eq!(outcome, ActionOutcome::Resolved(None));
             assert_eq!(sent.lock().unwrap().len(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn already_resolved_interception_never_stops_the_page() {
+        for action in [InterceptAction::Continue, InterceptAction::Block] {
+            for replies in [
+                vec![Reply::AlreadyResolved],
+                vec![Reply::ProtocolError, Reply::AlreadyResolved],
+            ] {
+                let expected = replies.len();
+                let (session, sent) = scripted_session(replies);
+                let outcome = execute_action(&session, "late-reply", &json!({}), &action).await;
+                assert_eq!(outcome, ActionOutcome::Resolved(None));
+                assert_eq!(sent.lock().unwrap().len(), expected);
+            }
         }
     }
 

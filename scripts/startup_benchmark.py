@@ -55,6 +55,42 @@ def percentile(values, fraction):
     return round(ordered[low] + (ordered[high] - ordered[low]) * (index - low), 2)
 
 
+# Launch-clock steps in boot order. Renderer marks are upper bounds (they
+# include IPC delivery); absent ones are left out rather than guessed.
+PHASES = ('engine_ready', 'db_opened', 'state_init', 'window_created', 'setup_complete',
+          'chrome_navigation_start', 'chrome_response_end', 'chrome_dom_interactive', 'chrome_shell_painted',
+          'chrome_script_start', 'chrome_ui_storage_loaded', 'chrome_app_module_loaded', 'chrome_app_rendered',
+          'chrome_boot_ready', 'chrome_first_paint', 'controls_ready')
+
+# A budget is an upper bound on a summary value, e.g. BENCH_BUDGET_WARM_START_P50_MS=900.
+BUDGETS = ('cold_start_p50_ms', 'warm_start_p50_ms', 'warm_start_p95_ms', 'initial_paint_p50_ms', 'controls_ready_p95_ms')
+
+
+def phase_medians(records):
+    phases = {}
+    for name in PHASES:
+        values = [r['milestones'][name] for r in records
+                  if isinstance(r['milestones'].get(name), (int, float)) and not isinstance(r['milestones'].get(name), bool)
+                  and math.isfinite(r['milestones'][name])]
+        if values:
+            phases[name] = percentile(values, .5)
+    return phases
+
+
+def budget_failures(summary):
+    failures = []
+    for key in BUDGETS:
+        raw = os.environ.get(f'BENCH_BUDGET_{key.upper()}')
+        if raw is None:
+            continue
+        limit = float(raw)
+        if not math.isfinite(limit) or limit <= 0:
+            raise ValueError(f'BENCH_BUDGET_{key.upper()} must be positive and finite')
+        if summary[key] > limit:
+            failures.append(f'{key} {summary[key]:.1f} ms exceeds its {limit:.0f} ms budget')
+    return failures
+
+
 def main():
     target = ROOT / 'target'
     target.mkdir(exist_ok=True)
@@ -109,16 +145,22 @@ def main():
         'initial_paint_p50_ms': percentile([r['timeline']['chrome_paint_ms'] for r in records], .5),
         'controls_ready_p95_ms': percentile([r['milestones']['controls_ready'] for r in records], .95),
         'max_setup_interval_ms': max(setup_deltas),
+        'warm_phases_p50_ms': phase_medians(warm),
+        'cold_phases_p50_ms': phase_medians(cold),
         'binary': str(binary), 'binary_sha256': fingerprint, 'evidence': str(results),
         'process_overrides': {key: os.environ.get(key) for key in ('DIVE_CHROMIUM_FLAGS', 'DIVE_DEFAULT_PROCESS_MODEL', 'DIVE_RENDERER_PROCESS_LIMIT')},
         'note': 'Setup interval is not a measurement of UI thread blocking.'
     }
     if hashlib.sha256(binary.read_bytes()).hexdigest() != fingerprint:
         raise ValueError('binary changed during measurement')
+    failures = budget_failures(summary)
+    summary['budget_failures'] = failures
     temporary = summary_path.with_suffix('.json.tmp')
     temporary.write_text(json.dumps(summary, indent=2) + '\n')
     temporary.replace(summary_path)
     print(json.dumps(summary, indent=2))
+    if failures:
+        raise ValueError('; '.join(failures))
 
 
 if __name__ == '__main__':

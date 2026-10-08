@@ -11,7 +11,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 
 
 class StartupBenchmarkTests(unittest.TestCase):
-    def run_probe(self, mode):
+    def run_probe(self, mode, extra=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             scripts = root / 'scripts'
@@ -26,7 +26,7 @@ assert os.environ.get('DIVE_USE_MOCK_KEYCHAIN') == '1', 'test accessed system ke
 mode=os.environ['FAKE_MODE']
 if mode == 'crash': sys.exit(9)
 if mode == 'no-record': sys.exit(0)
-report={'total_startup_ms':180.0,'timeline':{'state_init_ms':30.0,'window_created_ms':60.0,'setup_complete_ms':80.0,'chrome_paint_ms':150.0},'milestones':{'controls_ready':180.0,'window_created_to_setup_complete_ms':20.0}}
+report={'total_startup_ms':180.0,'timeline':{'state_init_ms':30.0,'window_created_ms':60.0,'setup_complete_ms':80.0,'chrome_paint_ms':150.0},'milestones':{'controls_ready':180.0,'window_created_to_setup_complete_ms':20.0,'chrome_app_rendered':140.0}}
 if mode == 'missing-paint': report['timeline']['chrome_paint_ms']=None
 if mode == 'nan': report['total_startup_ms']=float('nan')
 if mode == 'missing-controls': report['milestones'].pop('controls_ready')
@@ -39,7 +39,7 @@ if mode == 'hang': time.sleep(60)
             environment = {**os.environ, 'DIVE_BIN': str(fake), 'FAKE_MODE': mode,
                            'BENCH_COLD_RUNS': '2', 'BENCH_WARM_RUNS': '2',
                            'DIVE_PROBE_TIMEOUT_SECS': '0.75',
-                           'DIVE_BENCHMARK_RESULTS_DIR': str(root / 'results')}
+                           'DIVE_BENCHMARK_RESULTS_DIR': str(root / 'results'), **(extra or {})}
             completed = subprocess.run(['bash', str(scripts / 'benchmark-startup.sh')],
                                        env=environment, capture_output=True, text=True, timeout=20)
             summary_path = root / 'target/startup-benchmark-summary.json'
@@ -73,6 +73,20 @@ if mode == 'hang': time.sleep(60)
         self.assertEqual(summary['controls_ready_p95_ms'], 180)
         self.assertNotIn('zero_ui_blocked', summary)
         self.assertEqual(len(logs), 5)
+
+    def test_summary_carries_boot_phases(self):
+        result, summary, _ = self.run_probe('valid')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(summary['warm_phases_p50_ms'], {'chrome_app_rendered': 140, 'controls_ready': 180})
+        self.assertEqual(summary['budget_failures'], [])
+
+    def test_a_blown_budget_fails_the_run_but_keeps_the_evidence(self):
+        result, summary, _ = self.run_probe('valid', {'BENCH_BUDGET_WARM_START_P50_MS': '100'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('warm_start_p50_ms 180.0 ms exceeds its 100 ms budget', result.stderr)
+        self.assertEqual(len(summary['budget_failures']), 1)
+        result, summary, _ = self.run_probe('valid', {'BENCH_BUDGET_WARM_START_P50_MS': '400'})
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

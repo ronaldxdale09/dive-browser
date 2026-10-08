@@ -1,4 +1,5 @@
 import { StrictMode } from "react";
+import { bootMark } from "./lib/bootMarks";
 import { createRoot } from "react-dom/client";
 import { ChromeRoot } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
@@ -13,6 +14,7 @@ import { useConnectHint } from "./store/connectHint";
 import { useRecording } from "./store/recording";
 import { rememberedModel, useSubtitles } from "./store/subtitles";
 
+bootMark("script_start");
 if (isPrivateWindow()) document.documentElement.dataset.private = "true";
 
 // Errors outside React's reach (a throw in an event handler, a promise nobody
@@ -42,7 +44,10 @@ void loadUiStorage()
   .then(() =>
     Promise.all([useLayout.persist.rehydrate(), useRecording.persist.rehydrate(), useConnectHint.persist.rehydrate()]),
   )
-  .then(() => useSubtitles.setState({ model: rememberedModel() }))
+  .then(() => {
+    bootMark("ui_storage_loaded");
+    useSubtitles.setState({ model: rememberedModel() });
+  })
   .catch(() => undefined)
   .finally(() => {
 // The chrome never scrolls: the page is a native view placed over it, so a

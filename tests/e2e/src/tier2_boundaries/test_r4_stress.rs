@@ -38,7 +38,7 @@ async fn test_mcp_invalid_bearer_token_variations() {
     ];
 
     for auth in invalid_headers {
-        let mut req = client.post(&url).header("Origin", "http://localhost:3000");
+        let mut req = client.post(&url);
         if !auth.is_empty() {
             req = req.header("Authorization", auth);
         }
@@ -84,6 +84,10 @@ async fn test_mcp_untrusted_origin_rejection() {
     let url = server_handle.url();
 
     let untrusted_origins = [
+        // A localhost web page is still a web page, even with a valid token.
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
         "http://malicious-site.com",
         "https://evil.org",
         "http://192.168.1.100:8080",

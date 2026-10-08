@@ -363,6 +363,56 @@ pub fn observe_renderer_milestone(
     Ok(())
 }
 
+/// Renderer boot marks the main chrome may report, as `performance.now()`
+/// offsets. Each is recorded once under `chrome_<name>`.
+pub const RENDERER_TIMELINE_MARKS: &[&str] = &[
+    "navigation_start",
+    "response_end",
+    "dom_interactive",
+    "shell_painted",
+    "script_start",
+    "ui_storage_loaded",
+    "app_module_loaded",
+    "app_rendered",
+    "boot_ready",
+];
+
+/// Place the chrome document's own boot marks on the launch clock.
+///
+/// The renderer sends `now` (its `performance.now()` at send time) with each
+/// mark on the same clock; host receipt minus `now - mark` puts the mark on
+/// the launch clock. IPC delivery latency makes every mark slightly late, so
+/// these are upper bounds, comparable across launches.
+pub fn observe_renderer_timeline<S: std::hash::BuildHasher>(
+    webview: &str,
+    window: &str,
+    now: f64,
+    marks: &HashMap<String, f64, S>,
+) -> Result<(), String> {
+    if webview != crate::CHROME_LABEL || window != crate::MAIN_WINDOW {
+        return Err("startup observations are restricted to the main chrome".into());
+    }
+    if !now.is_finite() || now < 0.0 {
+        return Err("invalid renderer clock".into());
+    }
+    let receipt = elapsed_ms();
+    for (name, value) in marks {
+        if !RENDERER_TIMELINE_MARKS.contains(&name.as_str()) {
+            return Err(format!("unsupported startup mark {name}"));
+        }
+        if !value.is_finite() || *value < 0.0 || *value > now {
+            return Err(format!("invalid startup mark {name}"));
+        }
+    }
+    for (name, value) in marks {
+        let at = receipt - (now - value);
+        if at >= 0.0 {
+            record_custom_milestone(&format!("chrome_{name}"), at);
+        }
+    }
+    Ok(())
+}
+
 /// Format the required Chromium command-line switches for CEF runtime.
 ///
 /// Switches comply strictly with `tauri-runtime-cef` switch parsing:
@@ -803,6 +853,31 @@ mod tests {
         assert!(paint >= before && paint <= after);
         observe_renderer_milestone("chrome", "main", "controls_ready").unwrap();
         assert!(get_milestones()["controls_ready"] >= paint);
+    }
+
+    #[test]
+    fn renderer_timeline_lands_on_the_launch_clock_and_rejects_strangers() {
+        let _serial = test_lock();
+        reset_for_test(None);
+        let marks = HashMap::from([
+            ("navigation_start".to_owned(), 0.0),
+            ("app_rendered".to_owned(), 40.0),
+        ]);
+        assert!(observe_renderer_timeline("tab-1", "main", 50.0, &marks).is_err());
+        let unknown = HashMap::from([("whatever".to_owned(), 1.0)]);
+        assert!(observe_renderer_timeline("chrome", "main", 50.0, &unknown).is_err());
+        let future = HashMap::from([("app_rendered".to_owned(), 60.0)]);
+        assert!(observe_renderer_timeline("chrome", "main", 50.0, &future).is_err());
+        assert!(get_milestones().is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let before = elapsed_ms();
+        observe_renderer_timeline("chrome", "main", 50.0, &marks).unwrap();
+        let after = elapsed_ms();
+        let milestones = get_milestones();
+        let start = milestones["chrome_navigation_start"];
+        let rendered = milestones["chrome_app_rendered"];
+        assert!(start >= before - 50.0 && start <= after - 50.0);
+        assert!((rendered - start - 40.0).abs() < 1e-6);
     }
 
     #[test]

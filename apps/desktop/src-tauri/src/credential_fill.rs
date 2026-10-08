@@ -69,6 +69,38 @@ fn with_pending<T>(f: impl FnOnce(&mut HashMap<String, PendingSave>) -> T) -> T 
     f(guard.get_or_insert_with(HashMap::new))
 }
 
+fn remember_pending(
+    m: &mut HashMap<String, PendingSave>,
+    token: String,
+    pending: PendingSave,
+) -> bool {
+    prune_pending(m);
+    if m.values().any(|p| {
+        p.tab == pending.tab
+            && p.profile == pending.profile
+            && p.url == pending.url
+            && p.username == pending.username
+            && p.password == pending.password
+    }) {
+        return false;
+    }
+    // The chrome holds one card per tab; release every superseded secret,
+    // but leave identical logins in other tabs and profiles answerable.
+    m.retain(|_, p| p.tab != pending.tab);
+    m.insert(token, pending);
+    true
+}
+
+/// Release expired submitted passwords even when nobody answers a card or
+/// submits another login. Called by the periodic background sweep.
+pub fn expire_pending() {
+    with_pending(prune_pending);
+}
+
+fn prune_pending(m: &mut HashMap<String, PendingSave>) {
+    m.retain(|_, p| p.at.elapsed() < PENDING_TTL);
+}
+
 fn nonce_for(tab: TabId) -> Option<String> {
     let guard = NONCES
         .lock()
@@ -302,9 +334,9 @@ fn submitted(
         None => "save",
     };
     let token = dive_core::TabId::new().to_string();
-    with_pending(|m| {
-        m.retain(|_, p| (p.url != url || p.username != username) && p.at.elapsed() < PENDING_TTL);
-        m.insert(
+    if !with_pending(|m| {
+        remember_pending(
+            m,
             token.clone(),
             PendingSave {
                 tab: tab_id,
@@ -314,8 +346,10 @@ fn submitted(
                 password,
                 at: std::time::Instant::now(),
             },
-        );
-    });
+        )
+    }) {
+        return;
+    }
     let _ = CredentialPrompt {
         tab_id,
         kind: kind.into(),
@@ -448,6 +482,78 @@ pub async fn fill_into(app: AppHandle<Runtime>, tab_id: TabId, id: String) -> Ap
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pending(tab: TabId, profile: ProfileId, username: &str) -> PendingSave {
+        PendingSave {
+            tab,
+            profile,
+            url: "https://a.test".into(),
+            username: username.into(),
+            password: "fixture".into(),
+            at: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn repeated_login_reports_keep_one_answerable_prompt() {
+        let mut m = HashMap::new();
+        let tab = TabId::new();
+        let profile = ProfileId::new();
+        assert!(remember_pending(
+            &mut m,
+            "first".into(),
+            pending(tab, profile, "alice")
+        ));
+        assert!(!remember_pending(
+            &mut m,
+            "duplicate".into(),
+            pending(tab, profile, "alice")
+        ));
+        assert!(m.contains_key("first"));
+        assert_eq!(m.len(), 1);
+        assert!(remember_pending(
+            &mut m,
+            "changed".into(),
+            pending(tab, profile, "bob")
+        ));
+        assert_eq!(
+            m.len(),
+            1,
+            "one tab cannot retain invisible passwords from older prompts"
+        );
+        assert!(m.contains_key("changed"));
+    }
+
+    #[test]
+    fn matching_logins_in_other_tabs_and_profiles_remain_answerable() {
+        let mut m = HashMap::new();
+        remember_pending(
+            &mut m,
+            "one".into(),
+            pending(TabId::new(), ProfileId::new(), "alice"),
+        );
+        remember_pending(
+            &mut m,
+            "two".into(),
+            pending(TabId::new(), ProfileId::new(), "alice"),
+        );
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn unanswered_passwords_expire_without_another_submission() {
+        let tab = TabId::new();
+        let profile = ProfileId::new();
+        let mut expired = pending(tab, profile, "old");
+        expired.at -= PENDING_TTL;
+        let mut m = HashMap::from([
+            ("expired".into(), expired),
+            ("fresh".into(), pending(TabId::new(), profile, "new")),
+        ]);
+        prune_pending(&mut m);
+        assert!(!m.contains_key("expired"));
+        assert!(m.contains_key("fresh"));
+    }
 
     fn event(name: &str, payload: &str) -> CdpEvent {
         CdpEvent {

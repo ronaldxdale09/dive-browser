@@ -58,6 +58,12 @@ describe("startup observations", () => {
     acknowledge();
     await vi.runAllTimersAsync();
     expect(invoke).toHaveBeenLastCalledWith("report_startup_milestone", { milestone: "controls_ready" });
+    // The boot timeline lands before readiness ends a benchmark run.
+    expect(invoke).toHaveBeenNthCalledWith(2, "report_startup_milestone", expect.objectContaining({
+      milestone: "chrome_timeline",
+      now: expect.any(Number),
+      marks: expect.objectContaining({ navigation_start: 0 }),
+    }));
   });
 
   it("does not synthesize paint from controls readiness or elapsed time", async () => {

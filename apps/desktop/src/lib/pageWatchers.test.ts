@@ -232,6 +232,51 @@ describe("saved-login watcher", () => {
   });
 });
 
+describe("saved-login and form-entry arbitration", () => {
+  it.each([
+    ["credentials-first", "text", "username"],
+    ["forms-first", "text", "username"],
+    ["credentials-first", "email", "email"],
+    ["forms-first", "email", "email"],
+  ])("shows only saved accounts when their answer arrives late (%s, %s)", (order, type, name) => {
+    const page = frame();
+    laidOut(page);
+    page.document.body.innerHTML = `<form><input type="${type}" name="${name}" id="user"><input type="password"></form>`;
+    const roots: ShadowRoot[] = [];
+    const attach = page.Element.prototype.attachShadow;
+    page.Element.prototype.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    };
+    const forms: { kind: string; token?: number }[] = [];
+    page.__diveLogins = () => undefined;
+    page.__diveForms = (payload: string) => forms.push(JSON.parse(payload));
+    const { document, trust } = trusting(page);
+    const credentials = credentialsSource.replace(mainFrameOnly, "").replaceAll("__NONCE__", '"n"').replaceAll("__BINDING__", "__diveLogins");
+    const entries = formsSource.replace(mainFrameOnly, "").replaceAll("__NONCE__", '"n"').replaceAll("__BINDING__", "__diveForms");
+    for (const source of order === "credentials-first" ? [credentials, entries] : [entries, credentials]) run(page, source, document);
+    const user = page.document.getElementById("user") as HTMLInputElement;
+    user.dispatchEvent(trust(new page.MouseEvent("pointerdown", { bubbles: true })));
+    user.focus();
+    vi.advanceTimersByTime(100);
+    const query = forms.find((payload) => payload.kind === "query")!;
+    (page.__diveFormsOffer as (nonce: string, token: unknown, list: string[]) => void)("n", query.token, ["earlier-user"]);
+    const history = page.document.querySelector("dive-form-entries")!;
+    (page.__diveCredentialsOffer as (nonce: string, list: unknown[]) => void)("n", [{ id: "a", username: "alice" }, { id: "b", username: "bob" }]);
+    expect(page.document.querySelector("dive-saved-logins")).toBeTruthy();
+    const historyList = roots.find((root) => root.host === history)!.querySelector("ul") as HTMLElement;
+    expect(historyList.style.display).toBe("none");
+    expect(history.isConnected).toBe(true);
+    // A history reply already in flight cannot reopen its dismissed list.
+    (page.__diveFormsOffer as (nonce: string, token: unknown, list: string[]) => void)("n", query.token, ["late-user"]);
+    expect(historyList.style.display).toBe("none");
+    user.dispatchEvent(trust(new page.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    user.dispatchEvent(trust(new page.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+    expect(user.value).toBe(""); // the stale history list cannot fill too
+  });
+});
+
 describe("form-entry watcher", () => {
   function entries() {
     const page = frame();

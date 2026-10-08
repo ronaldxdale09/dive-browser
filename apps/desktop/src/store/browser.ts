@@ -1,3 +1,4 @@
+import { bootMark } from "../lib/bootMarks";
 import { create } from "zustand";
 import { showInFileManagerLabel } from "../lib/commands";
 import { ipc, events } from "../lib/ipc";
@@ -920,6 +921,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           snapshotDeltas = [];
         } else await applyLatestSnapshot(set);
         set({ ready: true, error: null });
+        bootMark("boot_ready");
         void get().refreshCounts();
       } catch (e) {
         set({ error: String(e), ready: true });

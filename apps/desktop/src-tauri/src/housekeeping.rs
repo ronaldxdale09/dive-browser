@@ -120,6 +120,7 @@ pub fn start(app: AppHandle<Runtime>) {
         let mut sweeps: u32 = 0;
         loop {
             tokio::time::sleep(every()).await;
+            crate::credential_fill::expire_pending();
             match sweep(&app).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!(n, "discarded idle tabs"),

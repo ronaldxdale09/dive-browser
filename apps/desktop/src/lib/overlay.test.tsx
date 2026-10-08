@@ -18,6 +18,7 @@ afterEach(() => {
   resetContentCover();
   resetOverlayElements();
   Reflect.deleteProperty(window, "__DIVE_LIVE_OVERLAYS__");
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -128,6 +129,46 @@ describe("useCoversContent", () => {
 
 
 describe("live native overlays", () => {
+  it.each(["visible", "hidden"] as const)("releases a closed dialog's mask and focus when Chromium pauses animation frames (%s)", async (visibility) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    Object.defineProperty(window, "__DIVE_LIVE_OVERLAYS__", { value: true, configurable: true });
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue(visibility);
+    vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const geometry = vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+    const box = { x: 5, y: 6, width: 70, height: 80 };
+    const measured = (role: string) => {
+      const element = document.createElement("div");
+      element.setAttribute("role", role);
+      element.getBoundingClientRect = () => ({ ...box, top: 6, left: 5, right: 75, bottom: 86, toJSON: () => "" });
+      document.body.append(element);
+      return element;
+    };
+    const card = measured("dialog");
+    card.setAttribute("data-overlay-passive", "");
+    const dialog = measured("alertdialog");
+    const view = render(<Overlay />);
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(geometry).toHaveBeenLastCalledWith([box], true, false);
+      dialog.remove();
+      await act(async () => { await Promise.resolve(); });
+      // Hidden Chromium documents throttle timers too; cleanup must be
+      // delivered without advancing either a timer or an animation frame.
+      if (visibility === "hidden") expect(geometry).toHaveBeenLastCalledWith([box], true, false, false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+      expect(geometry).toHaveBeenLastCalledWith([box], true, false, false);
+      view.unmount();
+      await act(async () => { await Promise.resolve(); });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      view.unmount();
+      card.remove();
+      dialog.remove();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the renderer visible and sends live geometry without taking a screenshot", async () => {
     Object.defineProperty(window, "__DIVE_LIVE_OVERLAYS__", {value:true, configurable:true});
     const geometry = vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
@@ -285,6 +326,16 @@ describe("what counts as an overlay", () => {
     document.body.append(empty);
     resetOverlayElements();
     expect(visibleOverlayRegions()).toEqual([]);
+  });
+
+  it("keeps one painted surface when nested overlays have identical bounds", () => {
+    const outer = measured("dialog");
+    const inner = document.createElement("div");
+    inner.setAttribute("role", "menu");
+    inner.getBoundingClientRect = outer.getBoundingClientRect;
+    outer.append(inner);
+    resetOverlayElements();
+    expect(visibleOverlayRegions()).toEqual([box]);
   });
 
   it("reports a nested overlay once, as the outer element", () => {

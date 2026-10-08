@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { bootMark } from "../lib/bootMarks";
 
 /** Load only this window's chrome without an initial Suspense retry delay. */
 export function ChromeRoot({ tabId, appId = null }: { tabId: string | null; appId?: string | null }) {
@@ -14,13 +15,20 @@ export function ChromeRoot({ tabId, appId = null }: { tabId: string | null; appI
       ? import("./AppWindow").then(({ AppWindow }) => <AppWindow tabId={tabId} appId={appId} />)
       : tabId
         ? import("./Popout").then(({ Popout }) => <Popout tabId={tabId} />)
-        : import("../App").then(({ App }) => <App />);
+        : import("../App").then(({ App }) => {
+          bootMark("app_module_loaded");
+          return <App />;
+        });
     void load.then(
       (node) => { if (!cancelled) setContent(node); },
       (error: unknown) => { if (!cancelled) setFailure({ error }); },
     );
     return () => { cancelled = true; };
   }, [tabId, appId]);
+
+  useEffect(() => {
+    if (content && !tabId) bootMark("app_rendered");
+  }, [content, tabId]);
 
   // Throw during rendering so the existing recovery boundary handles failed
   // imports too. Retrying remounts this component and requests the module again.

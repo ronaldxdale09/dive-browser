@@ -251,6 +251,9 @@
   };
   const showList = (field, password) => {
     if (!candidates || candidates.length < 2) return;
+    // A form-history reply may have arrived before the account query.
+    // Cancel that list and its outstanding reply before claiming the field.
+    window.__diveFormsDismissFor?.(field);
     listFor = field;
     listPassword = password;
     selected = -1;
@@ -328,6 +331,7 @@
     const password = passwordOf(el);
     if (!password || !candidates || candidates.length === 0) return;
     if (candidates.length === 1) {
+      window.__diveFormsDismissFor?.(el);
       if (!password.value) requestFill(password, candidates[0].id);
       return;
     }

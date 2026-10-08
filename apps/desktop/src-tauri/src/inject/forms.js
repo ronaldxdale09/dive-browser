@@ -179,6 +179,18 @@
     clearTimeout(debounce);
     debounce = setTimeout(() => send({ kind: "query", field, prefix: el.value.slice(0, 200), token: forToken }), 80);
   };
+  // Shared only inside Dive's isolated world. Account suggestions win
+  // regardless of which binding answers first; invalidate late history replies.
+  Object.defineProperty(window, "__diveFormsDismissFor", {
+    configurable: false,
+    enumerable: false,
+    value: (field) => {
+      if (field !== target) return;
+      clearTimeout(debounce);
+      token += 1;
+      hide();
+    },
+  });
   // Typing asks; a click on an empty field asks too, with an empty prefix,
   // so it shows what is remembered for it. Both have to be the person's: an
   // `input` event the page (or this script's own fill) dispatches, or focus

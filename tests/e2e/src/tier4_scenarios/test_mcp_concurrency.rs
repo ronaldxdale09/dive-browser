@@ -42,7 +42,6 @@ async fn initialize(client: &reqwest::Client, url: &str) -> Option<String> {
         .post(url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
-        .header("Origin", "http://localhost:5173")
         .body(body.to_string())
         .send()
         .await
@@ -105,7 +104,6 @@ async fn thirty_two_clients_call_tools_at_once_without_errors_or_tail_latency() 
                     .post(&url)
                     .header("Content-Type", "application/json")
                     .header("Accept", "application/json, text/event-stream")
-                    .header("Origin", "http://localhost:5173")
                     .timeout(Duration::from_secs(10))
                     .body(body.to_string());
                 if let Some(sid) = &sid {

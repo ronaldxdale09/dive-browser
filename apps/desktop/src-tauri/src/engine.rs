@@ -1350,13 +1350,8 @@ impl TabHost {
             self.update_overlay_mask(chrome, active)?;
             // A menu or dialog opening while a passive card was already up
             // still needs the keyboard.
-            if chrome == CHROME_LABEL
-                && active
-                && !self.passive_cover
-                && !self.focused_for_cover.get()
-            {
-                self.focus_chrome();
-                self.focused_for_cover.set(true);
+            if chrome == CHROME_LABEL {
+                self.apply_cover_focus();
             }
             #[cfg(all(feature = "cef", target_os = "windows"))]
             if was_active && !active && chrome != CHROME_LABEL {
@@ -1370,6 +1365,24 @@ impl TabHost {
             }
         }
         Ok(())
+    }
+
+    fn apply_cover_focus(&self) {
+        match cover_focus_change(
+            self.focused_for_cover.get(),
+            self.covered,
+            self.passive_cover,
+        ) {
+            Some(true) => self.focus_chrome(),
+            Some(false) => {
+                if let Some(view) = self.active.and_then(|id| self.views.get(&id)) {
+                    let _ = view.set_focus();
+                }
+            }
+            None => {}
+        }
+        self.focused_for_cover
+            .set(self.covered && !self.passive_cover);
     }
 
     fn update_overlay_mask(&self, chrome: &str, active: bool) -> tauri::Result<()> {
@@ -1488,11 +1501,7 @@ impl TabHost {
         // with the page: a tooltip under the pointer, or the save-login card
         // arriving while someone types a one-time code, must not swallow the
         // next Enter.
-        let wants_focus = self.covered && !self.passive_cover;
-        if wants_focus && !self.focused_for_cover.get() {
-            self.focus_chrome();
-        }
-        self.focused_for_cover.set(wants_focus);
+        self.apply_cover_focus();
         for chrome in self.live_overlays.keys() {
             self.update_overlay_mask(chrome, true)?;
         }
@@ -2101,6 +2110,19 @@ impl TabHost {
     /// Whether a view exists for `id`.
     pub fn has(&self, id: TabId) -> bool {
         self.views.contains_key(&id) || self.internal.contains(&id)
+    }
+}
+
+/// Focus transitions between interactive chrome and passive page overlays.
+/// `true` focuses chrome; `false` returns focus to the page.
+fn cover_focus_change(previous: bool, covered: bool, passive: bool) -> Option<bool> {
+    let wants = covered && !passive;
+    if wants && !previous {
+        Some(true)
+    } else if previous && covered && passive {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -3059,6 +3081,15 @@ mod close_request_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn closing_a_dialog_returns_input_to_the_page_beneath_a_passive_card() {
+        assert_eq!(super::cover_focus_change(true, true, true), Some(false));
+        assert_eq!(super::cover_focus_change(false, true, false), Some(true));
+        assert_eq!(super::cover_focus_change(false, true, true), None);
+        assert_eq!(super::cover_focus_change(true, true, false), None);
+        assert_eq!(super::cover_focus_change(true, false, false), None);
+    }
+
     #[test]
     fn history_records_where_you_went_and_what_it_turned_out_to_be_called() {
         use super::records_a_visit;
