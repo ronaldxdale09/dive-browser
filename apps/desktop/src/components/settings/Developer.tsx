@@ -57,7 +57,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
         <Row
           label="Open DevTools with new tabs"
           hint="Opens the inspector when a tab's view is created, including restore at launch. Tabs already on screen stay as they are."
-          control={<Switch label="Open DevTools with new tabs" checked={prefs.devtools_on_open} onChange={(devtools_on_open) => set({ devtools_on_open })} />}
+          control={<Switch label="Open DevTools with new tabs" checked={prefs.devtools_on_open} onChange={(devtools_on_open) => void set({ devtools_on_open })} />}
         />
       </Group>
 
@@ -71,7 +71,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
               id="pref-editor"
               label="Preferred editor"
               value={prefs.preferred_editor || "vscode"}
-              onChange={(preferred_editor) => set({ preferred_editor })}
+              onChange={(preferred_editor) => void set({ preferred_editor })}
               options={[
                 { value: "vscode", label: "VS Code (vscode://)" },
                 { value: "cursor", label: "Cursor (cursor://)" },

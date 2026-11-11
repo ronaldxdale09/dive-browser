@@ -958,8 +958,9 @@ function Apps({ query, onOpened }: { query: string; onOpened: () => void }) {
   const uninstall = useWebApps((s) => s.uninstall);
   useEffect(() => {
     void load();
-    window.addEventListener(WEBAPPS_CHANGED, load);
-    return () => window.removeEventListener(WEBAPPS_CHANGED, load);
+    const onChanged = () => void load();
+    window.addEventListener(WEBAPPS_CHANGED, onChanged);
+    return () => window.removeEventListener(WEBAPPS_CHANGED, onChanged);
   }, [load]);
   const shown = apps.filter((app) => matches(query, app.name, app.start_url));
   if (!loaded) return null;

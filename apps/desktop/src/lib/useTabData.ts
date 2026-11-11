@@ -41,12 +41,12 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
           if (!alive) return;
           const message = errorMessage(e);
           if (again && isTransientReadError(message)) {
-            retry = setTimeout(() => read(false), RETRY_MS);
+            retry = setTimeout(() => void read(false), RETRY_MS);
             return;
           }
           setAnswer((old) => ({ tabId, url, data: old.tabId === tabId && old.url === url ? old.data : null, error: readErrorText(message) }));
         });
-    const t = setTimeout(() => read(true), delayMs);
+    const t = setTimeout(() => void read(true), delayMs);
     return () => {
       alive = false;
       clearTimeout(t);

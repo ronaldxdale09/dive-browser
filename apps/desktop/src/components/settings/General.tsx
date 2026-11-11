@@ -110,7 +110,7 @@ export function General() {
             <Segmented
               label="On launch"
               value={prefs.startup}
-              onChange={(startup) => set({ startup })}
+              onChange={(startup) => void set({ startup })}
               options={[
                 { value: "restore", label: "Last tab" },
                 { value: "home", label: "Home page" },
@@ -147,7 +147,7 @@ export function General() {
               id="pref-engine"
               label="Search engine"
               value={prefs.search_engine}
-              onChange={(search_engine) => set({ search_engine })}
+              onChange={(search_engine) => void set({ search_engine })}
               options={ENGINES}
             />
           }
@@ -155,7 +155,7 @@ export function General() {
         <Row
           label="Suggestions from the search engine"
           hint="Completes what you type in the address bar. While this is on, what you type there is sent to your search engine as you type it — never in a private window, and never when it looks like an address."
-          control={<Switch checked={prefs.search_suggestions} onChange={(search_suggestions) => set({ search_suggestions })} label="Suggestions from the search engine" />}
+          control={<Switch checked={prefs.search_suggestions} onChange={(search_suggestions) => void set({ search_suggestions })} label="Suggestions from the search engine" />}
         />
         {prefs.search_engine === "custom" && (
           <Row
@@ -254,7 +254,7 @@ export function General() {
               id="pref-zoom"
               label="Default zoom"
               value={String(Math.round(prefs.default_zoom * 100))}
-              onChange={(z) => set({ default_zoom: Number(z) / 100 })}
+              onChange={(z) => void set({ default_zoom: Number(z) / 100 })}
               options={zoomOptions(Math.round(prefs.default_zoom * 100))}
             />
           }
@@ -262,7 +262,7 @@ export function General() {
         <Row
           label="Fill tab with videos"
           hint={`Hover a video for a control that makes it fill the tab, without taking over the screen. ${fillVideo} toggles it; Escape leaves.`}
-          control={<Switch label="Fill tab with videos" checked={prefs.video_fill_tab} onChange={(video_fill_tab) => set({ video_fill_tab })} />}
+          control={<Switch label="Fill tab with videos" checked={prefs.video_fill_tab} onChange={(video_fill_tab) => void set({ video_fill_tab })} />}
         />
       </Group>
     </>

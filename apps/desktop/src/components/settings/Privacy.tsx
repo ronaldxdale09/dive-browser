@@ -73,7 +73,7 @@ export function Privacy() {
             <Switch
               label="DivePrivacy protection"
               checked={prefs.block_trackers}
-              onChange={(block_trackers) => set({ block_trackers })}
+              onChange={(block_trackers) => void set({ block_trackers })}
             />
           }
         />
@@ -85,7 +85,7 @@ export function Privacy() {
               label="YouTube protection"
               checked={prefs.youtube_protection}
               disabled={!prefs.block_trackers}
-              onChange={(youtube_protection) => set({ youtube_protection })}
+              onChange={(youtube_protection) => void set({ youtube_protection })}
             />
           }
         />
@@ -108,7 +108,7 @@ export function Privacy() {
                     <button
                       type="button"
                       aria-label={`Resume protection on ${host}`}
-                      onClick={() => set({ privacy_exceptions: prefs.privacy_exceptions.filter((exception) => exception !== host) })}
+                      onClick={() => void set({ privacy_exceptions: prefs.privacy_exceptions.filter((exception) => exception !== host) })}
                       className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
                     >
                       <Icon icon={X} size={11} />
@@ -130,12 +130,12 @@ export function Privacy() {
         <Row
           label="Send “Do Not Track”"
           hint="Adds DNT: 1 and Sec-GPC: 1 to page requests. Most sites ignore both."
-          control={<Switch label="Send Do Not Track" checked={prefs.do_not_track} onChange={(do_not_track) => set({ do_not_track })} />}
+          control={<Switch label="Send Do Not Track" checked={prefs.do_not_track} onChange={(do_not_track) => void set({ do_not_track })} />}
         />
         <Row
           label="Run page JavaScript"
           hint="Off loads pages with scripting disabled — useful for checking what a page does without it."
-          control={<Switch label="Run page JavaScript" checked={prefs.javascript} onChange={(javascript) => set({ javascript })} />}
+          control={<Switch label="Run page JavaScript" checked={prefs.javascript} onChange={(javascript) => void set({ javascript })} />}
         />
       </Group>
 
@@ -166,7 +166,7 @@ export function Privacy() {
         <Row
           label="Secure connections"
           hint="Asks for every page over https, and stops rather than quietly loading it in the clear. Your own machine is never upgraded — localhost, private addresses and .local, .test and .internal keep working as they are."
-          control={<Switch label="Secure connections" checked={prefs.https_only} onChange={(https_only) => set({ https_only })} />}
+          control={<Switch label="Secure connections" checked={prefs.https_only} onChange={(https_only) => void set({ https_only })} />}
         />
         {prefs.https_only_allowed.length > 0 && (
           <Row
@@ -179,7 +179,7 @@ export function Privacy() {
                   <button
                     key={host}
                     type="button"
-                    onClick={() => set({ https_only_allowed: prefs.https_only_allowed.filter((h) => h !== host) })}
+                    onClick={() => void set({ https_only_allowed: prefs.https_only_allowed.filter((h) => h !== host) })}
                     className="flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 font-mono text-11 text-ink-2 hover:border-line-2 hover:text-ink"
                     title={`Ask for ${host} over https again`}
                   >
@@ -212,7 +212,7 @@ export function Privacy() {
               id="pref-dns-mode"
               label="Secure DNS"
               value={prefs.dns_mode}
-              onChange={(dns_mode) => setNetwork({ dns_mode })}
+              onChange={(dns_mode) => void setNetwork({ dns_mode })}
               options={[
                 { value: "system", label: "Use the system resolver" },
                 { value: "automatic", label: "Automatic" },
@@ -231,7 +231,7 @@ export function Privacy() {
                 id="pref-dns-provider"
                 label="Resolver"
                 value={prefs.dns_provider}
-                onChange={(dns_provider) => setNetwork({ dns_provider })}
+                onChange={(dns_provider) => void setNetwork({ dns_provider })}
                 options={[
                   { value: "cloudflare", label: "Cloudflare" },
                   { value: "google", label: "Google" },
@@ -278,7 +278,7 @@ export function Privacy() {
               id="pref-proxy-mode"
               label="Proxy"
               value={prefs.proxy_mode}
-              onChange={(proxy_mode) => setNetwork({ proxy_mode })}
+              onChange={(proxy_mode) => void setNetwork({ proxy_mode })}
               options={[
                 { value: "system", label: "Use system settings" },
                 { value: "direct", label: "No proxy" },

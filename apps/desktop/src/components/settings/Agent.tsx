@@ -59,7 +59,7 @@ export function Agent() {
     const next = providers.find((p) => p.id === id);
     if (!next) return;
     const keep = (models[id] ?? []).some((m) => m.id === prefs.agent_model);
-    set({ agent_provider: id, agent_model: keep ? prefs.agent_model : next.default_model });
+    void set({ agent_provider: id, agent_model: keep ? prefs.agent_model : next.default_model });
   };
 
   return (
@@ -102,7 +102,7 @@ export function Agent() {
           control={
             list.length ? (
               <span className="flex items-center gap-2">
-                <Select id="pref-model" label="Model" value={prefs.agent_model} onChange={(agent_model) => set({ agent_model })} options={modelOptions} />
+                <Select id="pref-model" label="Model" value={prefs.agent_model} onChange={(agent_model) => void set({ agent_model })} options={modelOptions} />
                 <Button variant="quiet" disabled={loading !== null} onClick={() => provider && void loadModels(provider.id, true)}>
                   Refresh
                 </Button>
@@ -115,7 +115,7 @@ export function Agent() {
         <Row
           label="Thinking"
           hint="How hard the model reasons before it acts. Auto leaves it to the provider; higher settings are slower and cost more, and not every model supports them."
-          control={<Segmented label="Thinking" value={prefs.agent_reasoning} onChange={(agent_reasoning) => set({ agent_reasoning })} options={EFFORTS} />}
+          control={<Segmented label="Thinking" value={prefs.agent_reasoning} onChange={(agent_reasoning) => void set({ agent_reasoning })} options={EFFORTS} />}
         />
       </Group>
 
@@ -123,18 +123,18 @@ export function Agent() {
         <Row
           label="Ask before acting"
           hint="Costly ones is the default: the agent gets on with ordinary clicking and typing, and stops for anything that spends money, destroys something, hands over a secret or happens on a page about money. Every action asks about all of it, which is thorough but wearing. Never asks about the rest only — a page can steer the model, so leave that for work you are watching. Whatever you choose, sending a file, reading a site's cookies or a server's reply, and then taking what was read to another site always ask."
-          control={<Segmented label="Ask before acting" value={prefs.agent_approvals} onChange={(agent_approvals) => set({ agent_approvals })} options={APPROVALS} />}
+          control={<Segmented label="Ask before acting" value={prefs.agent_approvals} onChange={(agent_approvals) => void set({ agent_approvals })} options={APPROVALS} />}
         />
         <Row
           label="Send page context"
           hint="The tab's title, URL, recent console, failed requests and visible text go with each message. Off saves tokens; the agent can still read the page with its tools."
-          control={<Switch label="Send page context" checked={prefs.agent_include_page} onChange={(agent_include_page) => set({ agent_include_page })} />}
+          control={<Switch label="Send page context" checked={prefs.agent_include_page} onChange={(agent_include_page) => void set({ agent_include_page })} />}
         />
         <Row
           label="Step limit"
           htmlFor="pref-agent-steps"
           hint="Most tool calls one message may make before the run is stopped."
-          control={<Select id="pref-agent-steps" label="Step limit" value={String(prefs.agent_max_steps)} onChange={(v) => set({ agent_max_steps: Number(v) })} options={stepOptions(prefs.agent_max_steps)} />}
+          control={<Select id="pref-agent-steps" label="Step limit" value={String(prefs.agent_max_steps)} onChange={(v) => void set({ agent_max_steps: Number(v) })} options={stepOptions(prefs.agent_max_steps)} />}
         />
       </Group>
 

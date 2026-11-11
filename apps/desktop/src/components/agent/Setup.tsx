@@ -283,7 +283,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                     )}
                     <button
                       type="button"
-                      onClick={handlePaste}
+                      onClick={() => void handlePaste()}
                       disabled={busy}
                       className="px-1.5 py-0.5 text-10 text-ink-3 hover:text-ink"
                     >

@@ -86,7 +86,7 @@ export function RecordingDoneDialog() {
             <div className="flex flex-col items-center gap-2 text-xs text-ink-3">
               <Icon icon={Video} size={22} />
               <p>{preview.reason}</p>
-              <button type="button" onClick={() => ipc.recordingOpen(result.path).catch(fail)} className="rounded-lg bg-surface-2 px-3 py-1.5 text-ink hover:bg-surface-3">
+              <button type="button" onClick={() => void ipc.recordingOpen(result.path).catch(fail)} className="rounded-lg bg-surface-2 px-3 py-1.5 text-ink hover:bg-surface-3">
                 Open in the system player
               </button>
             </div>
@@ -100,8 +100,8 @@ export function RecordingDoneDialog() {
         )}
 
         <footer className="flex items-center gap-1.5 px-5 py-4">
-          <Action icon={ExternalLink} label="Open" onClick={() => ipc.recordingOpen(result.path).catch(fail)} />
-          <Action icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => ipc.downloadsReveal(result.path).catch(fail)} />
+          <Action icon={ExternalLink} label="Open" onClick={() => void ipc.recordingOpen(result.path).catch(fail)} />
+          <Action icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => void ipc.downloadsReveal(result.path).catch(fail)} />
           <Action
             icon={copied ? Check : Copy}
             label={copied ? "Copied" : "Copy path"}

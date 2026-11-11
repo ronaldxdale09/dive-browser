@@ -215,9 +215,11 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
             ref={autoFocusPrimary}
             type="button"
             disabled={!canStart || starting}
-            onClick={async () => {
-              if (await start()) onStarted?.();
-            }}
+            onClick={() =>
+              void (async () => {
+                if (await start()) onStarted?.();
+              })()
+            }
             className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40"
           >
             {starting ? "Loading model…" : "Start subtitles"}

@@ -390,7 +390,7 @@ function DetailPane({ tabId, requestId, status, finished }: { tabId: string; req
           if (!alive) return;
           setDetail(d);
           setError(null);
-          if (retry && finished && d.response_body === null && d.response_body_note === null) again = setTimeout(() => read(false), BODY_RETRY_MS);
+          if (retry && finished && d.response_body === null && d.response_body_note === null) again = setTimeout(() => void read(false), BODY_RETRY_MS);
         })
         .catch((e: unknown) => alive && setError(errorMessage(e)));
     void read(true);

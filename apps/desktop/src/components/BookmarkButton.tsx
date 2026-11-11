@@ -45,7 +45,7 @@ export function BookmarkButton() {
         .bookmarkStatus(url)
         .then((v) => alive && setSaved(v))
         .catch(() => alive && setSaved(false));
-    read();
+    void read();
     // The Library or a shortcut can change this page's bookmark while the
     // star is showing; the star follows.
     const changed = () => void read();
