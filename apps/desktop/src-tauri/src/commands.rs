@@ -3508,15 +3508,8 @@ pub(crate) async fn backup_restore(
     if take_preferences && let Some(preferences) = &backup.preferences {
         use tauri::Manager as _;
         let state = app.state::<AppState>();
-        let mut restored = crate::prefs::parse_stored(preferences);
-        // A backup from another machine names that machine's download
-        // folder. One this machine cannot use keeps the folder in use here,
-        // rather than failing the whole restore after its data went in.
-        if crate::prefs::check_download_dir(&restored.download_dir).is_err() {
-            restored
-                .download_dir
-                .clone_from(&state.prefs.snapshot(&state).download_dir);
-        }
+        let incoming = crate::prefs::parse_stored(preferences);
+        let restored = crate::prefs::restorable(&incoming, &state.prefs.snapshot(&state));
         prefs_set(state, restored).await?;
         summary.preferences = true;
     }

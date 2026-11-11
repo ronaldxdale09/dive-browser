@@ -1497,9 +1497,132 @@ pub fn count_prunable(state: &AppState, days: i32) -> AppResult<usize> {
     Ok(crate::state::lock(&state.store).count_history_before(cutoff)?)
 }
 
+/// Preferences a backup may carry over: how Dive looks and behaves for the
+/// person. Anything that decides where traffic, keys or files go, or how much
+/// an agent may do unasked, is this machine's and stays as it is -- a backup
+/// can come from someone else. A new preference is kept, not restored, until
+/// it is added here on purpose.
+const RESTORABLE: &[&str] = &[
+    "theme",
+    "accent",
+    "tell_pages_theme",
+    "startup",
+    "homepage",
+    "search_engine",
+    "default_zoom",
+    "do_not_track",
+    "block_trackers",
+    "blocked_patterns",
+    "youtube_protection",
+    "javascript",
+    "history_days",
+    "devtools_on_open",
+    "rail_expanded",
+    "quick_links",
+    "agent_provider",
+    "agent_model",
+    "agent_reasoning",
+    "agent_max_steps",
+    "preferred_editor",
+    "appearance_preset",
+    "custom_ground",
+    "custom_ink",
+    "custom_highlight",
+    "ui_font",
+    "ui_scale",
+    "density",
+    "corner_radius",
+    "tab_style",
+    "motion",
+    "welcome_background",
+    "video_fill_tab",
+    "search_suggestions",
+];
+
+/// Preferences a restore deliberately leaves alone, each for a reason above.
+/// Read only by the test that makes every new preference take a decision.
+#[cfg(test)]
+const KEPT_ON_RESTORE: &[&str] = &[
+    "search_template",
+    "privacy_exceptions",
+    "download_dir",
+    "agent_auto_approve",
+    "agent_approvals",
+    "agent_include_page",
+    "agent_custom_base_url",
+    "https_only",
+    "https_only_allowed",
+    "dns_mode",
+    "dns_provider",
+    "dns_template",
+    "proxy_mode",
+    "proxy_server",
+    "proxy_pac_url",
+    "proxy_bypass",
+    "external_link_allowed",
+    "onboarded",
+];
+
+/// `current` with only the [`RESTORABLE`] fields taken from `incoming`.
+/// Going back through [`parse_stored`] keeps clamping and lenient parsing.
+pub(crate) fn restorable(incoming: &Prefs, current: &Prefs) -> Prefs {
+    let (Ok(Value::Object(incoming)), Ok(Value::Object(mut merged))) = (
+        serde_json::to_value(incoming),
+        serde_json::to_value(current),
+    ) else {
+        return current.clone();
+    };
+    for key in RESTORABLE {
+        if let Some(value) = incoming.get(*key) {
+            merged.insert((*key).to_string(), value.clone());
+        }
+    }
+    parse_stored(&Value::Object(merged).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_preference_is_either_restorable_or_kept() {
+        let Ok(Value::Object(all)) = serde_json::to_value(Prefs::default()) else {
+            panic!("Prefs must serialize to an object");
+        };
+        let keys: std::collections::BTreeSet<&str> = all.keys().map(String::as_str).collect();
+        let listed: std::collections::BTreeSet<&str> =
+            RESTORABLE.iter().chain(KEPT_ON_RESTORE).copied().collect();
+        assert_eq!(
+            RESTORABLE.len() + KEPT_ON_RESTORE.len(),
+            listed.len(),
+            "a preference is on both lists, or listed twice"
+        );
+        assert_eq!(keys, listed, "a new preference needs a restore decision");
+    }
+
+    #[test]
+    fn a_restore_keeps_this_machines_network_and_agent_safety() {
+        let current = Prefs::default();
+        let incoming = Prefs {
+            theme: "light".into(),
+            agent_custom_base_url: "https://elsewhere.example/v1".into(),
+            agent_approvals: "never".into(),
+            proxy_mode: "fixed".into(),
+            proxy_server: "elsewhere:8080".into(),
+            download_dir: "/tmp/x".into(),
+            ..Prefs::default()
+        };
+        let restored = restorable(&incoming, &current);
+        assert_eq!(restored.theme, "light");
+        assert_eq!(
+            restored.agent_custom_base_url,
+            current.agent_custom_base_url
+        );
+        assert_eq!(restored.agent_approvals, current.agent_approvals);
+        assert_eq!(restored.proxy_mode, current.proxy_mode);
+        assert_eq!(restored.proxy_server, current.proxy_server);
+        assert_eq!(restored.download_dir, current.download_dir);
+    }
 
     #[test]
     fn profile_cleanup_is_scoped_and_selection_specific() {
