@@ -4,6 +4,15 @@ import { downloadFailureReason, fold, foldProgress, selectActiveInWindow } from 
 const started = { tab: null, url: "https://cdn.example.com/report.pdf", path: "/dl/report.pdf", status: "started" };
 
 describe("downloads fold", () => {
+  it("does not rewrite a finished download when a repeat of the same URL reports progress", () => {
+    const finished = fold(fold([], started, 1000), { ...started, status: "finished" }, 2000);
+    const row = { ...finished[0]!, received: 50 };
+    const next = foldProgress([row], { id: 9, url: started.url, path: "", received: 1, total: 10, speed: 1, paused: false }, 3000);
+    expect(next).toHaveLength(2);
+    expect(next[0]).toMatchObject({ status: "started" });
+    expect(next[1]).toMatchObject({ status: "finished", received: 50 });
+  });
+
   it("adds a start and completes it in place", () => {
     const one = fold([], started, 1000);
     expect(one).toEqual([{ url: started.url, path: started.path, name: "report.pdf", status: "started", at: 1000, startedAt: 1000, tabId: null }]);

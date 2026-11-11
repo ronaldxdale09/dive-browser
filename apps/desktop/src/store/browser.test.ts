@@ -653,7 +653,7 @@ describe("reopening closed tabs", () => {
   });
 
   it("records the tab when the engine closes it, and reopens the last one in its workspace", async () => {
-    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({} as never);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
     const activate = vi.spyOn(ipc, "workspaceActivate").mockResolvedValue(null as never);
     useBrowser.setState({
       tabs: [t("a", "https://a.test/", "w1"), t("b", "https://b.test/", "w2")],
@@ -666,6 +666,25 @@ describe("reopening closed tabs", () => {
     await useBrowser.getState().reopenClosedTab();
     expect(activate).toHaveBeenCalledWith("w2");
     expect(open).toHaveBeenCalledWith(expect.anything(), "https://b.test/");
+    expect(useBrowser.getState().closedTabs).toEqual([]);
+  });
+
+  it("keeps the closed tab in the list when reopening it fails", async () => {
+    const open = vi.spyOn(ipc, "tabOpen").mockRejectedValue(new Error("engine busy"));
+    useBrowser.setState({
+      tabs: [t("a", "https://a.test/", "w1"), t("b", "https://b.test/", "w1")],
+      activeTab: "a",
+      activeWorkspace: "w1",
+      workspaces: [{ id: "w1" }] as unknown as Workspace[],
+    });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    const before = useBrowser.getState().closedTabs;
+    expect(before).toHaveLength(1);
+    await useBrowser.getState().reopenClosedTab();
+    expect(useBrowser.getState().closedTabs).toEqual(before);
+    expect(useBrowser.getState().error).toContain("engine busy");
+    open.mockResolvedValue({ id: "b2" } as never);
+    await useBrowser.getState().reopenClosedTab();
     expect(useBrowser.getState().closedTabs).toEqual([]);
   });
 

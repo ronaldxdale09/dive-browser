@@ -143,11 +143,14 @@ export function fold(items: Download[], notice: DownloadNotice, at = Date.now())
  *
  * Matched by path where there is one and by URL until then: the engine decides
  * the destination first and reports it with the start, but the first progress
- * can arrive before the chrome has processed that.
+ * can arrive before the chrome has processed that. URL matching is limited to
+ * rows still in flight (or resumable), as `fold` does, so a repeat download of
+ * the same URL never rewrites a finished row.
  */
 export function foldProgress(items: Download[], update: DownloadProgress, at = Date.now()): Download[] {
+  const inFlight = (d: Download) => d.status === "started" || (d.status === "failed" && d.resumable === true);
   const idx = items.findIndex((d) =>
-    update.path ? d.path === update.path : d.url === update.url,
+    update.path ? d.path === update.path : d.url === update.url && inFlight(d),
   );
   // A report for a download the chrome never heard start is still worth a row:
   // better a live row that appeared late than none at all.

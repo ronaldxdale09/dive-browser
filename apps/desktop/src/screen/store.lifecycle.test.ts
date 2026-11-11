@@ -36,6 +36,15 @@ beforeEach(async () => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe("recording editor persistence lifecycle", () => {
+  it.each(["{not json", "[]"])("opens the recording without its edits when the saved sidecar is %s", async (sidecar) => {
+    mocks.read.mockResolvedValue(sidecar);
+    await store.getState().open("A");
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().project?.media.source).toBe("A");
+    expect(store.getState().saved).toBe(false);
+    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining("could not be read") }));
+  });
+
   it("uses a fresh complete preview URL when retrying the same recording after a media failure", async () => {
     await store.getState().open("A");
     const first = store.getState().playable;

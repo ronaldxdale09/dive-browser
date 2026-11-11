@@ -3,6 +3,7 @@ import { ipc } from "../lib/ipc";
 import type { DefaultBrowserStatus } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { isWindows } from "../lib/commands";
+import { uiStorage } from "../lib/uiStorage";
 
 /**
  * Where the "make Dive the default" flow stands. `asking` while the host is
@@ -33,7 +34,7 @@ export function declinedAt(now: number, stored: string | null | undefined): bool
 
 function readDeclined(): boolean {
   try {
-    return declinedAt(Date.now(), localStorage.getItem(DECLINED_KEY));
+    return declinedAt(Date.now(), uiStorage.getItem(DECLINED_KEY));
   } catch {
     return false;
   }
@@ -41,9 +42,9 @@ function readDeclined(): boolean {
 
 function writeDeclined(until: number) {
   try {
-    localStorage.setItem(DECLINED_KEY, String(until));
+    uiStorage.setItem(DECLINED_KEY, String(until));
   } catch {
-    // Storage unavailable: the decline still holds for this session.
+    // The decline still holds for this session. It persists through the profile store via uiStorage.
   }
 }
 

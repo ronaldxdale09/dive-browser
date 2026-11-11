@@ -197,10 +197,29 @@ export const useEditor = create<EditorState>((set, get) => ({
       const draft = drafts.get(source);
       const saved = draft ? null : await ipc.screenProjectRead(source);
       if (!current()) return;
-      const stored = draft?.project ?? (saved ? JSON.parse(saved) as Partial<Project> | null : null);
+      let stored: Partial<Project> | null = draft?.project ?? null;
+      let unreadable = false;
+      if (!stored && saved) {
+        try {
+          const parsed: unknown = JSON.parse(saved);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) stored = parsed as Partial<Project>;
+          else unreadable = true;
+        } catch {
+          unreadable = true;
+        }
+      }
       // A copied or stale sidecar owns edits, never the opened file's identity
       // or dimensions. Apply current media before normalization clamps regions.
-      const project = stored ? normalizeProject({ ...stored, media }, media) : newProject(media);
+      let project: Project;
+      try {
+        project = stored ? normalizeProject({ ...stored, media }, media) : newProject(media);
+      } catch {
+        unreadable = true;
+        project = newProject(media);
+      }
+      if (unreadable) {
+        useBrowser.setState({ error: `Saved edits to ${source.split("/").pop() ?? source} could not be read, so the recording opened without them. Editing it saves a new copy.` });
+      }
       let track: RecordingEvents | null = null;
       if (info.events) {
         try {
@@ -221,7 +240,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const derived = derive(project, project.editor.cursor.smoothing, raw);
       activeRevision = draft?.revision ?? ++nextRevision;
       if (draft) drafts.set(source, { ...draft, project });
-      set({ project, playable: url.href, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
+      set({ project, playable: url.href, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: unreadable ? false : Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
       if (!saved && !draft && project.editor.autoZoom && raw.length) get().autoZoom();
     } catch (e) {
       if (current()) set({ loading: null, error: e instanceof Error ? e.message : String(e) });

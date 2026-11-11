@@ -134,7 +134,8 @@ export function usesNativeConsoleBatch() {
 
 /** Subscribe once to console events from the engine. */
 export function listenConsole() {
-  listening ??= (async () => {
+  if (listening) return listening;
+  const request = (async () => {
     const offLegacy = await events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
     try {
       const offBatch = await listen<ConsoleWireBatch>("console-entry-batch", (e) => enqueueConsoleBatch(e.payload));
@@ -144,7 +145,12 @@ export function listenConsole() {
       throw error;
     }
   })();
-  return listening;
+  listening = request;
+  // A failed subscription is not cached: the next call tries again.
+  request.catch(() => {
+    if (listening === request) listening = null;
+  });
+  return request;
 }
 
 const EMPTY: ConsoleRow[] = [];

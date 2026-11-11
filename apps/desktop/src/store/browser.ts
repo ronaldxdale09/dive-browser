@@ -757,13 +757,29 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       get().notify("No closed tab to reopen.");
       return;
     }
+    // Removed first so a quick second press cannot reopen the same entry twice,
+    // and put back if nothing opens so a failure does not lose it (the stack is persisted).
     set((s) => ({ closedTabs: s.closedTabs.filter((entry) => entry !== last) }));
+    const restore = () =>
+      set((s) => {
+        if (s.closedTabs.includes(last)) return {};
+        const next = [...s.closedTabs];
+        next.splice(Math.min(position, next.length), 0, last);
+        return { closedTabs: next };
+      });
     if (last.workspace_id && last.workspace_id !== get().activeWorkspace && get().workspaces.some((w) => w.id === last.workspace_id)) {
       await get().activateWorkspace(last.workspace_id);
     }
     const ws = get().activeWorkspace;
-    if (!ws) return;
+    if (!ws) {
+      restore();
+      return;
+    }
     const opened = await run(set, () => ipc.tabOpen(ws, last.url));
+    if (!opened?.id) {
+      restore();
+      return;
+    }
     // Pinned or essential again, as it was.
     if (opened?.id && last.tier) await ipc.tabSetTier(opened.id, last.tier).catch(() => undefined);
     // Scrolled to where it was, once the page is back.

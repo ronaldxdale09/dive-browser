@@ -304,7 +304,8 @@ export function enqueueNetworkBatch(entries: NetworkEvent[]) {
 
 /** Subscribe once to network events from the engine. */
 export function listenNetwork() {
-  listening ??= (async () => {
+  if (listening) return listening;
+  const request = (async () => {
     const offLegacy = await events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload));
     try {
       const offBatch = await listen<NetworkEvent[]>("network-event-batch", (e) => enqueueNetworkBatch(e.payload));
@@ -314,7 +315,12 @@ export function listenNetwork() {
       throw error;
     }
   })();
-  return listening;
+  listening = request;
+  // A failed subscription is not cached: the next call tries again.
+  request.catch(() => {
+    if (listening === request) listening = null;
+  });
+  return request;
 }
 
 const EMPTY: RequestRow[] = [];
