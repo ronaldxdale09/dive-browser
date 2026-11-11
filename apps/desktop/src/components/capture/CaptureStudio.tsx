@@ -335,7 +335,11 @@ export function fitZoom(mode: number | "fit", areaWidth: number, imageWidth: num
   return Math.min(1, Math.max(0.05, (areaWidth - AREA_PADDING) / imageWidth));
 }
 
-function validRegion(region: Operation): boolean {
+/** Exported for tests. A crop or blur needs area on both axes; the other marks need to have moved on either. */
+export function validRegion(region: Operation): boolean {
+  if (region.kind === "crop" || region.kind === "blur") {
+    return Math.abs(region.x2 - region.x1) > 3 && Math.abs(region.y2 - region.y1) > 3;
+  }
   const moved = (point: Point) => Math.abs(point.x - region.x1) > 3 || Math.abs(point.y - region.y1) > 3;
   return moved({ x: region.x2, y: region.y2 })
     || ((region.kind === "pen" || region.kind === "highlight") && !!region.points?.some(moved));

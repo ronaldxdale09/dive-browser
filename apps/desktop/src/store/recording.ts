@@ -81,6 +81,8 @@ export const DEFAULT_SETTINGS: RecordSettings = { source: "page", format: "mp4",
 
 const COUNTDOWN_SECONDS = 3;
 let countdownTimer = 0;
+// Settles the pending countdown wait; clearing the timer alone would leave it hanging.
+let countdownDone: (() => void) | null = null;
 let listening = false;
 
 /** What the engine says when it holds no recording for the tab. */
@@ -170,9 +172,11 @@ export const useRecording = create<RecordingState>()(
           // The recording follows the chosen tab; it has to be showing so the
           // page keeps painting frames.
           if (useBrowser.getState().activeTab !== tab) await useBrowser.getState().activateTab(tab);
+          if (get().tab !== tab || get().phase !== "starting") return;
           if (settings.countdown) {
             set({ phase: "countdown", countdown: COUNTDOWN_SECONDS });
             await new Promise<void>((resolve) => {
+              countdownDone = resolve;
               const tick = () => {
                 const { phase, countdown } = get();
                 if (phase !== "countdown") return resolve();
@@ -181,6 +185,8 @@ export const useRecording = create<RecordingState>()(
                 countdownTimer = window.setTimeout(tick, 1000);
               };
               countdownTimer = window.setTimeout(tick, 1000);
+            }).finally(() => {
+              countdownDone = null;
             });
             if (get().phase !== "countdown") return;
           }
@@ -203,16 +209,19 @@ export const useRecording = create<RecordingState>()(
         if (!tab || phase !== "recording") return;
         try {
           await ipc.tabScreencastPause(tab, true);
+          if (get().tab !== tab || get().phase !== "recording") return;
           set({ phase: "paused", pausedAt: Date.now(), error: null });
         } catch (e) {
           set({ error: errorMessage(e, "Recording could not be paused") });
         }
       },
       resume: async () => {
-        const { tab, phase, pausedAt, pausedTotal } = get();
+        const { tab, phase } = get();
         if (!tab || phase !== "paused") return;
         try {
           await ipc.tabScreencastPause(tab, false);
+          if (get().tab !== tab || get().phase !== "paused") return;
+          const { pausedAt, pausedTotal } = get();
           set({ phase: "recording", pausedAt: null, pausedTotal: pausedTotal + (pausedAt === null ? 0 : Date.now() - pausedAt), error: null });
         } catch (e) {
           set({ error: errorMessage(e, "Recording could not be resumed") });
@@ -253,6 +262,8 @@ export const useRecording = create<RecordingState>()(
       cancel: async () => {
         const { tab, phase } = get();
         window.clearTimeout(countdownTimer);
+        countdownDone?.();
+        countdownDone = null;
         if (phase === "finishing") return get().stopSaving();
         if (tab && (phase === "recording" || phase === "paused" || phase === "failed")) await ipc.tabScreencastCancel(tab).catch(() => undefined);
         useBrowser.setState({ recordingTab: null });
@@ -325,6 +336,8 @@ export function recordedTabClosed(id: string) {
   if (id !== tab) return;
   if (phase === "setup" || phase === "starting" || phase === "countdown") {
     window.clearTimeout(countdownTimer);
+    countdownDone?.();
+    countdownDone = null;
     useRecording.setState({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
     useBrowser.setState({ recordingTab: null, error: "The tab to record was closed before recording began" });
   } else if (phase === "recording" || phase === "paused") {

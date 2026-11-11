@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crosshairMove, fitZoom } from "./CaptureStudio";
+import { crosshairMove, fitZoom, validRegion } from "./CaptureStudio";
 
 describe("crosshairMove", () => {
   const size = { width: 1000, height: 500 };
@@ -25,5 +25,20 @@ describe("fitZoom", () => {
   it("keeps a chosen zoom and copes with an unmeasured area", () => {
     expect(fitZoom(0.5, 948, 2456)).toBe(0.5);
     expect(fitZoom("fit", 0, 2456)).toBe(1);
+  });
+});
+
+describe("validRegion", () => {
+  it("rejects a crop dragged along one axis only", () => {
+    expect(validRegion({ kind: "crop", x1: 10, y1: 10, x2: 200, y2: 10 })).toBe(false);
+  });
+  it("accepts a blur with area on both axes", () => {
+    expect(validRegion({ kind: "blur", color: "#ef4444", width: 2, x1: 10, y1: 10, x2: 20, y2: 20 })).toBe(true);
+  });
+  it("rejects a typed crop with no width", () => {
+    expect(validRegion({ kind: "crop", x1: 50, y1: 10, x2: 50, y2: 300 })).toBe(false);
+  });
+  it("accepts an arrow moved along one axis", () => {
+    expect(validRegion({ kind: "arrow", color: "#ef4444", width: 2, x1: 10, y1: 10, x2: 200, y2: 10 })).toBe(true);
   });
 });

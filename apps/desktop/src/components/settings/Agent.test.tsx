@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ipc } from "../../lib/ipc";
 import type { ProviderInfo } from "../../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../../store/prefs";
 import { useAgent } from "../../store/agent";
@@ -70,6 +71,25 @@ describe("Settings › Agent", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saveKey).toHaveBeenCalledWith("anthropic", "sk-ant-offline"));
     expect(await screen.findByText(/Saved; couldn't verify it/)).toBeTruthy();
+  });
+
+  it("says so when removing a key fails", async () => {
+    vi.spyOn(ipc, "agentKeySet").mockRejectedValue(new Error("Keychain locked"));
+    useAgent.setState({ providers: [anthropic], keyed: ["anthropic"] });
+    render(<Agent />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(await screen.findByText("Keychain locked")).toBeTruthy();
+  });
+
+  it("verifies a key once when Enter is pressed twice", async () => {
+    const verifyKey = vi.fn().mockReturnValue(new Promise(() => undefined));
+    useAgent.setState({ providers: [anthropic], keyed: [], verifyKey });
+    render(<Agent />);
+    const field = screen.getByLabelText("Anthropic API key");
+    fireEvent.change(field, { target: { value: "sk-ant-twice" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(verifyKey).toHaveBeenCalledTimes(1);
   });
 
   it("does not save a key the provider refused", async () => {

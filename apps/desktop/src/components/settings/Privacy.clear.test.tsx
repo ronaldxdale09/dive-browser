@@ -78,6 +78,24 @@ describe("Settings › Privacy › history retention", () => {
     await waitFor(() => expect(usePrefs.getState().prefs.history_days).toBe(30));
   });
 
+  it("ignores a count for a choice that was changed while it was asked", async () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, history_days: 30 }, loaded: true });
+    let answer!: (count: number) => void;
+    vi.spyOn(ipc, "historyPruneCount").mockReturnValue(new Promise<number>((resolve) => (answer = resolve)));
+    vi.spyOn(ipc, "prefsSet").mockImplementation(async (prefs) => prefs);
+    render(<Privacy />);
+    fireEvent.click(screen.getByLabelText("Keep history for"));
+    fireEvent.click(screen.getByRole("option", { name: "7 days" }));
+    fireEvent.click(screen.getByLabelText("Keep history for"));
+    fireEvent.click(screen.getByRole("option", { name: "90 days" }));
+    await waitFor(() => expect(usePrefs.getState().prefs.history_days).toBe(90));
+    answer(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(usePrefs.getState().prefs.history_days).toBe(90);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("keeps a longer window without asking, and shows a custom one as itself", () => {
     expect(shortensRetention(30, 90)).toBe(false);
     expect(shortensRetention(30, 0)).toBe(false);

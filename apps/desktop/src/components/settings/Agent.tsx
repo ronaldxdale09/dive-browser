@@ -195,7 +195,7 @@ function KeyRow({ provider, saved }: { provider: ProviderInfo; saved: boolean })
               variant="danger"
               onClick={() => {
                 setStatus(null);
-                void saveKey(provider.id, "");
+                saveKey(provider.id, "").catch((e: unknown) => setStatus({ tone: "error", message: errorMessage(e) }));
               }}
             >
               Remove
@@ -211,7 +211,7 @@ function KeyRow({ provider, saved }: { provider: ProviderInfo; saved: boolean })
                 onChange={(e) => setKey(e.target.value)}
                 onKeyDown={(e) => {
                   if (isImeComposing(e)) return;
-                  if (e.key === "Enter" && key.trim()) void submit();
+                  if (e.key === "Enter" && key.trim() && !busy) void submit();
                   // Escape clears a half-pasted key first; the next one
                   // closes Settings. It used to close Settings with the key
                   // still in the field, unsaved and gone.

@@ -522,7 +522,10 @@ function ScopedSitePermissions() {
 function HistoryRetention({ days, onChange }: { days: number; onChange: (days: number) => void }) {
   const [pending, setPending] = useState<{ days: number; count: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The newest choice wins: a count that comes back for an older one is stale.
+  const asked = useRef(0);
   const choose = async (next: number) => {
+    const turn = ++asked.current;
     setError(null);
     setPending(null);
     if (!shortensRetention(days, next)) {
@@ -531,9 +534,11 @@ function HistoryRetention({ days, onChange }: { days: number; onChange: (days: n
     }
     try {
       const count = await ipc.historyPruneCount(next);
+      if (turn !== asked.current) return;
       if (count === 0) onChange(next);
       else setPending({ days: next, count });
     } catch (e) {
+      if (turn !== asked.current) return;
       setError(errorMessage(e));
     }
   };

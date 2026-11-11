@@ -11,7 +11,10 @@ beforeEach(() => {
   useRecording.setState({ phase: "idle", tab: null, error: null, result: null, progress: null, micRequested: false, micFailed: false, limitHit: false, settings: { ...DEFAULT_SETTINGS, countdown: false }, startedAt: null, pausedAt: null, pausedTotal: 0 });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("elapsedSeconds", () => {
   it("counts recorded time only, leaving pauses out", () => {
@@ -102,6 +105,50 @@ describe("recording command recovery", () => {
     useRecording.setState({ phase: "paused", pausedAt: Date.now(), error: null });
     await useRecording.getState().resume();
     expect(useRecording.getState()).toMatchObject({ phase: "paused", error: "Recorder is unavailable" });
+  });
+
+  it("does not put a recording the length cap ended back into paused", async () => {
+    let answer!: () => void;
+    vi.spyOn(ipc, "tabScreencastPause").mockReturnValue(new Promise<null>((resolve) => (answer = () => resolve(null))));
+    useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now() });
+    const pausing = useRecording.getState().pause();
+    useRecording.setState({ phase: "done" });
+    answer();
+    await pausing;
+    expect(useRecording.getState().phase).toBe("done");
+  });
+
+  it("does not put a recording that began finishing back into recording", async () => {
+    let answer!: () => void;
+    vi.spyOn(ipc, "tabScreencastPause").mockReturnValue(new Promise<null>((resolve) => (answer = () => resolve(null))));
+    useRecording.setState({ phase: "paused", tab: "tab-1", startedAt: Date.now(), pausedAt: Date.now() });
+    const resuming = useRecording.getState().resume();
+    useRecording.setState({ phase: "finishing" });
+    answer();
+    await resuming;
+    expect(useRecording.getState().phase).toBe("finishing");
+  });
+
+  it("settles start when the countdown is cancelled", async () => {
+    vi.useFakeTimers();
+    const start = vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
+    useRecording.setState({ phase: "setup", tab: "tab-1", settings: { ...DEFAULT_SETTINGS, countdown: true } });
+    const started = useRecording.getState().start();
+    expect(useRecording.getState().phase).toBe("countdown");
+    await useRecording.getState().cancel();
+    await expect(started).resolves.toBeUndefined();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("settles start when the recorded tab closes during the countdown", async () => {
+    vi.useFakeTimers();
+    const start = vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
+    useRecording.setState({ phase: "setup", tab: "tab-1", settings: { ...DEFAULT_SETTINGS, countdown: true } });
+    const started = useRecording.getState().start();
+    expect(useRecording.getState().phase).toBe("countdown");
+    recordedTabClosed("tab-1");
+    await expect(started).resolves.toBeUndefined();
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("ends a failed stop in a state that says so, and a second try saves", async () => {

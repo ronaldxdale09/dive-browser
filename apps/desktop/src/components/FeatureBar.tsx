@@ -332,8 +332,14 @@ function useElapsed(ticking: boolean): number {
     if (!ticking) return;
     // The label is whole seconds, so repainting it four times a second only
     // burns chrome work without changing what the person can read.
+    // Catch up at once: after a pause the stored tick still holds a moment
+    // from before it, and the clock would read low until the first interval.
+    const first = window.setTimeout(() => setTick(Date.now()), 0);
     const id = window.setInterval(() => setTick(Date.now()), 1000);
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
   }, [ticking]);
   const startedAt = useRecording((s) => s.startedAt);
   const pausedAt = useRecording((s) => s.pausedAt);

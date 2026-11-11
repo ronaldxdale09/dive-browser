@@ -50,7 +50,6 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const setUi = useEmulation((s) => s.setUi);
   const setDevice = useEmulation((s) => s.setDevice);
   const openPicker = usePicker((s) => s.setOpen);
-  const setNotice = useCallback((notice: string | null) => useBrowser.setState({ notice }), []);
   const dark = useBarsDark(sel.ui, media.colorScheme);
   const preview = useContentPreview(tabId);
 
@@ -121,8 +120,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const snapshot = async () => {
     try {
       const path = await captureFramed({ tabId, device, landscape: sel.landscape, mode: sel.ui, dark, url });
-      setNotice(`Saved ${path.split("/").pop() ?? path}`);
-      setTimeout(() => setNotice(null), 4000);
+      useBrowser.getState().notify(`Saved ${path.split("/").pop() ?? path}`, 4000);
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }

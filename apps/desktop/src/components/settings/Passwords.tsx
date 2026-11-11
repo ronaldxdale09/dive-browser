@@ -478,7 +478,7 @@ function AddLogin({ onSaved, onCancel, onError }: { onSaved: (c: Credential, rep
   const save = async (replace: boolean) => {
     setBusy(true);
     try {
-      const result = await ipc.passwordsSave(site.trim(), username, password, replace);
+      const result = await ipc.passwordsSave(site.trim(), username.trim(), password, replace);
       if (result.kind === "exists") setExisting(result.origin);
       else onSaved(result.credential, result.replaced);
     } catch (err) {

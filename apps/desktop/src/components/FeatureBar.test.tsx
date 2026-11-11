@@ -118,6 +118,27 @@ describe("FeatureBar", () => {
     expect(screen.queryByRole("timer")).toBeNull();
   });
 
+  it("does not read low after a resume", () => {
+    vi.useFakeTimers();
+    try {
+      const t0 = new Date("2026-09-03T12:00:00Z").getTime();
+      vi.setSystemTime(t0);
+      useRecording.setState({ phase: "paused", tab: tab.id, startedAt: t0 - 5_000, pausedAt: t0, pausedTotal: 0 });
+      render(<FeatureBar />);
+      expect(screen.getByRole("timer").getAttribute("aria-label")).toBe("0:05 recorded");
+      vi.setSystemTime(t0 + 10_000);
+      act(() => {
+        useRecording.setState({ phase: "recording", pausedAt: null, pausedTotal: 10_000 });
+      });
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(screen.getByRole("timer").getAttribute("aria-label")).toBe("0:05 recorded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says in words that a save failed, and offers another try or discarding", async () => {
     const stop = vi.spyOn(ipc, "tabScreencastStop").mockRejectedValue(new Error("ffmpeg timed out"));
     useRecording.setState({ phase: "failed", tab: tab.id, error: "ffmpeg could not encode the recording" });

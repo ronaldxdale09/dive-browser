@@ -6,6 +6,9 @@ import { useBrowser } from "../../store/browser";
 import { resetPushed, useEmulation } from "../../store/emulation";
 import { DeviceStage } from "./DeviceStage";
 import { clipBounds } from "./DeviceFrame";
+import { captureFramed } from "./frameCapture";
+
+vi.mock("./frameCapture", async (importOriginal) => ({ ...(await importOriginal<typeof import("./frameCapture")>()), captureFramed: vi.fn() }));
 
 const tab: Tab = {
   id: "tab-1",
@@ -68,6 +71,15 @@ describe("DeviceStage", () => {
   it("reports the page slot's rectangle as the content bounds", async () => {
     render(<DeviceStage tabId={tab.id} sel={iphone} />);
     await vi.waitFor(() => expect(ipc.setContentBounds).toHaveBeenCalled());
+  });
+
+  it("shows the screenshot notice without another notice's action", async () => {
+    vi.mocked(captureFramed).mockResolvedValue("/tmp/shots/device.png");
+    useBrowser.setState({ noticeAction: { label: "Undo", run: () => undefined } });
+    render(<DeviceStage tabId={tab.id} sel={iphone} />);
+    fireEvent.click(screen.getByRole("button", { name: "Screenshot with device frame" }));
+    await vi.waitFor(() => expect(useBrowser.getState().notice).toBe("Saved device.png"));
+    expect(useBrowser.getState().noticeAction).toBeNull();
   });
 
   it("rotates on R without reloading", async () => {

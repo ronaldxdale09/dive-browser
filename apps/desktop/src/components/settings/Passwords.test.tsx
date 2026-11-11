@@ -133,6 +133,17 @@ describe("Settings › Passwords", () => {
     expect(screen.queryByRole("form", { name: "Add login" })).toBeNull();
   });
 
+  it("sends the username without trailing spaces", async () => {
+    vi.mocked(ipc.passwordsList).mockResolvedValue([]);
+    render(<Passwords />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add login" }));
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: "github.com" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user " } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save login" }));
+    await waitFor(() => expect(ipc.passwordsSave).toHaveBeenCalledWith("github.com", "user", "pw", false));
+  });
+
   it("asks before an added login replaces a saved password", async () => {
     vi.mocked(ipc.passwordsSave).mockResolvedValueOnce({ kind: "exists", origin: "https://github.com" }).mockResolvedValueOnce({ kind: "saved", credential: login, replaced: true });
     render(<Passwords />);
