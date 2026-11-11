@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { bootMark } from "./lib/bootMarks";
 import { createRoot } from "react-dom/client";
-import { ChromeRoot } from "./components/ChromeRoot";
+import { ChromeRoot, preloadChrome } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
 import { installChromeErrorReporting, ignored } from "./lib/chromeErrors";
@@ -11,8 +11,9 @@ import { isPrivateWindow } from "./lib/privateMode";
 import { loadUiStorage } from "./lib/uiStorage";
 import { useLayout } from "./store/layout";
 import { useConnectHint } from "./store/connectHint";
+import { rehydrateDefaultBrowser } from "./store/defaultBrowser";
 import { useRecording } from "./store/recording";
-import { rememberedModel, useSubtitles } from "./store/subtitles";
+import { rememberedLanguage, rememberedModel, rememberedTranslate, useSubtitles } from "./store/subtitles";
 
 bootMark("script_start");
 if (isPrivateWindow()) document.documentElement.dataset.private = "true";
@@ -38,6 +39,10 @@ if (!popout) {
   import.meta.hot?.dispose(stopStartupTelemetry);
 }
 
+// The controls' code does not depend on the saved UI state; fetch it while
+// that state is read, rather than after the first render asks for it.
+void preloadChrome(popout, appId).catch(ignored("chrome preload"));
+
 // The chrome's own state comes from the profile store (see `uiStorage`);
 // the persisted stores hydrate from it before the first paint.
 void loadUiStorage()
@@ -45,8 +50,13 @@ void loadUiStorage()
     Promise.all([useLayout.persist.rehydrate(), useRecording.persist.rehydrate(), useConnectHint.persist.rehydrate()]),
   )
   .then(() => {
+    rehydrateDefaultBrowser();
     bootMark("ui_storage_loaded");
-    useSubtitles.setState({ model: rememberedModel() });
+    useSubtitles.setState({
+      model: rememberedModel(),
+      language: rememberedLanguage(),
+      translate: rememberedTranslate(),
+    });
   })
   .catch(ignored("ui storage load"))
   .finally(() => {

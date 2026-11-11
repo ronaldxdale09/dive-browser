@@ -108,12 +108,19 @@ function watch(set: (patch: Partial<DefaultBrowserState>) => void, get: () => De
   window.addEventListener("focus", onFocus);
 }
 
+/** Apply the saved "Not now" once ui storage has loaded. */
+export function rehydrateDefaultBrowser(): void {
+  useDefaultBrowser.setState({ declined: readDeclined() });
+}
+
 export const useDefaultBrowser = create<DefaultBrowserState>((set, get) => ({
   status: null,
   phase: "idle",
   error: null,
   timedOut: false,
-  declined: readDeclined(),
+  // The saved "Not now" lives in ui storage, which is empty until the boot
+  // load finishes; `rehydrateDefaultBrowser` applies it afterwards.
+  declined: false,
   decline: () => {
     writeDeclined(Date.now() + DECLINE_REST_MS);
     set({ declined: true });

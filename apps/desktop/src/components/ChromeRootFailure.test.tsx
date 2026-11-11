@@ -1,10 +1,10 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ChromeRoot } from "./ChromeRoot";
+import { ChromeRoot, preloadChrome, resetChromePreload } from "./ChromeRoot";
 import { ChromeErrorBoundary } from "./ChromeErrorBoundary";
 
 vi.mock("../App", () => { throw new Error("UI module unavailable"); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); resetChromePreload(); });
 
 it("routes a failed async module load into the existing visible recovery controls", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -15,4 +15,12 @@ it("routes a failed async module load into the existing visible recovery control
   expect(screen.getByRole("button", { name: "Reload window" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   expect(screen.queryByLabelText("Loading Dive")).toBeNull();
+});
+
+it("a failed preload is retried on the next request", async () => {
+  const first = preloadChrome(null);
+  await expect(first).rejects.toThrow();
+  const second = preloadChrome(null);
+  expect(second).not.toBe(first);
+  await expect(second).rejects.toThrow();
 });

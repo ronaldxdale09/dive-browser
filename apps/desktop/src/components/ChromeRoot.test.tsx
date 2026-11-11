@@ -1,12 +1,13 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChromeRoot } from "./ChromeRoot";
+import { ChromeRoot, preloadChrome, resetChromePreload } from "./ChromeRoot";
+import { bootTimeline, resetBootMarks } from "../lib/bootMarks";
 import { ChromeErrorBoundary } from "./ChromeErrorBoundary";
 
 vi.mock("../App", () => ({ App: () => <div>Main controls</div> }));
 vi.mock("./Popout", () => ({ Popout: ({ tabId }: { tabId: string }) => <div>Popout {tabId}</div> }));
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); resetChromePreload(); resetBootMarks(); });
 
 describe("window chrome loading", () => {
   it("shows main controls as soon as the module resolves, without advancing a 300 ms timer", async () => {
@@ -29,6 +30,30 @@ describe("window chrome loading", () => {
     const { unmount } = render(<ChromeErrorBoundary><ChromeRoot tabId={null} /></ChromeErrorBoundary>);
     unmount();
     await act(() => vi.dynamicImportSettled());
+    expect(screen.queryByText("Main controls")).toBeNull();
+  });
+
+  it("shows main controls at once when the module was preloaded before render", async () => {
+    void preloadChrome(null);
+    await act(() => vi.dynamicImportSettled());
+    render(<ChromeRoot tabId={null} />);
+    await act(() => vi.dynamicImportSettled());
+    expect(screen.getByText("Main controls")).toBeTruthy();
+  });
+
+  it("records app_module_loaded when a preload resolves, before any render", async () => {
+    resetBootMarks();
+    void preloadChrome(null);
+    await act(() => vi.dynamicImportSettled());
+    expect(bootTimeline()).toHaveProperty("app_module_loaded");
+    expect(bootTimeline()).not.toHaveProperty("app_rendered");
+  });
+
+  it("a preload for a detached window does not load the main controls", async () => {
+    void preloadChrome("tab-9");
+    render(<ChromeRoot tabId="tab-9" />);
+    await act(() => vi.dynamicImportSettled());
+    expect(screen.getByText("Popout tab-9")).toBeTruthy();
     expect(screen.queryByText("Main controls")).toBeNull();
   });
 });
