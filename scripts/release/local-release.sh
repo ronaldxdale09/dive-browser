@@ -103,6 +103,11 @@ pnpm typecheck
 pnpm lint
 pnpm test
 
+# The CI run (clippy, Rust tests, audit, live checks) must have passed on this
+# exact commit; the local preflight above is only the fast half.
+passed="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${COMMIT}&status=success&per_page=1" --jq '.total_count')"
+[[ "${passed}" -ge 1 ]] || die "no successful ci.yml run for ${COMMIT}; wait for CI to pass on main"
+
 step "stamp ${VERSION} into this checkout"
 PUBLISHED=0
 CEF_CFG="${CEF_PATH}/Chromium Embedded Framework.framework/Resources/crash_reporter.cfg"

@@ -16,6 +16,13 @@ Local, CI, and release builds use Rust 1.98.0, pinned in
 when qualifying a newer compiler so a release uses the same compiler and
 Clippy rules on every platform.
 
+A release needs a green `ci` run on the exact commit being released: the
+release workflow's preflight (and `local-release.sh`) refuses to start
+otherwise, and re-runs `cargo audit` in case an advisory was published after
+CI passed. Wait for CI on `main` to finish before running a release. Every
+action in `release.yml` is pinned to a commit SHA because those jobs hold the
+signing keys; Dependabot proposes the updates.
+
 ### From GitHub (the normal way)
 
 **Actions → `release` → Run workflow**, pick a bump, run it.

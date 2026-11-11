@@ -51,7 +51,10 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -59,13 +62,29 @@ jobs:
       is_prerelease: ${{ steps.resolve.outputs.isPrerelease }}
       make_latest: ${{ steps.resolve.outputs.makeLatest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Every tag, so the next version is computed against all of them.
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      # ci.yml runs clippy, the Rust tests, cargo audit/deny and the live
+      # end-to-end job; this workflow runs none of them. Releasing a commit
+      # those never passed on is how a red main ships, so the run that passed
+      # must exist for this exact commit before anything is built or signed.
+      - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')"
+          if [ "${passed}" -lt 1 ]; then
+            echo "::error::No successful ci.yml run for ${GITHUB_SHA}. Wait for CI to finish green on this commit, then run the release again."
+            exit 1
+          fi
+          echo "ci.yml passed on ${GITHUB_SHA}"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -73,15 +92,17 @@ jobs:
 
       - id: resolve
         name: Resolve release version
+        env:
+          KIND: ${{ inputs.kind }}
+          EXACT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             node scripts/release/resolve-release.mjs --ref "${GITHUB_REF_NAME}" --github-output
+          elif [ -n "${EXACT_VERSION}" ]; then
+            node scripts/release/resolve-release.mjs --kind "${KIND}" --version "${EXACT_VERSION}" --github-output
           else
-            node scripts/release/resolve-release.mjs \
-              --kind "${{ inputs.kind }}" \
-              ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
-              --github-output
+            node scripts/release/resolve-release.mjs --kind "${KIND}" --github-output
           fi
 
       # The heavy Rust gate runs in ci.yml on every push to main, so this is
@@ -92,6 +113,16 @@ jobs:
           pnpm typecheck
           pnpm lint
           pnpm test
+
+      # CI audited this commit when it was pushed; an advisory published since
+      # then would otherwise ship. Lockfile-only, so no build is needed.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - name: Dependency advisories
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit
 
   build:
     name: Build macOS (aarch64)
@@ -105,21 +136,23 @@ jobs:
     # is cancelled at the finish line.
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@1.98.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: brew install cmake ninja
 
       - name: Cache CEF binaries
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
@@ -127,7 +160,9 @@ jobs:
       # Stamped into this checkout only. Nothing is committed here; `finalize`
       # commits the bump once the release exists.
       - name: Stamp release version
-        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}"
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release/stamp-versions.mjs "${RELEASE_VERSION}"
 
       - name: Import Apple signing certificate
         env:
@@ -199,6 +234,10 @@ jobs:
       # Fails when the signature or the archive is missing, instead of writing
       # a manifest with an empty field that only breaks on a user's machine.
       - name: Build update manifest
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -219,15 +258,15 @@ jobs:
           fi
 
           node scripts/release/update-manifest.mjs build \
-            --version "${{ needs.preflight.outputs.version }}" \
+            --version "${RELEASE_VERSION}" \
             --target aarch64-apple-darwin \
             --archive "${archives[0]}" \
             --signature-file "${signatures[0]}" \
-            --notes "${{ needs.preflight.outputs.name }}" \
-            --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
+            --notes "${RELEASE_NAME}" \
+            --base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
             --out out/manifest-aarch64-apple-darwin.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-aarch64
           path: out/*
@@ -239,19 +278,20 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # 1.98.0
         with:
+          toolchain: 1.98.0
           targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # CEF's dll wrapper is built with the static C++ runtime -- CEF's own
       # convention, not configurable from here -- and a program links exactly
@@ -288,13 +328,15 @@ jobs:
           "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" >> $env:GITHUB_ENV
 
       - name: Cache CEF binaries
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Stamp release version
-        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}"
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release/stamp-versions.mjs "${RELEASE_VERSION}"
 
       # NSIS, not WiX: WiX is the Tauri default on Windows and its candle step
       # is the one part of this that cannot run on an ARM machine, so the
@@ -318,6 +360,10 @@ jobs:
 
       - name: Build update manifest
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -337,15 +383,15 @@ jobs:
           fi
 
           node scripts/release/update-manifest.mjs build \
-            --version "${{ needs.preflight.outputs.version }}" \
+            --version "${RELEASE_VERSION}" \
             --target x86_64-pc-windows-msvc \
             --archive "${archives[0]}" \
             --signature-file "${signatures[0]}" \
-            --notes "${{ needs.preflight.outputs.name }}" \
-            --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
+            --notes "${RELEASE_NAME}" \
+            --base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
             --out out/manifest-x86_64-pc-windows-msvc.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-x86_64
           path: out/*
@@ -360,14 +406,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: "{macos,windows}-*"
           merge-multiple: true
@@ -385,7 +431,7 @@ jobs:
           rm -f assets/manifest-*.json
 
       - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # On a manual run this is what creates the tag, so the tag never
           # exists before the assets that justify it.
@@ -410,7 +456,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node scripts/release/verify-release-assets.mjs "${{ needs.preflight.outputs.tag }}"
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: node scripts/release/verify-release-assets.mjs "${RELEASE_TAG}"
 
   finalize:
     name: Record the version on main
@@ -421,35 +468,43 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
           persist-credentials: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
       - id: stamp
-        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}" --github-output
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release/stamp-versions.mjs "${RELEASE_VERSION}" --github-output
 
       - name: Commit the version bump
         if: steps.stamp.outputs.changed == 'true'
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/cef/crash_reporter.cfg
-          git commit -m "chore(release): ${{ needs.preflight.outputs.tag }}"
+          git commit -m "chore(release): ${RELEASE_TAG}"
           git push origin HEAD:main
 
       - name: Summary
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
+          RELEASE_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
         run: |
           {
-            echo "## ${{ needs.preflight.outputs.name }}"
+            echo "## ${RELEASE_NAME}"
             echo
-            echo "- Tag: \`${{ needs.preflight.outputs.tag }}\`"
-            echo "- Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}"
-            echo "- Prerelease: \`${{ needs.preflight.outputs.is_prerelease }}\`"
+            echo "- Tag: \`${RELEASE_TAG}\`"
+            echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+            echo "- Prerelease: \`${RELEASE_PRERELEASE}\`"
           } >> "$GITHUB_STEP_SUMMARY"
