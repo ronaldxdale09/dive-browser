@@ -6,14 +6,20 @@
 #   schtasks /create /tn DiveRebuild /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\rebuild.ps1" /sc once /st 00:00 /ru SYSTEM /f
 #   schtasks /run /tn DiveRebuild
 #
-# then poll C:\dive-rebuild.log for DONE.
+# then poll C:\dev\logs\rebuild.log for DONE (FAILED appears before it when a
+# step failed).
+#
+# The pull is fast-forward only and refuses to run over local changes in
+# C:\dev\dive. -Reset discards them (fetch + git reset --hard origin/main).
 # -Installer also builds the .exe installer. NSIS rather than WiX: WiX v3
 # candle does not run on Windows-on-ARM, and `--bundles all` stops there
 # before it reaches anything else.
-param([switch] $Installer)
+param([switch] $Installer, [switch] $Reset)
 
 $ProgressPreference = "SilentlyContinue"
-$log = "C:\dive-rebuild.log"
+$logDir = "C:\dev\logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$log = "$logDir\rebuild.log"
 Remove-Item $log -ErrorAction SilentlyContinue
 function Say($m) { Add-Content $log "$(Get-Date -Format HH:mm:ss)  $m" }
 
@@ -35,7 +41,18 @@ foreach ($v in "Path","CARGO_HOME","RUSTUP_HOME","CEF_PATH") {
 }
 $repo = "C:\dev\dive"
 Set-Location $repo
-Run "pull" "git fetch --depth 1 origin main && git reset --hard origin/main"
+# The static C++ runtime flags CI sets, for this process only.
+. "$repo\scripts\windows\msvc-runtime.ps1"
+if ($Reset) {
+  Run "pull (reset)" "git fetch --depth 1 origin main && git reset --hard origin/main"
+} else {
+  $dirty = git -C $repo status --porcelain
+  if ($dirty) {
+    Say "the checkout has local changes; commit them or pass -Reset to discard them"
+    Say "FAILED"; Say "DONE"; exit 1
+  }
+  Run "pull" "git pull --ff-only origin main"
+}
 # Windows will not replace a binary that is still open.
 Get-Process dive-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
 Run "pnpm install" "pnpm install --frozen-lockfile"

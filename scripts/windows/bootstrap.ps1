@@ -28,7 +28,16 @@ function Have($cmd) { $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue)
 # ErrorActionPreference = Stop a `2>&1` pipe turns that chatter into a
 # terminating error -- which is exactly how the first run of this script died
 # one line after installing Rust successfully.
+#
+# A program that does not exist is NOT an exit code: `&` reports an error but
+# does not throw under "Continue", and $LASTEXITCODE keeps the previous
+# command's value, so a missing tool would look like success. Check first,
+# and reset the code so a stale value can never be read.
 function Run($exe, [string[]]$exeArgs, [switch]$IgnoreExit) {
+    if (-not (Test-Path $exe) -and -not (Get-Command $exe -ErrorAction SilentlyContinue)) {
+        throw "$exe was not found"
+    }
+    $global:LASTEXITCODE = 0
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
@@ -113,7 +122,7 @@ if ($vs) {
 }
 
 # ---- Rust ------------------------------------------------------------------
-# Into C:\dev\rust rather than a profile, so the toolchain is the same one
+# Into C:\dev\cargo and C:\dev\rustup rather than a profile, so the toolchain is the same one
 # whether SYSTEM or a person is driving the build.
 $cargoHome = "$Root\cargo"; $rustupHome = "$Root\rustup"
 [Environment]::SetEnvironmentVariable("CARGO_HOME", $cargoHome, "Machine")
@@ -133,23 +142,33 @@ if (Have rustc) {
 Run "$cargoHome\bin\rustup.exe" @("component", "add", "clippy", "rustfmt")
 
 # ---- Node and pnpm ---------------------------------------------------------
+$npm = $null
 if (Have node) {
     Say "node already present: $(node --version)"
+    $npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 } else {
     Say "installing node"
-    # Resolved from the dist index rather than pinned, so this does not rot.
+    # Pinned to the Node major CI uses (node-version: 24). Not "newest LTS":
+    # corepack is no longer bundled from Node 26 on, so a floating pick
+    # leaves pnpm uninstallable. Bump together with CI.
     $index = Invoke-RestMethod "https://nodejs.org/dist/index.json" -UseBasicParsing
     $want = if ($isArm) { "win-arm64-zip" } else { "win-x64-zip" }
-    $rel = $index | Where-Object { $_.lts -and $_.files -contains $want } | Select-Object -First 1
+    $rel = $index | Where-Object { $_.version -like "v24.*" -and $_.files -contains $want } | Select-Object -First 1
+    if (-not $rel) { throw "no Node v24 build for $want in the dist index (Node is pinned to the major CI uses; corepack is not bundled from Node 26 on)" }
     $arch = if ($isArm) { "arm64" } else { "x64" }
     Get-Zip "https://nodejs.org/dist/$($rel.version)/node-$($rel.version)-win-$arch.zip" $Root
     $nodeDir = (Get-ChildItem $Root -Directory -Filter "node-v*").FullName | Select-Object -First 1
     Add-MachinePath $nodeDir
     Say "node installed: $(& "$nodeDir\node.exe" --version)"
+    $npm = "$nodeDir\npm.cmd"
 }
-Say "enabling pnpm"
-Run "corepack" @("enable")
-Run "corepack" @("prepare", "pnpm@latest", "--activate")
+if (-not $npm) { throw "node is present but npm.cmd was not found on PATH" }
+Say "installing pnpm"
+# Installed with npm, not corepack (not bundled from Node 26 on). The version
+# must equal "packageManager" in the root package.json. The global pnpm.cmd
+# lands in the Node directory, which Add-MachinePath already put on PATH.
+Run $npm @("install", "--global", "pnpm@10.33.0")
+Run "pnpm" @("--version")
 
 # ---- CMake and Ninja -------------------------------------------------------
 # cef-dll-sys needs both to build the CEF C++ wrapper.
@@ -198,6 +217,6 @@ Say "done"
 Write-Output ""
 Write-Output "Open a NEW shell so the machine PATH is picked up, then:"
 Write-Output "    git clone https://github.com/ronaldxdale09/dive-browser.git C:\dev\dive"
-Write-Output "    cd C:\dev\dive; pnpm install; pnpm dev"
+Write-Output "    cd C:\dev\dive; . scripts\windows\msvc-runtime.ps1; pnpm install; pnpm dev"
 Write-Output ""
 Write-Output "The macOS-only code is not ported yet -- see docs/WINDOWS.md."
