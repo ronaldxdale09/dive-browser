@@ -6,9 +6,10 @@
 //! Now the failure is sorted into the few cases a person can act on:
 //!
 //! - **Damaged** (not a database, corrupt, or failing SQLite's quick check):
-//!   the files are set aside under a `.corrupt-<time>` name, never deleted,
-//!   and the person chooses to start fresh, go back to the copy taken before
-//!   the last migration, or quit.
+//!   the person chooses to start fresh, go back to the copy taken before
+//!   the last migration, or quit. Only after a choice to go on are the files
+//!   set aside under a `.corrupt-<time>` name, never deleted; quitting
+//!   leaves them where they are.
 //! - **In use**, **read-only**, or **from a newer Dive**: nothing here can
 //!   fix those, so a dialog says what is wrong and Dive quits cleanly.
 //!
@@ -41,9 +42,13 @@ pub(crate) enum Failure {
 pub(crate) struct FailedCheck;
 
 /// The launch stopped on purpose, after telling the person why.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Default, thiserror::Error)]
 #[error("Dive stopped at launch because its data could not be opened")]
-pub(crate) struct Aborted;
+pub(crate) struct Aborted {
+    /// The person quit on a damaged database that is still in place, so
+    /// the next launch must check it again.
+    pub(crate) damage_kept: bool,
+}
 
 /// Sort an open failure into what can be done about it.
 pub(crate) fn classify(error: &anyhow::Error) -> Failure {
@@ -98,19 +103,40 @@ fn database_files(path: &Path) -> [(PathBuf, &'static str); 3] {
     ]
 }
 
+/// The name a database file is set aside under: `<name>.corrupt-<stamp>`,
+/// plus the journal suffix for the WAL and index.
+fn quarantine_name(path: &Path, stamp: &str, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".corrupt-{stamp}{suffix}"));
+    PathBuf::from(name)
+}
+
 /// Move a damaged database aside as `<name>.corrupt-<stamp>`, with its WAL
 /// and index under the same stamp, so a fresh one can be made in its place
 /// and nothing is lost. Returns the new name of the main file.
+///
+/// It is all or nothing: if a later file cannot be moved, the ones already
+/// moved are renamed back, so a failure never leaves a half-moved database.
 pub(crate) fn quarantine(path: &Path, stamp: &str) -> std::io::Result<PathBuf> {
     let mut moved = None;
+    let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (file, suffix) in database_files(path) {
         if !file.exists() {
             continue;
         }
-        let mut name = path.as_os_str().to_owned();
-        name.push(format!(".corrupt-{stamp}{suffix}"));
-        let target = PathBuf::from(name);
-        std::fs::rename(&file, &target)?;
+        let target = quarantine_name(path, stamp, suffix);
+        if let Err(error) = std::fs::rename(&file, &target) {
+            for (from, to) in done.iter().rev() {
+                if let Err(undo) = std::fs::rename(to, from) {
+                    tracing::error!(
+                        "could not put {} back after a failed move: {undo}",
+                        from.display()
+                    );
+                }
+            }
+            return Err(error);
+        }
+        done.push((file, target.clone()));
         if suffix.is_empty() {
             moved = Some(target);
         }
@@ -139,6 +165,18 @@ enum Choice {
     Quit,
 }
 
+/// What the quick check's answer means for opening: a clean pass goes on,
+/// a failed check is damage, and a check that could not run at all is
+/// sorted by its own error -- a corrupt file still reads as damage through
+/// `classify`, but a busy lock or an I/O hiccup no longer does.
+fn check_verdict(verdict: dive_core::Result<bool>) -> anyhow::Result<()> {
+    match verdict {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::Error::new(FailedCheck)),
+        Err(error) => Err(anyhow::Error::from(error)),
+    }
+}
+
 /// Open the store at `path`, recovering from a damaged file with the
 /// person's say, and seed it with `seed`.
 ///
@@ -151,14 +189,26 @@ pub(crate) fn open<T>(
     check: bool,
     seed: impl Fn(&Store) -> anyhow::Result<T>,
 ) -> anyhow::Result<(Store, T)> {
+    open_with(path, check, seed, ask_about_damage, explain)
+}
+
+/// [`open`] with the dialogs passed in, so the order of asking and moving
+/// can be tested. `ask` receives the name the file would be set aside under.
+fn open_with<T>(
+    path: &Path,
+    check: bool,
+    seed: impl Fn(&Store) -> anyhow::Result<T>,
+    mut ask: impl FnMut(&Path, Option<&Path>) -> Choice,
+    explain: impl Fn(&Failure, &anyhow::Error, &Path),
+) -> anyhow::Result<(Store, T)> {
     // Each round is one recovery; a fresh or restored file that is damaged
     // again is not worth a loop of dialogs.
     for _ in 0..3 {
         let attempt = Store::open(path)
             .map_err(anyhow::Error::from)
             .and_then(|store| {
-                if check && !store.quick_check().unwrap_or(false) {
-                    return Err(anyhow::Error::new(FailedCheck));
+                if check {
+                    check_verdict(store.quick_check())?;
                 }
                 let seeded = seed(&store)?;
                 Ok((store, seeded))
@@ -171,29 +221,33 @@ pub(crate) fn open<T>(
         tracing::error!(?failure, "could not open the database: {error:#}");
         if failure != Failure::Damaged {
             explain(&failure, &error, path);
-            return Err(Aborted.into());
+            return Err(Aborted::default().into());
         }
+        let stamp = stamp();
         let backup = Store::migration_backups(path).into_iter().next();
-        let moved = match quarantine(path, &stamp()) {
-            Ok(moved) => moved,
+        // Nothing moves until the person has chosen: quitting must leave
+        // every file exactly where it was.
+        let choice = ask(&quarantine_name(path, &stamp, ""), backup.as_deref());
+        if matches!(choice, Choice::Quit) {
+            return Err(Aborted { damage_kept: true }.into());
+        }
+        match quarantine(path, &stamp) {
+            Ok(moved) => tracing::warn!(moved = %moved.display(), "set a damaged database aside"),
             Err(move_error) => {
                 tracing::error!("could not set the damaged database aside: {move_error}");
                 explain(&Failure::Other, &error, path);
-                return Err(Aborted.into());
+                return Err(Aborted::default().into());
             }
-        };
-        tracing::warn!(moved = %moved.display(), "set a damaged database aside");
-        match ask_about_damage(&moved, backup.as_deref()) {
-            Choice::StartFresh => tracing::info!("starting with a fresh database"),
-            Choice::Restore(backup) => {
-                if let Err(e) = restore(&backup, path) {
-                    tracing::error!("could not restore {}: {e}", backup.display());
-                    explain(&Failure::Other, &anyhow::Error::from(e), path);
-                    return Err(Aborted.into());
-                }
-                tracing::info!(backup = %backup.display(), "restored the pre-migration copy");
+        }
+        if let Choice::Restore(backup) = choice {
+            if let Err(e) = restore(&backup, path) {
+                tracing::error!("could not restore {}: {e}", backup.display());
+                explain(&Failure::Other, &anyhow::Error::from(e), path);
+                return Err(Aborted::default().into());
             }
-            Choice::Quit => return Err(Aborted.into()),
+            tracing::info!(backup = %backup.display(), "restored the pre-migration copy");
+        } else {
+            tracing::info!("starting with a fresh database");
         }
     }
     explain(
@@ -201,7 +255,7 @@ pub(crate) fn open<T>(
         &anyhow::anyhow!("the database was damaged again after recovery"),
         path,
     );
-    Err(Aborted.into())
+    Err(Aborted::default().into())
 }
 
 /// The sentence a dialog leads with for each failure.
@@ -239,17 +293,18 @@ fn explain(failure: &Failure, error: &anyhow::Error, path: &Path) {
         .show();
 }
 
-fn ask_about_damage(moved: &Path, backup: Option<&Path>) -> Choice {
+fn ask_about_damage(will_be_kept_as: &Path, backup: Option<&Path>) -> Choice {
     const FRESH: &str = "Start Fresh";
     const RESTORE: &str = "Restore Copy";
     const QUIT: &str = "Quit";
-    let kept = moved.file_name().map_or_else(
-        || moved.display().to_string(),
+    let kept = will_be_kept_as.file_name().map_or_else(
+        || will_be_kept_as.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
     let mut description = format!(
-        "Dive could not read its database. It has been set aside as \u{201c}{kept}\u{201d} in \
-         the data folder; nothing was deleted.\n\n"
+        "Dive could not read its database. If you go on, it will be set aside as \
+         \u{201c}{kept}\u{201d} in the data folder; nothing is deleted. Quit leaves everything \
+         as it is.\n\n"
     );
     let buttons = if backup.is_some() {
         description.push_str(
@@ -280,12 +335,15 @@ fn ask_about_damage(moved: &Path, backup: Option<&Path>) -> Choice {
 mod tests {
     use super::*;
 
-    fn sqlite(code: i32) -> anyhow::Error {
+    fn core_sqlite(code: i32) -> CoreError {
         CoreError::Db(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(code),
             None,
         ))
-        .into()
+    }
+
+    fn sqlite(code: i32) -> anyhow::Error {
+        core_sqlite(code).into()
     }
 
     #[test]
@@ -385,5 +443,104 @@ mod tests {
         );
         assert!(text.contains("newer version of Dive"), "{text}");
         assert!(text.contains("Nothing has been changed"), "{text}");
+    }
+
+    const NOT_SQLITE: &[u8] = b"this is not sqlite, just some bytes that go on for a while";
+
+    fn damaged_folder() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dive.db");
+        std::fs::write(&path, NOT_SQLITE).unwrap();
+        std::fs::write(dir.path().join("dive.db-wal"), b"wal").unwrap();
+        (dir, path)
+    }
+
+    fn corrupt_entries(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".corrupt-"))
+            .collect()
+    }
+
+    #[test]
+    fn quitting_on_a_damaged_database_moves_nothing() {
+        let (dir, path) = damaged_folder();
+        let error = open_with(&path, false, |_| Ok(()), |_, _| Choice::Quit, |_, _, _| {})
+            .err()
+            .unwrap();
+        let aborted = error.downcast_ref::<Aborted>().unwrap();
+        assert!(aborted.damage_kept);
+        assert_eq!(std::fs::read(&path).unwrap(), NOT_SQLITE);
+        assert!(dir.path().join("dive.db-wal").exists());
+        assert!(corrupt_entries(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn starting_fresh_sets_the_damaged_file_aside_and_opens() {
+        let (dir, path) = damaged_folder();
+        let asked = std::cell::RefCell::new(Vec::new());
+        let opened = open_with(
+            &path,
+            false,
+            |_| Ok(()),
+            |name, _| {
+                asked.borrow_mut().push(name.to_owned());
+                Choice::StartFresh
+            },
+            |_, _, _| {},
+        );
+        assert!(opened.is_ok());
+        let kept = corrupt_entries(dir.path());
+        let main: Vec<_> = kept
+            .iter()
+            .filter(|n| !n.ends_with("-wal") && !n.ends_with("-shm"))
+            .collect();
+        assert_eq!(main.len(), 1, "{kept:?}");
+        assert!(main[0].starts_with("dive.db.corrupt-"));
+        assert_eq!(std::fs::read(dir.path().join(main[0])).unwrap(), NOT_SQLITE);
+        let asked = asked.borrow();
+        assert_eq!(asked.len(), 1);
+        assert!(
+            asked[0]
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("dive.db.corrupt-")
+        );
+        assert!(asked[0].exists());
+    }
+
+    #[test]
+    fn a_check_that_could_not_run_is_sorted_by_its_cause() {
+        let verdict = |code| classify(&check_verdict(Err(core_sqlite(code))).unwrap_err());
+        assert_eq!(verdict(rusqlite::ffi::SQLITE_BUSY), Failure::Locked);
+        assert_eq!(verdict(rusqlite::ffi::SQLITE_CORRUPT), Failure::Damaged);
+        assert_eq!(verdict(rusqlite::ffi::SQLITE_IOERR), Failure::Other);
+        assert_eq!(
+            classify(&check_verdict(Ok(false)).unwrap_err()),
+            Failure::Damaged
+        );
+        assert!(check_verdict(Ok(true)).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_move_puts_back_what_it_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dive.db");
+        std::fs::write(&path, b"db").unwrap();
+        std::fs::write(dir.path().join("dive.db-wal"), b"wal").unwrap();
+        // A non-empty directory at the target makes the WAL's rename fail.
+        let blocker = dir.path().join("dive.db.corrupt-T1-wal");
+        std::fs::create_dir(&blocker).unwrap();
+        std::fs::write(blocker.join("occupied"), b"x").unwrap();
+        assert!(quarantine(&path, "T1").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"db");
+        assert!(!dir.path().join("dive.db.corrupt-T1").exists());
+        assert_eq!(
+            std::fs::read(dir.path().join("dive.db-wal")).unwrap(),
+            b"wal"
+        );
     }
 }

@@ -908,8 +908,9 @@ impl Store {
     ///
     /// `PRAGMA quick_check` reads every page, so this is for after something
     /// went wrong (an unclean exit), not for every launch. A database too
-    /// damaged to run the check at all reports an error, which callers
-    /// treat the same as a failed check.
+    /// damaged to run the check at all reports an error, which is passed to
+    /// the caller to sort by cause (a corrupt file is still damage; a busy
+    /// lock is not).
     pub fn quick_check(&self) -> Result<bool> {
         let verdict: String = self
             .conn

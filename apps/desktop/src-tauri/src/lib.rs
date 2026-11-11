@@ -445,7 +445,10 @@ pub fn run() {
             if let Err(error) = state::init(app) {
                 // Tauri turns a setup error into a panic with no message, so
                 // the reason is shown here and the exit is an ordinary one.
-                if !error.is::<db_recovery::Aborted>() {
+                if let Some(aborted) = error.downcast_ref::<db_recovery::Aborted>() {
+                    STARTUP_DAMAGE_KEPT
+                        .store(aborted.damage_kept, std::sync::atomic::Ordering::SeqCst);
+                } else {
                     tracing::error!("could not start: {error:#}");
                     let _ = rfd::MessageDialog::new()
                         .set_title("Dive could not start")
@@ -550,7 +553,9 @@ pub fn run() {
                 if let Some(monitor) = state::lock(&exit_responsiveness).as_ref() {
                     monitor.request_stop();
                 }
-                if !private_session::is_private() {
+                if !private_session::is_private()
+                    && !STARTUP_DAMAGE_KEPT.load(std::sync::atomic::Ordering::SeqCst)
+                {
                     recovery::end(&state::data_root());
                 }
             }
@@ -672,6 +677,10 @@ pub fn run() {
 /// Setup could not open the store and has asked for an exit; the run loop
 /// has no state to consult from then on.
 static STARTUP_ABORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The person quit on a damaged database, so the running marker stays and the
+/// next launch checks the file again.
+static STARTUP_DAMAGE_KEPT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Passed to the build an update restarts into, with this process's id.
 const RESTART_FROM_FLAG: &str = "--dive-restart-from=";
