@@ -1031,7 +1031,6 @@ fn abandon(run: &Run, on_delta: &Channel<ChatDelta>, calls: &[dive_agent::ToolUs
     }
 }
 
-#[allow(clippy::too_many_lines)] // Keep the streamed tool-loop state machine in execution order.
 async fn drive(
     browser: &crate::mcp::AppBrowser,
     state: &AppState,
@@ -1112,6 +1111,96 @@ async fn drive(
     } else {
         Approvals::parse(&prefs.agent_approvals)
     };
+    let tools = AppTools {
+        state,
+        browser,
+        tab_id,
+        approvals,
+    };
+    rounds(&client, &mut request, run, on_delta, max_steps, &tools).await
+}
+
+/// Something that opens one round's reply stream. The real one is the
+/// provider client; tests script it.
+pub(crate) trait OpenStream: Sync {
+    fn open<'a>(
+        &'a self,
+        request: &'a dive_agent::Request,
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<futures_util::stream::BoxStream<'static, Delta>, dive_agent::AgentError>,
+    >;
+}
+
+impl OpenStream for dive_agent::Client {
+    fn open<'a>(
+        &'a self,
+        request: &'a dive_agent::Request,
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<futures_util::stream::BoxStream<'static, Delta>, dive_agent::AgentError>,
+    > {
+        Box::pin(async move { self.stream(request).await.map(StreamExt::boxed) })
+    }
+}
+
+/// The two places the round loop reaches into the app.
+pub(crate) trait RoundTools: Sync {
+    /// The row drawn when a call streams in.
+    fn announce(&self, run: &Run, call: &dive_agent::ToolUse) -> ToolStep;
+    /// Run one round's calls.
+    fn run_calls<'a>(
+        &'a self,
+        run: &'a Run,
+        on_delta: &'a Channel<ChatDelta>,
+        calls: &'a [dive_agent::ToolUse],
+    ) -> futures_util::future::BoxFuture<'a, Vec<dive_agent::ToolResult>>;
+}
+
+/// The app's own tools: the real step rows and the real browser.
+struct AppTools<'a> {
+    state: &'a AppState,
+    browser: &'a crate::mcp::AppBrowser,
+    tab_id: Option<TabId>,
+    approvals: Approvals,
+}
+
+impl RoundTools for AppTools<'_> {
+    fn announce(&self, run: &Run, call: &dive_agent::ToolUse) -> ToolStep {
+        step_for(self.state, run, self.tab_id, call, None)
+    }
+
+    fn run_calls<'a>(
+        &'a self,
+        run: &'a Run,
+        on_delta: &'a Channel<ChatDelta>,
+        calls: &'a [dive_agent::ToolUse],
+    ) -> futures_util::future::BoxFuture<'a, Vec<dive_agent::ToolResult>> {
+        Box::pin(run_calls(
+            self.state,
+            run,
+            self.browser,
+            on_delta,
+            self.tab_id,
+            calls,
+            self.approvals,
+        ))
+    }
+}
+
+/// Run rounds until the reply ends, fails, is stopped or hits the step limit.
+#[allow(clippy::too_many_lines)] // Keep the streamed tool-loop state machine in execution order.
+async fn rounds(
+    opener: &impl OpenStream,
+    request: &mut dive_agent::Request,
+    run: &Run,
+    on_delta: &Channel<ChatDelta>,
+    max_steps: usize,
+    tools: &impl RoundTools,
+) -> AppResult<()> {
+    let stopped = |on_delta: &Channel<ChatDelta>| {
+        let _ = on_delta.send(ChatDelta::Done("stopped".into()));
+    };
     let mut total = Usage::default();
     let mut steps_used = 0usize;
     loop {
@@ -1119,7 +1208,7 @@ async fn drive(
             stopped(on_delta);
             return Ok(());
         }
-        let Ok(stream) = start_stream(&client, &request, run, on_delta).await else {
+        let Ok(stream) = start_stream(opener, request, run, on_delta).await else {
             return Ok(());
         };
         tokio::pin!(stream);
@@ -1159,9 +1248,7 @@ async fn drive(
                     let _ = on_delta.send(ChatDelta::Reasoning(t));
                 }
                 Delta::ToolUse(call) => {
-                    let _ = on_delta.send(ChatDelta::ToolCall(step_for(
-                        state, run, tab_id, &call, None,
-                    )));
+                    let _ = on_delta.send(ChatDelta::ToolCall(tools.announce(run, &call)));
                     calls.push(call);
                 }
                 Delta::Usage(u) => {
@@ -1221,7 +1308,7 @@ async fn drive(
             ));
             Turn::assistant_blocks(blocks)
         });
-        let results = run_calls(state, run, browser, on_delta, tab_id, &calls, approvals).await;
+        let results = tools.run_calls(run, on_delta, &calls).await;
         if run.is_cancelled() {
             stopped(on_delta);
             return Ok(());
@@ -1247,21 +1334,21 @@ const STREAM_ATTEMPTS: u32 = 3;
 /// this returns, so a Stop during the wait is a stopped reply rather than an
 /// error, and a failure says what kind of failure it was.
 async fn start_stream(
-    client: &dive_agent::Client,
+    opener: &impl OpenStream,
     request: &dive_agent::Request,
     run: &Run,
     on_delta: &Channel<ChatDelta>,
-) -> Result<impl futures_util::Stream<Item = dive_agent::Delta> + use<>, Ended> {
+) -> Result<futures_util::stream::BoxStream<'static, Delta>, Ended> {
     let mut attempt = 1;
     loop {
-        let opened = tokio::select! {
+        let attempted = tokio::select! {
             () = run.halted() => {
                 let _ = on_delta.send(ChatDelta::Done("stopped".into()));
                 return Err(Ended::Stopped);
             }
-            opened = client.stream(request) => opened,
+            attempted = opener.open(request) => attempted,
         };
-        match opened {
+        match attempted {
             Ok(stream) => return Ok(stream),
             Err(e) if e.is_transient() && attempt < STREAM_ATTEMPTS => {
                 let wait = dive_agent::retry_delay(attempt, e.retry_after());
@@ -1290,6 +1377,36 @@ async fn start_stream(
             }
         }
     }
+}
+
+/// What a call's result says when the host did not run it.
+const STOPPED_BEFORE_RUN: &str = "The user stopped the run before this ran.";
+
+/// What a call's result is when it was not run, by why. A stopped run wins
+/// over any answer to an approval.
+fn refusal(approval: Approval, cancelled: bool) -> Option<&'static str> {
+    if cancelled {
+        return Some(STOPPED_BEFORE_RUN);
+    }
+    match approval {
+        Approval::Allowed => None,
+        Approval::Denied => Some(
+            "The user did not allow this action. Do not retry it; explain what you wanted to do instead.",
+        ),
+        Approval::Unanswered => Some(
+            "Nobody answered the approval request within 2 minutes, so this action was skipped. Do not retry it; say what you wanted to do so the user can allow it next time.",
+        ),
+    }
+}
+
+/// Whether a finished call leaves the run holding `name`'s site data.
+fn leaves_taint(ran: bool, result: &dive_agent::ToolResult, name: &str) -> bool {
+    ran && !result.is_error && crate::agent_risk::taints(name)
+}
+
+/// Whether a finished call leaves the softer mark of having read a page.
+fn leaves_sight(ran: bool, result: &dive_agent::ToolResult, name: &str) -> bool {
+    ran && !result.is_error && crate::agent_risk::reads_page(name)
 }
 
 /// Execute one round of tool calls in order (gating actions on approval),
@@ -1332,35 +1449,27 @@ async fn run_calls(
         } else {
             Approval::Allowed
         };
-        let stopped = "The user stopped the run before this ran.";
         // Whether the browser produced this result, rather than the host
         // refusing to run the call. Only the first can carry page content.
         let mut ran = false;
-        let result = match approval {
-            _ if run.is_cancelled() => denied(stopped),
+        let result = if let Some(why) = refusal(approval, run.is_cancelled()) {
+            denied(why)
+        } else {
             // A tool can wait a long while -- for a page to load, for a
             // selector to appear -- and Stop has to end that wait rather than
             // queue behind it. Dropping the call abandons its reply; nothing
             // it holds outlives the await.
-            Approval::Allowed => tokio::select! {
-                () = run.halted() => denied(stopped),
+            tokio::select! {
+                () = run.halted() => denied(STOPPED_BEFORE_RUN),
                 result = crate::agent_tools::run(browser, tab_id, &run.scope, call) => {
                     ran = true;
                     result
                 }
-            },
-            Approval::Denied => denied(
-                "The user did not allow this action. Do not retry it; explain what you wanted to do instead.",
-            ),
-            Approval::Unanswered => denied(
-                "Nobody answered the approval request within 2 minutes, so this action was skipped. Do not retry it; say what you wanted to do so the user can allow it next time.",
-            ),
+            }
         };
         // A read of cookies, a response or the console leaves the run holding
         // that site's private data, whether or not it found any.
-        if ran
-            && !result.is_error
-            && crate::agent_risk::taints(&call.name)
+        if leaves_taint(ran, &result, &call.name)
             && let Some(site) = crate::agent_tools::call_tab(tab_id, &call.input)
                 .and_then(|tab| lock(&state.store).tab(tab).ok())
                 .and_then(|tab| crate::site::of(&tab.url))
@@ -1370,9 +1479,7 @@ async fn run_calls(
         // Reading a page of the person's own leaves a softer mark. Pages the
         // run opened itself, and everything in a clean session, are ones it
         // chose or that hold nothing of the person's.
-        if ran
-            && !result.is_error
-            && crate::agent_risk::reads_page(&call.name)
+        if leaves_sight(ran, &result, &call.name)
             && run.scope.context().is_none()
             && let Some(tab) = crate::agent_tools::call_tab(tab_id, &call.input)
             && !run.scope.opened().contains(&tab)
@@ -2201,5 +2308,541 @@ mod tests {
             FailureKind::of(&dive_agent::AgentError::Unanswered("timed out".into())),
             FailureKind::Other
         );
+    }
+
+    // ----- the round loop, with the provider and the tools scripted -----
+
+    use dive_agent::{AgentError, ToolResult, ToolUse};
+    use futures_util::stream::{self, BoxStream};
+    use std::collections::VecDeque;
+    use std::sync::atomic::AtomicUsize;
+
+    /// What one opened stream does.
+    enum Script {
+        /// Yield these deltas, then end.
+        Reply(Vec<Delta>),
+        /// Yield these deltas, then never yield again.
+        Hang(Vec<Delta>),
+        /// Fail to open.
+        Fail(AgentError),
+    }
+
+    struct ScriptedOpener {
+        scripts: Mutex<VecDeque<Script>>,
+        opened: AtomicUsize,
+    }
+
+    impl ScriptedOpener {
+        fn new(scripts: Vec<Script>) -> Self {
+            Self {
+                scripts: Mutex::new(scripts.into()),
+                opened: AtomicUsize::new(0),
+            }
+        }
+
+        fn opens(&self) -> usize {
+            self.opened.load(Ordering::SeqCst)
+        }
+    }
+
+    impl OpenStream for ScriptedOpener {
+        fn open<'a>(
+            &'a self,
+            _request: &'a dive_agent::Request,
+        ) -> futures_util::future::BoxFuture<'a, Result<BoxStream<'static, Delta>, AgentError>>
+        {
+            self.opened.fetch_add(1, Ordering::SeqCst);
+            let script = lock(&self.scripts)
+                .pop_front()
+                .expect("the loop opened more streams than the test scripted");
+            Box::pin(async move {
+                match script {
+                    Script::Reply(deltas) => Ok(stream::iter(deltas).boxed()),
+                    Script::Hang(deltas) => {
+                        Ok(stream::iter(deltas).chain(stream::pending()).boxed())
+                    }
+                    Script::Fail(error) => Err(error),
+                }
+            })
+        }
+    }
+
+    /// Announces a plain step and answers every call with "ok", recording
+    /// which calls it was asked to run.
+    #[derive(Default)]
+    struct StubTools {
+        rounds: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl RoundTools for StubTools {
+        fn announce(&self, run: &Run, call: &ToolUse) -> ToolStep {
+            ToolStep {
+                id: run.step_id(&call.id),
+                name: call.name.clone(),
+                input: call.input.to_string(),
+                action: false,
+                locator: None,
+                caution: None,
+                always: false,
+            }
+        }
+
+        fn run_calls<'a>(
+            &'a self,
+            _run: &'a Run,
+            _on_delta: &'a Channel<ChatDelta>,
+            calls: &'a [ToolUse],
+        ) -> futures_util::future::BoxFuture<'a, Vec<ToolResult>> {
+            lock(&self.rounds).push(calls.iter().map(|c| c.id.clone()).collect());
+            Box::pin(async move {
+                calls
+                    .iter()
+                    .map(|c| ToolResult {
+                        tool_use_id: c.id.clone(),
+                        content: json!("ok"),
+                        is_error: false,
+                    })
+                    .collect()
+            })
+        }
+    }
+
+    type Seen = Arc<Mutex<Vec<ChatDelta>>>;
+
+    /// A channel that keeps every delta sent into it, built the way the
+    /// agent probe builds one.
+    fn collecting() -> (Channel<ChatDelta>, Seen) {
+        let seen: Seen = Arc::default();
+        let sink = Arc::clone(&seen);
+        let channel = Channel::new(move |body: tauri::ipc::InvokeResponseBody| {
+            if let Ok(delta) = body.deserialize::<ChatDelta>() {
+                lock(&sink).push(delta);
+            }
+            Ok(())
+        });
+        (channel, seen)
+    }
+
+    fn call(id: &str, name: &str) -> ToolUse {
+        ToolUse {
+            id: id.into(),
+            name: name.into(),
+            input: json!({}),
+        }
+    }
+
+    /// One round as the wires emit it: text, calls, usage, the replayable
+    /// turn, then the stop reason.
+    fn reply(text: &str, calls: &[(&str, &str)], stop: &str) -> Vec<Delta> {
+        let mut out = Vec::new();
+        let mut blocks = Vec::new();
+        if !text.is_empty() {
+            out.push(Delta::Text(text.into()));
+            blocks.push(json!({"type": "text", "text": text}));
+        }
+        for (id, name) in calls {
+            out.push(Delta::ToolUse(call(id, name)));
+            blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": {}}));
+        }
+        out.push(Delta::Usage(Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Usage::default()
+        }));
+        out.push(Delta::Assistant(Turn::assistant_blocks(blocks)));
+        out.push(Delta::Done(stop.into()));
+        out
+    }
+
+    fn api(status: u16, retry_after: Option<Duration>) -> AgentError {
+        AgentError::Api {
+            status,
+            message: "scripted".into(),
+            retry_after,
+        }
+    }
+
+    fn fresh_request() -> Request {
+        Request::new("system", vec![Turn::text(Role::User, "go")])
+    }
+
+    /// Run the loop to its end with `max_steps`, returning what came out.
+    async fn run_rounds(
+        opener: &ScriptedOpener,
+        tools: &StubTools,
+        request: &mut Request,
+        max_steps: usize,
+    ) -> Vec<ChatDelta> {
+        let run = Run::new("t");
+        let (channel, seen) = collecting();
+        rounds(opener, request, &run, &channel, max_steps, tools)
+            .await
+            .unwrap();
+        lock(&seen).clone()
+    }
+
+    fn last_error(deltas: &[ChatDelta]) -> (&str, FailureKind) {
+        match deltas.last() {
+            Some(ChatDelta::Error { message, kind }) => (message, *kind),
+            other => panic!("the run did not end in an error: {other:?}"),
+        }
+    }
+
+    fn statuses(deltas: &[ChatDelta]) -> Vec<&str> {
+        deltas
+            .iter()
+            .filter_map(|d| match d {
+                ChatDelta::Status(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn not_run(deltas: &[ChatDelta]) -> Vec<(&str, &str)> {
+        deltas
+            .iter()
+            .filter_map(|d| match d {
+                ChatDelta::ToolDone {
+                    id,
+                    summary,
+                    error: true,
+                } => Some((id.as_str(), summary.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_channel_can_be_built_and_read_outside_an_app() {
+        let (channel, seen) = collecting();
+        channel.send(ChatDelta::Done("end_turn".into())).unwrap();
+        assert!(matches!(&lock(&seen)[..], [ChatDelta::Done(r)] if r == "end_turn"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reply_without_tool_calls_ends_the_run() {
+        let opener = ScriptedOpener::new(vec![Script::Reply(reply("hello", &[], "end_turn"))]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert!(
+            matches!(out.last(), Some(ChatDelta::Done(r)) if r == "end_turn"),
+            "{out:?}"
+        );
+        assert_eq!(opener.opens(), 1);
+        assert!(lock(&tools.rounds).is_empty());
+        assert_eq!(request.turns.len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tool_rounds_append_the_assistant_turn_and_results() {
+        let opener = ScriptedOpener::new(vec![
+            Script::Reply(reply(
+                "",
+                &[("a", "page_text"), ("b", "page_text")],
+                "tool_use",
+            )),
+            Script::Reply(reply("done", &[], "end_turn")),
+        ]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert!(
+            matches!(out.last(), Some(ChatDelta::Done(r)) if r == "end_turn"),
+            "{out:?}"
+        );
+        assert_eq!(opener.opens(), 2);
+        assert_eq!(
+            *lock(&tools.rounds),
+            vec![vec!["a".to_owned(), "b".to_owned()]]
+        );
+        assert_eq!(request.turns.len(), 3);
+        assert_eq!(request.turns[1].role, Role::Assistant);
+        assert_eq!(request.turns[2].role, Role::User);
+        let results = request.turns[2].content.as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r["type"] == "tool_result"));
+        // Each call was announced as a row before it ran.
+        let announced = out
+            .iter()
+            .filter(|d| matches!(d, ChatDelta::ToolCall(_)))
+            .count();
+        assert_eq!(announced, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_step_limit_counts_calls_not_rounds() {
+        let opener = ScriptedOpener::new(vec![
+            Script::Reply(reply(
+                "",
+                &[("a", "page_text"), ("b", "page_text")],
+                "tool_use",
+            )),
+            Script::Reply(reply(
+                "",
+                &[("c", "page_text"), ("d", "page_text")],
+                "tool_use",
+            )),
+        ]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 3).await;
+
+        // Two calls fit, the next two would make four.
+        assert_eq!(lock(&tools.rounds).len(), 1);
+        assert_eq!(opener.opens(), 2);
+        let (message, kind) = last_error(&out);
+        assert!(
+            message.starts_with("Stopped after 3 tool calls"),
+            "{message}"
+        );
+        assert_eq!(kind, FailureKind::Other);
+        assert_eq!(
+            not_run(&out),
+            vec![
+                ("t:c", "Not run: the step limit was reached."),
+                ("t:d", "Not run: the step limit was reached."),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_busy_provider_is_retried_then_succeeds() {
+        let opener = ScriptedOpener::new(vec![
+            Script::Fail(api(529, None)),
+            Script::Reply(reply("hi", &[], "end_turn")),
+        ]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(opener.opens(), 2);
+        let status = statuses(&out);
+        assert_eq!(status.len(), 1, "{out:?}");
+        assert!(status[0].contains("trying again in 1s"), "{}", status[0]);
+        assert!(
+            matches!(out.last(), Some(ChatDelta::Done(r)) if r == "end_turn"),
+            "{out:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retries_give_up_after_three_attempts() {
+        let opener = ScriptedOpener::new(vec![
+            Script::Fail(api(503, None)),
+            Script::Fail(api(503, None)),
+            Script::Fail(api(503, None)),
+        ]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(opener.opens(), 3);
+        assert_eq!(statuses(&out).len(), 2);
+        let (message, kind) = last_error(&out);
+        assert!(message.contains("503"), "{message}");
+        assert_eq!(kind, FailureKind::Other);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_bad_key_is_not_retried() {
+        let opener = ScriptedOpener::new(vec![Script::Fail(api(401, None))]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(opener.opens(), 1);
+        assert!(statuses(&out).is_empty());
+        assert_eq!(last_error(&out).1, FailureKind::Auth);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_config_error_is_not_retried() {
+        let opener = ScriptedOpener::new(vec![Script::Fail(AgentError::Config(
+            "invalid base URL".into(),
+        ))]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(opener.opens(), 1);
+        assert_eq!(last_error(&out).1, FailureKind::Model);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unanswered_request_is_not_sent_again() {
+        let opener = ScriptedOpener::new(vec![Script::Fail(AgentError::Unanswered(
+            "request timed out waiting for response headers".into(),
+        ))]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(opener.opens(), 1);
+        assert!(statuses(&out).is_empty());
+        assert_eq!(last_error(&out).1, FailureKind::Other);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_during_the_backoff_ends_at_once() {
+        let opener =
+            ScriptedOpener::new(vec![Script::Fail(api(429, Some(Duration::from_secs(20))))]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let run = Run::new("t");
+        let (channel, seen) = collecting();
+        let started = tokio::time::Instant::now();
+        let (result, ()) = tokio::join!(
+            rounds(&opener, &mut request, &run, &channel, 25, &tools),
+            async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                run.cancel();
+            }
+        );
+        result.unwrap();
+
+        let out = lock(&seen).clone();
+        assert!(
+            matches!(out.last(), Some(ChatDelta::Done(r)) if r == "stopped"),
+            "{out:?}"
+        );
+        assert!(statuses(&out)[0].contains("trying again in 20s"));
+        assert_eq!(opener.opens(), 1);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_while_the_reply_streams_abandons_the_calls() {
+        let opener = ScriptedOpener::new(vec![Script::Hang(vec![Delta::ToolUse(call(
+            "a",
+            "page_text",
+        ))])]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let run = Run::new("t");
+        let (channel, seen) = collecting();
+        let (result, ()) = tokio::join!(
+            rounds(&opener, &mut request, &run, &channel, 25, &tools),
+            async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                run.cancel();
+            }
+        );
+        result.unwrap();
+
+        let out = lock(&seen).clone();
+        assert!(
+            matches!(out.last(), Some(ChatDelta::Done(r)) if r == "stopped"),
+            "{out:?}"
+        );
+        assert_eq!(
+            not_run(&out),
+            vec![("t:a", "Not run: the run was stopped.")]
+        );
+        assert!(lock(&tools.rounds).is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_stream_fails_after_the_idle_timeout() {
+        let opener = ScriptedOpener::new(vec![Script::Hang(vec![])]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        let (message, kind) = last_error(&out);
+        assert_eq!(
+            message,
+            "The provider stopped sending data for two minutes."
+        );
+        assert_eq!(kind, FailureKind::Other);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_that_ends_without_a_stop_reason_is_reported() {
+        let opener = ScriptedOpener::new(vec![Script::Reply(vec![Delta::Text("partial".into())])]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(
+            last_error(&out).0,
+            "The provider stream ended before it completed the reply."
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_error_abandons_announced_calls() {
+        let opener = ScriptedOpener::new(vec![Script::Reply(vec![
+            Delta::ToolUse(call("a", "page_text")),
+            Delta::Error("boom".into()),
+        ])]);
+        let tools = StubTools::default();
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+
+        assert_eq!(last_error(&out).0, "boom");
+        assert_eq!(not_run(&out), vec![("t:a", "Not run: the reply failed.")]);
+        assert!(lock(&tools.rounds).is_empty());
+    }
+
+    // ----- what happens to a call, decided apart from the browser -----
+
+    #[test]
+    fn a_denied_call_is_refused_with_do_not_retry() {
+        assert!(
+            refusal(Approval::Denied, false)
+                .unwrap()
+                .contains("Do not retry it")
+        );
+    }
+
+    #[test]
+    fn an_unanswered_call_names_the_two_minute_wait() {
+        assert!(
+            refusal(Approval::Unanswered, false)
+                .unwrap()
+                .contains("2 minutes")
+        );
+    }
+
+    #[test]
+    fn stop_wins_over_an_approval() {
+        for approval in [Approval::Allowed, Approval::Denied, Approval::Unanswered] {
+            assert_eq!(refusal(approval, true), Some(STOPPED_BEFORE_RUN));
+        }
+        assert_eq!(
+            STOPPED_BEFORE_RUN,
+            "The user stopped the run before this ran."
+        );
+    }
+
+    #[test]
+    fn an_allowed_call_is_not_refused() {
+        assert_eq!(refusal(Approval::Allowed, false), None);
+    }
+
+    #[test]
+    fn only_a_successful_run_of_a_tainting_read_taints() {
+        let result = |is_error| ToolResult {
+            tool_use_id: "a".into(),
+            content: json!("x"),
+            is_error,
+        };
+        assert!(leaves_taint(true, &result(false), "page_storage"));
+        // A call the host refused never ran, so it read nothing.
+        assert!(!leaves_taint(false, &result(false), "page_storage"));
+        assert!(!leaves_taint(true, &result(true), "page_storage"));
+        assert!(!leaves_taint(true, &result(false), "page_click"));
+        // The softer mark follows the same rule for page reads.
+        assert!(leaves_sight(true, &result(false), "page_text"));
+        assert!(!leaves_sight(false, &result(false), "page_text"));
+        assert!(!leaves_sight(true, &result(true), "page_text"));
+        assert!(!leaves_sight(true, &result(false), "page_click"));
     }
 }

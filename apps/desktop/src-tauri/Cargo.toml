@@ -118,5 +118,8 @@ cef = ["tauri/cef", "dep:cef", "dep:tauri-runtime-cef"]
 # System webview fallback for UI-only development without CEF.
 wry = ["tauri/wry"]
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

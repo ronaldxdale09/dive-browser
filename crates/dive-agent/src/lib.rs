@@ -1086,21 +1086,93 @@ mod tests {
         assert!(matches!(err, AgentError::MissingKey));
     }
 
-    #[tokio::test]
-    async fn openrouter_requests_do_not_disclose_the_app_or_page_origin() {
-        use std::io::{Read, Write};
+    /// Read one HTTP request off `stream`: the headers, then as many body
+    /// bytes as `Content-Length` promises (a single `read` can miss the body
+    /// of a `POST`).
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+
+        let mut raw = Vec::new();
+        let mut buffer = [0_u8; 8 * 1024];
+        loop {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buffer[..read]);
+            let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
+            let head = String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase();
+            let length = head
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if raw.len() >= end + 4 + length {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&raw).to_ascii_lowercase()
+    }
+
+    /// Serve one HTTP exchange on loopback: write `chunks` one by one (with a
+    /// flush and a short sleep between them so they arrive as separate TCP
+    /// reads), then close. Returns the base URL and a handle yielding the
+    /// raw request.
+    fn serve_once(chunks: Vec<Vec<u8>>) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::Write;
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0_u8; 8 * 1024];
-            let read = stream.read(&mut buffer).unwrap();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
-                .unwrap();
-            String::from_utf8_lossy(&buffer[..read]).to_ascii_lowercase()
+            let request = read_request(&mut stream);
+            stream.set_nodelay(true).unwrap();
+            for chunk in chunks {
+                stream.write_all(&chunk).unwrap();
+                stream.flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            request
         });
+        (base_url, server)
+    }
+
+    /// One complete response with a body of known length.
+    fn response(status_line: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 {status_line}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// A streamed 200 whose body is cut at `cuts` (byte offsets into `body`),
+    /// each piece written as its own TCP segment.
+    fn event_stream(body: &[u8], cuts: &[usize]) -> Vec<Vec<u8>> {
+        let mut chunks = vec![
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+        ];
+        let mut from = 0;
+        for &cut in cuts {
+            chunks.push(body[from..cut].to_vec());
+            from = cut;
+        }
+        chunks.push(body[from..].to_vec());
+        chunks
+    }
+
+    fn hi() -> Request {
+        Request::new("s", vec![Turn::text(Role::User, "hi")])
+    }
+
+    #[tokio::test]
+    async fn openrouter_requests_do_not_disclose_the_app_or_page_origin() {
+        let (base_url, server) = serve_once(vec![response("200 OK", "", b"{}")]);
 
         Client::new(Provider::Openrouter, "secret", Some(&base_url))
             .verify()
@@ -1121,5 +1193,265 @@ mod tests {
                 "OpenRouter request disclosed {identifying_header}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_rate_limit_carries_the_providers_retry_after() {
+        let (base_url, server) = serve_once(vec![response(
+            "429 Too Many Requests",
+            "Retry-After: 7\r\n",
+            br#"{"error":{"message":"slow down"}}"#,
+        )]);
+        let err = Client::new(Provider::Anthropic, "k", Some(&base_url))
+            .stream(&hi())
+            .await
+            .err()
+            .unwrap();
+        server.join().unwrap();
+
+        assert!(
+            matches!(
+                &err,
+                AgentError::Api { status: 429, message, retry_after: Some(wait) }
+                    if message == "slow down" && *wait == Duration::from_secs(7)
+            ),
+            "{err:?}"
+        );
+        assert!(err.is_transient());
+        assert_eq!(retry_delay(1, err.retry_after()), Duration::from_secs(7));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_retry_after_means_no_advice() {
+        let (base_url, server) = serve_once(vec![response(
+            "429 Too Many Requests",
+            "Retry-After: Wed, 21 Oct 2015 07:28:00 GMT\r\n",
+            br#"{"error":{"message":"slow down"}}"#,
+        )]);
+        let err = Client::new(Provider::Anthropic, "k", Some(&base_url))
+            .stream(&hi())
+            .await
+            .err()
+            .unwrap();
+        server.join().unwrap();
+
+        assert!(
+            matches!(
+                &err,
+                AgentError::Api {
+                    status: 429,
+                    retry_after: None,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(err.retry_after(), None);
+    }
+
+    #[tokio::test]
+    async fn a_huge_error_body_is_cut_and_says_so() {
+        let body = vec![b'x'; 200 * 1024];
+        let (base_url, server) = serve_once(vec![response("500 Internal Server Error", "", &body)]);
+        let err = Client::new(Provider::Anthropic, "k", Some(&base_url))
+            .stream(&hi())
+            .await
+            .err()
+            .unwrap();
+        // The server may still be writing when the client stops reading.
+        let _ = server.join();
+
+        let AgentError::Api {
+            status: 500,
+            message,
+            ..
+        } = &err
+        else {
+            panic!("{err:?}");
+        };
+        // `tidy_error` keeps the first 400 characters of a plain-text body, so
+        // the truncation suffix of the raw read does not reach the message;
+        // what reaches the chrome is bounded either way.
+        assert!(message.len() <= MAX_ERROR_BODY + "\n[response truncated]".len());
+        assert_eq!(message.len(), 400, "{}", message.len());
+        assert!(message.bytes().all(|b| b == b'x'));
+    }
+
+    #[tokio::test]
+    async fn the_error_body_reader_cuts_at_the_limit_and_says_so() {
+        let body = vec![b'x'; 200 * 1024];
+        let (base_url, server) = serve_once(vec![response("500 Internal Server Error", "", &body)]);
+        let response = reqwest::Client::new().get(&base_url).send().await.unwrap();
+        let message = read_error_body(response).await;
+        let _ = server.join();
+
+        assert!(
+            message.ends_with("\n[response truncated]"),
+            "{}",
+            message.len()
+        );
+        assert_eq!(
+            message.len(),
+            MAX_ERROR_BODY + "\n[response truncated]".len()
+        );
+    }
+
+    const ANTHROPIC_REPLY: &str = "event: message_start\n\
+data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":120,\"cache_read_input_tokens\":100}}}\n\n\
+event: content_block_start\n\
+data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"caf\u{e9} \"}}\n\n\
+event: content_block_delta\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"au lait\"}}\n\n\
+event: content_block_stop\n\
+data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\n\
+data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":9}}\n\n\
+event: message_stop\n\
+data: {\"type\":\"message_stop\"}\n\n";
+
+    #[tokio::test]
+    async fn an_anthropic_stream_split_across_chunks_is_reassembled() {
+        let body = ANTHROPIC_REPLY.as_bytes();
+        // One cut inside an event name, one between the two bytes of the
+        // accented character, one inside a data line further on.
+        let inside_event = body
+            .windows(b"content_block_start".len())
+            .position(|w| w == b"content_block_start")
+            .unwrap()
+            + 8;
+        let inside_char = body.iter().position(|&b| b == 0xC3).unwrap() + 1;
+        let inside_data = body
+            .windows(b"message_delta".len())
+            .rposition(|w| w == b"message_delta")
+            .unwrap()
+            + 5;
+        let (base_url, server) = serve_once(event_stream(
+            body,
+            &[inside_event, inside_char, inside_data],
+        ));
+
+        let out: Vec<Delta> = Client::new(Provider::Anthropic, "k", Some(&base_url))
+            .stream(&hi())
+            .await
+            .unwrap()
+            .collect()
+            .await;
+        let request = server.join().unwrap();
+
+        assert!(request.starts_with("post /v1/messages "), "{request}");
+        let text: String = out
+            .iter()
+            .filter_map(|d| match d {
+                Delta::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "caf\u{e9} au lait", "{out:?}");
+        let usage: Vec<&Usage> = out
+            .iter()
+            .filter_map(|d| match d {
+                Delta::Usage(u) => Some(u),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(usage.len(), 1, "{out:?}");
+        assert_eq!(
+            (
+                usage[0].input_tokens,
+                usage[0].cache_read_tokens,
+                usage[0].output_tokens
+            ),
+            (120, 100, 9)
+        );
+        assert_eq!(
+            out.iter()
+                .filter(|d| matches!(d, Delta::Assistant(_)))
+                .count(),
+            1,
+            "{out:?}"
+        );
+        assert_eq!(out.last(), Some(&Delta::Done("end_turn".into())));
+    }
+
+    #[tokio::test]
+    async fn an_openai_stream_split_across_chunks_is_reassembled() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"caf\u{e9}\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"page_click\",\"arguments\":\"\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"locator\\\":\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"text=Go\\\"\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n\
+data: [DONE]\n\n"
+            .as_bytes();
+        let inside_char = body.iter().position(|&b| b == 0xC3).unwrap() + 1;
+        let inside_line = body
+            .windows(b"\"locator\\\"".len())
+            .position(|w| w == b"\"locator\\\"")
+            .unwrap()
+            + 4;
+        let near_end = body.len() - 9;
+        let (base_url, server) =
+            serve_once(event_stream(body, &[inside_char, inside_line, near_end]));
+
+        let out: Vec<Delta> = Client::new(Provider::Custom, "", Some(&base_url))
+            .stream(&hi())
+            .await
+            .unwrap()
+            .collect()
+            .await;
+        let request = server.join().unwrap();
+
+        assert!(request.starts_with("post /chat/completions "), "{request}");
+        assert_eq!(out[0], Delta::Text("caf\u{e9}".into()), "{out:?}");
+        let calls: Vec<&ToolUse> = out
+            .iter()
+            .filter_map(|d| match d {
+                Delta::ToolUse(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls.len(), 1, "{out:?}");
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "page_click");
+        assert_eq!(calls[0].input, json!({"locator": "text=Go"}));
+        assert_eq!(out.last(), Some(&Delta::Done("tool_use".into())));
+    }
+
+    #[tokio::test]
+    async fn a_header_timeout_is_not_retried() {
+        use std::io::Read;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (read_tx, read_rx) = std::sync::mpsc::channel();
+        // Accept, read the request, then say nothing until the client gives
+        // up and closes; then see whether a second connection came (a retry).
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = read_request(&mut stream);
+            read_tx.send(()).unwrap();
+            let mut rest = [0_u8; 64];
+            while stream.read(&mut rest).unwrap_or(0) > 0 {}
+            listener.set_nonblocking(true).unwrap();
+            listener.accept().is_ok()
+        });
+
+        let client = Client::new(Provider::Anthropic, "k", Some(&base_url));
+        let call = tokio::spawn(async move { client.stream(&hi()).await.err() });
+        // Pause the clock only once the request is out: while the socket is
+        // still connecting, an auto-advancing clock would fire the connect
+        // timeout instead of the header one.
+        tokio::task::spawn_blocking(move || read_rx.recv().unwrap())
+            .await
+            .unwrap();
+        tokio::time::pause();
+        tokio::time::advance(RESPONSE_HEADER_TIMEOUT + Duration::from_secs(1)).await;
+        let err = call.await.unwrap().unwrap();
+        let retried = server.join().unwrap();
+
+        assert!(matches!(err, AgentError::Unanswered(_)), "{err:?}");
+        assert!(!err.is_transient());
+        assert!(!retried, "the request was sent more than once");
     }
 }
