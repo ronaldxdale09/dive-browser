@@ -445,6 +445,15 @@ impl Client {
                     .into(),
             ));
         }
+        // A key sent over plain http can be read by anyone on the path. Local
+        // servers (Ollama, LM Studio, a box on the LAN) are fine; anything
+        // else has to be https once there is a key to send.
+        if url.scheme() == "http" && !self.api_key.trim().is_empty() && !is_local_host(&url) {
+            return Err(AgentError::Http(
+                "an API key is only sent over https, or over http to this machine or the local network"
+                    .into(),
+            ));
+        }
         self.http()?;
         Ok(())
     }
@@ -781,6 +790,42 @@ async fn read_json_body(response: reqwest::Response) -> Result<Value, AgentError
     serde_json::from_slice(&body).map_err(|error| AgentError::Http(error.to_string()))
 }
 
+/// Whether `url` names this machine or the local network, where plain http
+/// does not expose a key to the wider internet.
+fn is_local_host(url: &reqwest::Url) -> bool {
+    use std::net::IpAddr;
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    match bare.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => is_local_v4(ip),
+        Ok(IpAddr::V6(ip)) => is_local_v6(ip),
+        Err(_) => {
+            let name = bare.trim_end_matches('.').to_ascii_lowercase();
+            // `localhost`, `*.localhost` and mDNS `*.local` names: the last label.
+            matches!(name.rsplit('.').next(), Some("localhost" | "local"))
+        }
+    }
+}
+
+fn is_local_v4(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        // Carrier-grade NAT, 100.64.0.0/10 (used by Tailscale).
+        || (a == 100 && (64..=127).contains(&b))
+}
+
+fn is_local_v6(ip: std::net::Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    ip.is_loopback()
+        // Unique-local fc00::/7 and link-local fe80::/10.
+        || first & 0xfe00 == 0xfc00
+        || first & 0xffc0 == 0xfe80
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -982,6 +1027,31 @@ mod tests {
                 "accepted {invalid}"
             );
         }
+    }
+
+    #[test]
+    fn a_key_never_goes_over_plain_http_to_a_remote_host() {
+        let ready = |key: &str, url: &str| {
+            Client::new(Provider::Custom, key, Some(url))
+                .check_ready()
+                .is_ok()
+        };
+        assert!(!ready("k", "http://api.example.com/v1"));
+        assert!(ready("k", "https://api.example.com/v1"));
+        for local in [
+            "http://127.0.0.1:8080/v1",
+            "http://192.168.1.20:11434/v1",
+            "http://box.local:1234/v1",
+            "http://[::1]:8080/v1",
+        ] {
+            assert!(ready("k", local), "refused {local}");
+        }
+        assert!(ready("", "http://api.example.com/v1"));
+        assert!(
+            Client::new(Provider::Ollama, "", None)
+                .check_ready()
+                .is_ok()
+        );
     }
 
     #[tokio::test]
