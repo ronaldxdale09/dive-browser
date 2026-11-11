@@ -18,7 +18,7 @@ const fixture: ExtensionInfo = {
   permissions: ["storage", "https://example.com/*"],
   warnings: ["A compatibility warning."],
 };
-const listed = (items: ExtensionInfo[] = [fixture], restart_required = false): ExtensionList => ({ items, restart_required });
+const listed = (items: ExtensionInfo[] = [fixture], restart_required = false, notice: string | null = null): ExtensionList => ({ items, restart_required, notice });
 
 beforeEach(() => {
   useBrowser.setState({ ...initial, open: { ...initial.open, extensions: true } }, true);
@@ -40,6 +40,12 @@ afterEach(() => {
 });
 
 describe("Extensions", () => {
+  it("shows a notice about the extension list", async () => {
+    vi.spyOn(ipc, "extensionsList").mockResolvedValue(listed([fixture], false, "Dive could not read its list of extensions and set it aside as /x/extensions.json.unreadable. Load your extensions again."));
+    render(<Extensions />);
+    expect(await screen.findByText(/set it aside as/)).toBeTruthy();
+  });
+
   it("loads extension details, permissions, and compatibility warnings", async () => {
     render(<Extensions />);
     expect(screen.getByRole("dialog", { name: "Extensions" })).toBeTruthy();

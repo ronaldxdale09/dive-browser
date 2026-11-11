@@ -1956,6 +1956,11 @@ export type ExtensionList = {
 	items: ExtensionInfo[],
 	/**  True when enabled paths differ from what this process started with. */
 	restart_required: boolean,
+	/**
+	 *  Something the person should know about the list itself, such as an
+	 *  unreadable extension list that was set aside.
+	 */
+	notice: string | null,
 };
 
 /**  What the chrome asks the person. */

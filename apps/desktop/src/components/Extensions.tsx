@@ -47,6 +47,7 @@ export function Extensions() {
           <button ref={loadButton} type="button" disabled={busy} onClick={() => void load()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"><Icon icon={FolderOpen} size={13} />Load unpacked</button>
           <IconButton icon={X} label="Close extensions" onClick={close} />
         </header>
+        {data?.notice && <div role="status" className="flex items-center gap-2 border-b border-highlight/25 bg-highlight/10 px-4 py-2 text-xs text-ink"><Icon icon={RotateCw} size={13} className="text-highlight" /><span className="flex-1">{data.notice}</span></div>}
         {data?.restart_required && <div role="status" className="flex items-center gap-2 border-b border-highlight/25 bg-highlight/10 px-4 py-2 text-xs text-ink"><Icon icon={RotateCw} size={13} className="text-highlight" /><span className="flex-1">Restart Dive to apply extension changes.</span><button type="button" onClick={() => void ipc.appRestart()} className="rounded-md border border-line-2 px-2.5 py-1 text-11 hover:bg-surface-3">Restart now</button></div>}
         {error && <div role="alert" className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-danger"><Icon icon={AlertTriangle} size={14} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
         <main className="min-h-0 flex-1 overflow-y-auto p-4">

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,6 +16,8 @@ use crate::error::{AppError, AppResult};
 const REGISTRY_VERSION: u8 = 1;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 static STARTED_PATHS: OnceLock<Vec<String>> = OnceLock::new();
+/// Where an unreadable registry was moved to, so the Extensions page can say so.
+static REGISTRY_SET_ASIDE: Mutex<Option<String>> = Mutex::new(None);
 
 /// One locally installed unpacked extension.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -45,6 +47,9 @@ pub struct ExtensionList {
     pub items: Vec<ExtensionInfo>,
     /// True when enabled paths differ from what this process started with.
     pub restart_required: bool,
+    /// Something the person should know about the list itself, such as an
+    /// unreadable extension list that was set aside.
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -61,7 +66,7 @@ struct Registry {
 
 /// The warning shown on an extension whose manifest is not the one that was
 /// loaded.
-const MANIFEST_CHANGED: &str = "Its manifest.json has changed since you loaded it, and may ask for permissions you have not seen. Check the folder, then load it again to accept the change.";
+const MANIFEST_CHANGED: &str = "Its manifest.json has changed since you loaded it, and may ask for permissions you have not seen, so Dive is not loading it. Check the folder, then load it again to accept the change.";
 
 /// SHA-256 of the manifest in `directory`, as hex.
 fn manifest_digest(directory: &Path) -> Option<String> {
@@ -82,23 +87,61 @@ fn registry_path() -> PathBuf {
     crate::state::data_root().join("extensions.json")
 }
 
-fn read_registry(path: &Path) -> AppResult<Registry> {
-    if !path.exists() {
-        return Ok(Registry {
-            version: REGISTRY_VERSION,
-            ..Registry::default()
-        });
+/// Why a registry could not be used. Only a file that does not parse is moved
+/// aside; one from a newer Dive is left where it is.
+enum RegistryError {
+    Unparseable(String),
+    Other(AppError),
+}
+
+fn empty_registry() -> Registry {
+    Registry {
+        version: REGISTRY_VERSION,
+        ..Registry::default()
     }
-    let bytes = fs::read(path).map_err(AppError::new)?;
+}
+
+fn read_registry_checked(path: &Path) -> Result<Registry, RegistryError> {
+    if !path.exists() {
+        return Ok(empty_registry());
+    }
+    let bytes = fs::read(path).map_err(|e| RegistryError::Other(AppError::new(e)))?;
     let registry: Registry = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::new(format!("invalid extension registry: {e}")))?;
+        .map_err(|e| RegistryError::Unparseable(format!("invalid extension registry: {e}")))?;
     if registry.version != REGISTRY_VERSION {
-        return Err(AppError::new(format!(
+        return Err(RegistryError::Other(AppError::new(format!(
             "unsupported extension registry version {}",
             registry.version
-        )));
+        ))));
     }
     Ok(registry)
+}
+
+#[cfg(test)]
+fn read_registry(path: &Path) -> AppResult<Registry> {
+    read_registry_checked(path).map_err(|e| match e {
+        RegistryError::Unparseable(message) => AppError::new(message),
+        RegistryError::Other(error) => error,
+    })
+}
+
+/// Like `read_registry`, but a file that does not parse is moved aside as
+/// `extensions.json.unreadable` and an empty registry is used, so the person
+/// is not stuck with an Extensions page that fails on every edit.
+fn read_registry_or_recover(path: &Path) -> AppResult<Registry> {
+    match read_registry_checked(path) {
+        Ok(registry) => Ok(registry),
+        Err(RegistryError::Other(error)) => Err(error),
+        Err(RegistryError::Unparseable(reason)) => {
+            let aside = path.with_extension("json.unreadable");
+            fs::rename(path, &aside).map_err(AppError::new)?;
+            tracing::warn!(%reason, moved_to = %aside.display(), "extension registry could not be read and was set aside");
+            if let Ok(mut slot) = REGISTRY_SET_ASIDE.lock() {
+                *slot = Some(aside.to_string_lossy().into_owned());
+            }
+            Ok(empty_registry())
+        }
+    }
 }
 
 fn write_registry(path: &Path, registry: &Registry) -> AppResult<()> {
@@ -308,11 +351,16 @@ fn validate(directory: &Path) -> AppResult<ExtensionInfo> {
     })
 }
 
-fn enabled_paths_from(registry: &Registry) -> Vec<String> {
-    let mut paths: Vec<_> = registry
+/// What Chromium is given at startup: enabled extensions that still
+/// validate and whose manifest is the one the person loaded. A changed
+/// manifest waits until it is loaded again (`extension_import`).
+fn loadable_paths(registry: &Registry) -> Vec<String> {
+    let mut paths: Vec<String> = registry
         .items
         .iter()
         .filter(|item| item.enabled)
+        .filter(|item| !manifest_changed(registry, item))
+        .filter(|item| validate(Path::new(&item.path)).is_ok())
         .map(|item| item.path.clone())
         .collect();
     paths.sort();
@@ -322,18 +370,19 @@ fn enabled_paths_from(registry: &Registry) -> Vec<String> {
 
 /// Enabled, currently valid extension paths used to construct Chromium startup arguments.
 pub fn startup_paths() -> Vec<String> {
-    let Ok(registry) = read_registry(&registry_path()) else {
+    startup_paths_at(&registry_path())
+}
+
+fn startup_paths_at(path: &Path) -> Vec<String> {
+    let Ok(registry) = read_registry_or_recover(path) else {
         return Vec::new();
     };
     for item in registry.items.iter().filter(|item| item.enabled) {
         if manifest_changed(&registry, item) {
-            tracing::warn!(extension = %item.name, "extension manifest changed since it was loaded");
+            tracing::warn!(extension = %item.name, "extension manifest changed since it was loaded, so it is not loaded");
         }
     }
-    enabled_paths_from(&registry)
-        .into_iter()
-        .filter(|path| validate(Path::new(path)).is_ok())
-        .collect()
+    loadable_paths(&registry)
 }
 
 /// Record the exact extensions passed to this process.
@@ -342,7 +391,13 @@ pub fn mark_started(paths: &[String]) {
 }
 
 fn list_at(path: &Path) -> AppResult<ExtensionList> {
-    let mut registry = read_registry(path)?;
+    list_with(path, STARTED_PATHS.get().map(Vec::as_slice))
+}
+
+fn list_with(path: &Path, started: Option<&[String]>) -> AppResult<ExtensionList> {
+    let mut registry = read_registry_or_recover(path)?;
+    // Worked out before the warnings are added: they do not change what loads.
+    let enabled = loadable_paths(&registry);
     let changed: Vec<String> = registry
         .items
         .iter()
@@ -354,14 +409,20 @@ fn list_at(path: &Path) -> AppResult<ExtensionList> {
             item.warnings.push(MANIFEST_CHANGED.to_owned());
         }
     }
-    let enabled = enabled_paths_from(&registry);
-    let started = STARTED_PATHS
-        .get()
-        .cloned()
-        .unwrap_or_else(|| enabled.clone());
+    let restart_required = started.is_some_and(|started| enabled != started);
+    let notice = REGISTRY_SET_ASIDE
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .map(|aside| {
+            format!(
+                "Dive could not read its list of extensions and set it aside as {aside}. Load your extensions again."
+            )
+        });
     Ok(ExtensionList {
         items: registry.items,
-        restart_required: enabled != started,
+        restart_required,
+        notice,
     })
 }
 
@@ -386,10 +447,14 @@ pub async fn extension_pick() -> Option<String> {
 /// Validate and register an unpacked extension directory.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::needless_pass_by_value)] // Owned command payload is the Tauri IPC boundary.
 pub fn extension_import(path: String) -> AppResult<ExtensionList> {
-    let mut registry = read_registry(&registry_path())?;
-    let path = PathBuf::from(path);
-    let mut item = validate(&path)?;
+    import_at(&registry_path(), Path::new(&path))
+}
+
+fn import_at(registry_file: &Path, path: &Path) -> AppResult<ExtensionList> {
+    let mut registry = read_registry_or_recover(registry_file)?;
+    let mut item = validate(path)?;
     if let Some(existing) = registry
         .items
         .iter()
@@ -404,8 +469,12 @@ pub fn extension_import(path: String) -> AppResult<ExtensionList> {
     registry.items.retain(|existing| existing.id != item.id);
     registry.items.push(item);
     registry.items.sort_by_key(|item| item.name.to_lowercase());
-    write_registry(&registry_path(), &registry)?;
-    list_at(&registry_path())
+    write_registry(registry_file, &registry)?;
+    // Loading an extension again is what the set-aside notice asks for.
+    if let Ok(mut slot) = REGISTRY_SET_ASIDE.lock() {
+        *slot = None;
+    }
+    list_at(registry_file)
 }
 
 /// Enable or disable an installed extension for the next launch.
@@ -413,7 +482,7 @@ pub fn extension_import(path: String) -> AppResult<ExtensionList> {
 #[specta::specta]
 #[allow(clippy::needless_pass_by_value)] // Owned command payload is the Tauri IPC boundary.
 pub fn extension_set_enabled(id: String, enabled: bool) -> AppResult<ExtensionList> {
-    let mut registry = read_registry(&registry_path())?;
+    let mut registry = read_registry_or_recover(&registry_path())?;
     let item = registry
         .items
         .iter_mut()
@@ -429,7 +498,7 @@ pub fn extension_set_enabled(id: String, enabled: bool) -> AppResult<ExtensionLi
 #[specta::specta]
 #[allow(clippy::needless_pass_by_value)] // Owned command payload is the Tauri IPC boundary.
 pub fn extension_remove(id: String) -> AppResult<ExtensionList> {
-    let mut registry = read_registry(&registry_path())?;
+    let mut registry = read_registry_or_recover(&registry_path())?;
     let before = registry.items.len();
     registry.items.retain(|item| item.id != id);
     if registry.items.len() == before {
@@ -604,8 +673,138 @@ mod tests {
         };
         write_registry(&path, &registry).unwrap();
         assert_eq!(read_registry(&path).unwrap().items, registry.items);
-        assert_eq!(enabled_paths_from(&registry), vec!["/a", "/z"]);
         assert!(!root.join("extensions.json.tmp").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `import_at` clears the process-wide set-aside notice, so the tests that
+    /// import or assert on it take this lock.
+    static NOTICE_LOCK: Mutex<()> = Mutex::new(());
+
+    const PLAIN: &str = r#"{"manifest_version":3,"name":"Fixture","version":"1"}"#;
+    const WIDE: &str = r#"{"manifest_version":3,"name":"Fixture","version":"1","host_permissions":["<all_urls>"]}"#;
+
+    fn registry_with(root: &Path, recorded: bool) -> Registry {
+        let item = validate(root).unwrap();
+        let mut registry = Registry {
+            version: REGISTRY_VERSION,
+            items: vec![item.clone()],
+            manifests: std::collections::BTreeMap::new(),
+        };
+        if recorded {
+            registry
+                .manifests
+                .insert(item.id, manifest_digest(root).unwrap());
+        }
+        registry
+    }
+
+    #[test]
+    fn a_changed_manifest_is_left_out_of_startup_until_loaded_again() {
+        let _guard = NOTICE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let root = fixture(PLAIN);
+        let dir = temp_dir("startup");
+        let path = dir.join("extensions.json");
+        let registry = registry_with(&root, true);
+        let item_path = registry.items[0].path.clone();
+        write_registry(&path, &registry).unwrap();
+        assert_eq!(startup_paths_at(&path), vec![item_path.clone()]);
+
+        fs::write(root.join("manifest.json"), WIDE).unwrap();
+        assert!(startup_paths_at(&path).is_empty());
+
+        import_at(&path, &root).unwrap();
+        assert_eq!(startup_paths_at(&path), vec![item_path]);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn restart_required_ignores_an_enabled_extension_whose_folder_is_gone() {
+        let dir = temp_dir("restart");
+        let path = dir.join("extensions.json");
+        let mut registry = registry_with(&fixture(PLAIN), true);
+        registry.items[0].path = dir.join("gone").to_string_lossy().into_owned();
+        write_registry(&path, &registry).unwrap();
+        assert!(!list_with(&path, Some(&[])).unwrap().restart_required);
+
+        let root = fixture(PLAIN);
+        write_registry(&path, &registry_with(&root, true)).unwrap();
+        assert!(list_with(&path, Some(&[])).unwrap().restart_required);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_changed_manifest_does_not_ask_for_a_restart_until_it_is_accepted() {
+        let root = fixture(PLAIN);
+        let dir = temp_dir("accept");
+        let path = dir.join("extensions.json");
+        let registry = registry_with(&root, true);
+        let started = vec![registry.items[0].path.clone()];
+        write_registry(&path, &registry).unwrap();
+        assert!(!list_with(&path, Some(&started)).unwrap().restart_required);
+
+        fs::write(root.join("manifest.json"), WIDE).unwrap();
+        // True: it was started, and the next launch will drop it until the
+        // person loads it again.
+        assert!(list_with(&path, Some(&started)).unwrap().restart_required);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_registry_is_set_aside_and_an_empty_one_used() {
+        let _guard = NOTICE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = temp_dir("unreadable");
+        let path = dir.join("extensions.json");
+        fs::write(&path, "{not json").unwrap();
+        assert!(startup_paths_at(&path).is_empty());
+        let aside = path.with_extension("json.unreadable");
+        assert!(aside.exists());
+        assert!(!path.exists());
+        assert!(REGISTRY_SET_ASIDE.lock().unwrap().is_some());
+        let listed = list_with(&path, None).unwrap();
+        assert!(listed.notice.is_some_and(|n| n.contains("set it aside")));
+        assert!(listed.items.is_empty());
+
+        // Loading an extension again is what the notice asks for, and clears it.
+        let root = fixture(PLAIN);
+        let after = import_at(&path, &root).unwrap();
+        assert!(after.notice.is_none());
+        assert_eq!(after.items.len(), 1);
+        fs::remove_dir_all(root).unwrap();
+        *REGISTRY_SET_ASIDE.lock().unwrap() = None;
+
+        // A registry from a newer Dive is left alone.
+        fs::write(&path, r#"{"version":99,"items":[]}"#).unwrap();
+        assert!(list_with(&path, None).is_err());
+        assert!(path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_resource_symlinked_outside_the_extension_is_refused() {
+        use std::os::unix::fs::symlink;
+        let manifest = r#"{"manifest_version":3,"name":"Link","version":"1","background":{"service_worker":"worker.js"}}"#;
+        let outside = temp_dir("outside");
+        fs::write(outside.join("real.js"), "//").unwrap();
+        let root = fixture(manifest);
+        symlink(outside.join("real.js"), root.join("worker.js")).unwrap();
+        let error = validate(&root).expect_err("escaping symlink").to_string();
+        assert!(error.contains("outside"), "{error}");
+
+        let inside = fixture(manifest);
+        fs::write(inside.join("real.js"), "//").unwrap();
+        symlink(inside.join("real.js"), inside.join("worker.js")).unwrap();
+        assert!(validate(&inside).is_ok());
+        for d in [outside, root, inside] {
+            fs::remove_dir_all(d).unwrap();
+        }
     }
 }
