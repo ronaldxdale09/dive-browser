@@ -31,11 +31,28 @@ lets you *see* the browser, and CEF publishes `windowsarm64` alongside
 `windows64`, so it runs natively rather than under emulation.
 
 `scripts/windows/bootstrap.ps1` sets a fresh Windows machine up in one go:
-MSVC build tools, Rust, Node, pnpm, CMake, Ninja, the repo, and a persisted
-`CEF_PATH`. Run it in an admin PowerShell. CEF itself (~500 MB) is downloaded
-by the first build, the same as on macOS.
+VS Build Tools with clang, Rust via rustup, Node 24 with pnpm 10.33.0 (the
+major CI uses and the `packageManager` version; pnpm is installed with npm,
+because corepack is not bundled from Node 26 on), CMake, Ninja, Git, and a
+persisted `CEF_PATH`. Run it in an admin PowerShell. It does not clone the
+repo: you do, or `scripts/windows/first-build.ps1` does. CEF is downloaded by
+the first build (several hundred MB, about 1 GB unpacked), the same as on
+macOS.
 
 Ship `windows64`. Test on whichever you have.
+
+### Native Windows quickstart (x64)
+
+1. Run `scripts\windows\bootstrap.ps1` in an admin PowerShell.
+2. Open a new shell, so the machine PATH is picked up.
+3. `git clone https://github.com/ronaldxdale09/dive-browser.git C:\dev\dive; cd C:\dev\dive`
+4. `. scripts\windows\msvc-runtime.ps1` (sets the C++ runtime flags for this
+   shell; see "Status" below).
+5. `pnpm install; pnpm dev`
+
+Release builds go through `pnpm --filter @dive/desktop tauri build`, never a
+bare `cargo build` (see the black-window row above). `pnpm check` needs Git
+Bash on PATH; it skips the POSIX-only probe tests on Windows, as CI does.
 
 ## The work, as it turned out
 
@@ -93,6 +110,10 @@ it hands a script to the Task Scheduler as the logged-on user.
 
 Other things that cost time and are not obvious:
 
+- `rebuild.ps1` logs to `C:\dev\logs\rebuild.log` and `first-build.ps1` to
+  `C:\dev\logs\first-build.log`. `rebuild.ps1` refuses to pull over local
+  changes in `C:\dev\dive`; pass `-Reset` to discard them
+  (`git reset --hard origin/main`).
 - The VM allows **one `prlctl exec` session at a time**. A long build in the
   foreground blocks every other call, so builds run detached via the Task
   Scheduler and the log is polled.
@@ -139,19 +160,13 @@ the frameless title bar, shortcut labels, screen recording (`gdigrab`), the
 eyedropper, the credential store, default-browser registration, and web-app
 launchers as Start Menu shortcuts.
 
-Building x64 locally needs one thing CI sets for itself: whisper.cpp and
-CEF's wrapper must agree on a C++ runtime. `cef-dll-sys` builds the wrapper
-with the static one -- CEF's own convention, not configurable from here --
-and whisper.cpp defaults to the dynamic one, so the link ends in fifty-odd
-duplicate `std::locale` symbols.
-
-    $env:CFLAGS = "/MT"; $env:CXXFLAGS = "/MT"
-
-Not `CMAKE_MSVC_RUNTIME_LIBRARY`, which is the obvious answer and the wrong
-one: the `cmake` crate hands CMake the flags the `cc` crate chose, and an
-explicit `/MD` among them beats the variable. `cc` appends `CFLAGS` and
-`CXXFLAGS` after its own flags, and MSVC honours the last runtime flag it is
-given, so that is where it has to go.
+Building x64 locally needs what CI sets for itself: whisper.cpp and CEF's
+wrapper must agree on a C++ runtime. `cef-dll-sys` builds the wrapper with the
+static one -- CEF's own convention, not configurable from here -- and
+whisper.cpp defaults to the dynamic one, so the link ends in fifty-odd
+duplicate `std::locale` symbols. Dot-source `scripts/windows/msvc-runtime.ps1`
+before building. It sets the same five variables CI sets; `ci.yml` ("Match
+CEF's C++ runtime") explains why each is needed.
 
 The ARM VM never sees any of this, because whisper.cpp is not built there at
 all -- which is exactly why it linked a binary CI could not. `cargo clippy`
@@ -163,5 +178,5 @@ Known gaps:
   build has them.
 - **The installer is unsigned.** Without an OV or EV certificate SmartScreen
   warns on first run. WiX is not an option on ARM; the bundle target is NSIS.
-- **No CI job yet.** `ci.yml` is parameterised by `matrix.os`, so adding
-  `windows-latest` is a small change.
+- CI runs the `check` job on `windows-latest` (build, clippy, tests), and
+  `release.yml` builds the NSIS installer on `windows-latest`.

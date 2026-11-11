@@ -113,9 +113,9 @@ export CEF_PATH="$HOME/.local/share/cef"   # CEF is downloaded here once (~500 M
 pnpm dev
 ```
 
-Windows needs the MSVC toolchain and one extra environment variable so
-whisper.cpp and CEF agree on a C++ runtime; [docs/WINDOWS.md](docs/WINDOWS.md)
-has the setup and the reasoning.
+Windows needs the MSVC toolchain and the C++ runtime flags set by
+`scripts/windows/msvc-runtime.ps1` so whisper.cpp and CEF agree on a C++
+runtime; [docs/WINDOWS.md](docs/WINDOWS.md) has the setup and the reasoning.
 
 `pnpm check` runs the full gate. Layout, environment knobs and conventions are in [CONTRIBUTING.md](CONTRIBUTING.md); design notes and measurements are under [docs/](docs/README.md).
 
