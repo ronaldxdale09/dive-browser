@@ -148,30 +148,252 @@ pub fn cleanup() {
     }
 }
 
-/// Startup extension loading and all credential-bearing/background services are
-/// disabled as well as these UI commands. The policy is enforced before dispatch.
-/// Installing a web app writes a launcher to disk that outlives the session
-/// and opens a window with no private context behind it, so it is refused.
+/// Commands a private window may run. Everything else is refused before
+/// dispatch, so a command added later stays off in Private Mode until
+/// someone decides otherwise (the test below makes them decide).
+const PRIVATE_ALLOWED: &[&str] = &[
+    "address_delete",
+    "address_fill",
+    "address_save",
+    "addresses_list",
+    "backup_export",
+    "backup_restore",
+    "bookmark_restore",
+    "bookmark_status",
+    "bookmarks_search",
+    "browser_import_open_privacy",
+    "browser_import_run",
+    "browser_import_sources",
+    "browsing_data_clear",
+    "capture_read",
+    "capture_save",
+    "card_delete",
+    "card_fill",
+    "card_save",
+    "cards_list",
+    "cert_error_answer",
+    "chrome_ready",
+    "clipboard_write_png",
+    "clipboard_write_secret",
+    "clipboard_write_text",
+    "command_run",
+    "dev_servers",
+    "dev_servers_watch",
+    "diagnostics_export",
+    "diagnostics_reveal_logs",
+    "download_dir_pick",
+    "download_forget",
+    "download_start",
+    "downloads_cancel",
+    "downloads_clear",
+    "downloads_history",
+    "downloads_history_clear",
+    "downloads_missing",
+    "downloads_open",
+    "downloads_resume",
+    "downloads_reveal",
+    "external_link_open",
+    "favicon_get",
+    "file_read_chunk",
+    "file_size",
+    "forms_clear",
+    "forms_delete",
+    "forms_list",
+    "history_prune_count",
+    "history_remove",
+    "history_search",
+    "http_auth_answer",
+    "http_auth_pending",
+    "https_only_allow",
+    "js_dialog_answer",
+    "js_dialog_pending",
+    "keep_site_set",
+    "keep_sites_list",
+    "layout_prepare_content_cover",
+    "layout_set_content_bounds",
+    "layout_set_content_covered",
+    "layout_set_corner_radius",
+    "layout_set_overlay_regions",
+    "layout_set_panes",
+    "mcp_token",
+    "page_reader",
+    "page_reader_leave",
+    "page_reader_open",
+    "page_save",
+    "page_translate",
+    "page_translate_restore",
+    "page_translate_state",
+    "pages_scheme",
+    "passwords_answer",
+    "passwords_copy",
+    "passwords_delete",
+    "passwords_edit",
+    "passwords_export",
+    "passwords_fill",
+    "passwords_for_url",
+    "passwords_import_csv",
+    "passwords_list",
+    "passwords_never",
+    "passwords_never_list",
+    "passwords_never_remove",
+    "passwords_reveal",
+    "passwords_save",
+    "passwords_used",
+    "permission_reply",
+    "permission_set",
+    "permissions_list",
+    "popout_ready",
+    "popout_set_bounds",
+    "prefs_set",
+    "profiles_list",
+    "recording_capabilities",
+    "recording_delete",
+    "recording_open",
+    "recording_read",
+    "recordings_list",
+    "report_startup_milestone",
+    "request_captured",
+    "request_detail",
+    "request_replay",
+    "resolve_frame",
+    "rules_set",
+    "screen_export_append",
+    "screen_export_begin",
+    "screen_export_cancel",
+    "screen_export_finish",
+    "screen_import_path",
+    "screen_import_video",
+    "screen_media_info",
+    "screen_project_read",
+    "screen_project_write",
+    "search_suggest",
+    "session_recovery_resolve",
+    "share_url",
+    "snapshot",
+    "subtitle_start",
+    "tab_a11y",
+    "tab_a11y_reveal",
+    "tab_activate",
+    "tab_attach",
+    "tab_back",
+    "tab_bug_report",
+    "tab_capture",
+    "tab_capture_png",
+    "tab_close",
+    "tab_deactivate",
+    "tab_detach",
+    "tab_devtools",
+    "tab_emulate",
+    "tab_environment",
+    "tab_eyedropper",
+    "tab_fill_video",
+    "tab_find",
+    "tab_focus",
+    "tab_forward",
+    "tab_har",
+    "tab_history",
+    "tab_history_navigate",
+    "tab_info",
+    "tab_inspect_cancel",
+    "tab_inspect_revert",
+    "tab_inspect_start",
+    "tab_inspect_style",
+    "tab_media",
+    "tab_meta",
+    "tab_move_to_workspace",
+    "tab_navigate",
+    "tab_open",
+    "tab_openapi",
+    "tab_palette",
+    "tab_picture_in_picture",
+    "tab_print",
+    "tab_record_start",
+    "tab_reload",
+    "tab_reload_hard",
+    "tab_reorder",
+    "tab_restore_scroll",
+    "tab_screencast_cancel",
+    "tab_screencast_pause",
+    "tab_screencast_start",
+    "tab_screencast_stop",
+    "tab_scroll_position",
+    "tab_set_muted",
+    "tab_set_pinned",
+    "tab_set_tier",
+    "tab_stack",
+    "tab_stop",
+    "tab_storage",
+    "tab_storage_delete",
+    "tab_storage_value",
+    "tab_throttle",
+    "tab_unresponsive_answer",
+    "tab_vitals",
+    "tab_zoom",
+    "tasks_list",
+    "ui_state_load",
+    "ui_state_set",
+    "webapp_for_tab",
+    "webapp_for_window",
+    "webapp_icon",
+    "webapp_open",
+    "webapp_probe",
+    "webapp_uninstall",
+    "webapps_list",
+    "window_close",
+    "window_command",
+    "window_exit_private",
+    "window_open",
+    "window_private",
+    "window_set_background",
+    "workspace_activate",
+    "workspace_delete",
+    "workspace_other_tabs",
+    "workspace_reorder",
+    "workspace_tab_counts",
+    "workspace_update",
+];
+
+/// Commands a private window refuses: they persist something the session
+/// promises not to keep, or reach credentials, extensions, other profiles
+/// or updates. Startup extension loading and all credential-bearing or
+/// background services are disabled as well. Installing a web app writes a
+/// launcher to disk that outlives the session and opens a window with no
+/// private context behind it, so it is refused. Listed so the test can tell
+/// "refused" from "forgotten".
+#[cfg(test)]
+const PRIVATE_REFUSED: &[&str] = &[
+    "agent_approve",
+    "agent_key_present",
+    "agent_key_set",
+    "agent_key_verify",
+    "agent_models",
+    "agent_send",
+    "agent_stop",
+    "agent_thread_clear",
+    "agent_thread_load",
+    "agent_thread_save",
+    "bookmark_remove",
+    "bookmark_rename",
+    "bookmark_toggle",
+    "default_browser_set",
+    "extension_import",
+    "extension_remove",
+    "extension_set_enabled",
+    "extensions_list",
+    "profile_activate",
+    "profile_create",
+    "profile_delete",
+    "profile_update",
+    "subtitle_model_delete",
+    "subtitle_model_download",
+    "update_check",
+    "update_install",
+    "webapp_install",
+    "workspace_create",
+];
+
 pub fn allows_command(command: &str) -> bool {
-    ![
-        "agent_",
-        "extensions_",
-        "extension_",
-        "profile_",
-        "subtitle_model_",
-        "update_",
-    ]
-    .iter()
-    .any(|prefix| command.starts_with(prefix))
-        && !matches!(
-            command,
-            "bookmark_toggle"
-                | "bookmark_remove"
-                | "bookmark_rename"
-                | "default_browser_set"
-                | "workspace_create"
-                | "webapp_install"
-        )
+    PRIVATE_ALLOWED.binary_search(&command).is_ok()
 }
 
 pub fn open(app: &AppHandle<Runtime>) -> AppResult<()> {
@@ -379,14 +601,15 @@ mod tests {
     fn private_policy_blocks_persistent_and_credential_actions() {
         for command in [
             "agent_send",
-            "agent_set_key",
-            "extension_load",
+            "agent_key_set",
+            "extension_import",
             "extensions_list",
             "profile_create",
             "bookmark_toggle",
             "default_browser_set",
             "update_install",
             "webapp_install",
+            "definitely_not_a_command",
         ] {
             assert!(!allows_command(command), "{command}");
         }
@@ -395,11 +618,57 @@ mod tests {
             "tab_open",
             "tab_reload",
             "window_private",
-            "privacy_info",
-            "screen_export",
-            "download_open",
+            "screen_export_begin",
+            "downloads_open",
+            "report_startup_milestone",
+            "card_save",
         ] {
             assert!(allows_command(command), "{command}");
+        }
+    }
+
+    #[test]
+    fn every_command_has_a_private_mode_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bindings.ts");
+        crate::commands::specta_builder()
+            .export(specta_typescript::Typescript::default(), &path)
+            .expect("export bindings");
+        let generated = std::fs::read_to_string(&path).unwrap();
+        let marker = "__TAURI_INVOKE(\"";
+        let mut names: Vec<&str> = generated
+            .split(marker)
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .collect();
+        names.push("report_startup_milestone");
+        names.sort_unstable();
+        names.dedup();
+        assert!(names.len() > 100, "found only {} commands", names.len());
+
+        for list in [PRIVATE_ALLOWED, PRIVATE_REFUSED] {
+            assert!(
+                list.windows(2).all(|pair| pair[0] < pair[1]),
+                "private-mode lists must be strictly sorted"
+            );
+            for name in list {
+                assert!(
+                    names.binary_search(name).is_ok(),
+                    "{name} is not a command; remove it from the private-mode lists"
+                );
+            }
+        }
+        for name in &names {
+            let allowed = PRIVATE_ALLOWED.binary_search(name).is_ok();
+            let refused = PRIVATE_REFUSED.binary_search(name).is_ok();
+            assert!(
+                allowed || refused,
+                "{name} has no private-mode decision: add it to PRIVATE_ALLOWED or PRIVATE_REFUSED in private_session.rs"
+            );
+            assert!(
+                !(allowed && refused),
+                "{name} is in both private-mode lists"
+            );
         }
     }
 

@@ -18,6 +18,10 @@ use crate::state::{AppState, lock};
 
 const SERVICE: &str = "app.dive.browser.cards";
 
+/// Why a private window keeps no cards.
+pub const PRIVATE_CARD_SAVE: &str =
+    "Private windows do not keep cards. Add this card from a normal window to save it.";
+
 fn entry(id: &str) -> AppResult<keyring_core::Entry> {
     keyring_core::Entry::new(SERVICE, id).map_err(AppError::new)
 }
@@ -130,6 +134,11 @@ pub fn save_address(
 
 /// Save a card: the listing row in the store, the number in the keychain.
 pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> AppResult<Card> {
+    if crate::private_session::is_private() {
+        // Nothing in a private window outlives it; a card saved here would
+        // fill until the window closed and then be gone without a word.
+        return Err(AppError::new(PRIVATE_CARD_SAVE));
+    }
     let number = digits(&draft.number);
     if !luhn_ok(&number) {
         return Err(AppError::new("that does not look like a card number"));
