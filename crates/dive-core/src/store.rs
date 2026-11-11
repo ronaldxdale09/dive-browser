@@ -2156,6 +2156,47 @@ impl Store {
         readable_rows(rows, "history")
     }
 
+    /// One page of the active profile's history, one row per address, newest
+    /// first, each with its row id.
+    ///
+    /// `before` is the `(last_visit, id)` of the last row of the previous page
+    /// (`None` for the first page); the id breaks ties between rows visited at
+    /// the same moment, so walking page by page returns every row once. Lets a
+    /// long read let go of the store between pages instead of holding it for
+    /// all of them.
+    pub fn history_page(
+        &self,
+        before: Option<(&str, i64)>,
+        limit: usize,
+    ) -> Result<Vec<(i64, HistoryEntry)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, url, title, last_visit, visit_count FROM urls
+             WHERE profile_id = ?1 AND (?2 IS NULL OR (last_visit, id) < (?2, ?3))
+             ORDER BY last_visit DESC, id DESC LIMIT ?4",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                self.scope()?,
+                before.map(|(at, _)| at),
+                before.map_or(0, |(_, id)| id),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    HistoryEntry {
+                        url: r.get(1)?,
+                        title: r.get(2)?,
+                        last_visited_at: r.get(3)?,
+                        visits: r.get::<_, i64>(4)?.try_into().unwrap_or(u32::MAX),
+                        favicon: None,
+                    },
+                ))
+            },
+        )?;
+        readable_rows(rows, "history")
+    }
+
     /// Bookmarks whose address or title contains `query`, newest first.
     pub fn search_bookmarks(&self, query: &str, limit: usize) -> Result<Vec<Bookmark>> {
         let like = format!("%{}%", like_escape(query.trim()));
@@ -2180,9 +2221,7 @@ impl Store {
             },
         )?;
         let mut found: Vec<Bookmark> = readable_rows(rows, "bookmarks")?;
-        for b in &mut found {
-            b.favicon = self.site_favicon(&b.url);
-        }
+        self.fill_favicons(found.iter_mut().map(|b| (b.url.as_str(), &mut b.favicon)));
         Ok(found)
     }
 
@@ -2789,9 +2828,7 @@ impl Store {
             pages = scored.into_iter().map(|(_, p)| p).collect();
         }
         pages.truncate(limit);
-        for page in &mut pages {
-            page.favicon = self.site_favicon(&page.url);
-        }
+        self.fill_favicons(pages.iter_mut().map(|p| (p.url.as_str(), &mut p.favicon)));
         Ok(pages)
     }
 
@@ -2932,17 +2969,32 @@ impl Store {
         })
     }
 
-    /// The key of the icon remembered for `url`'s origin, if any.
+    /// Give each row the icon remembered for its URL's origin.
     ///
     /// Lets a history or bookmark row wear its site's mark even though no tab
     /// is open on it, which is the only source of an icon for a page that is
-    /// not currently loaded anywhere.
-    fn site_favicon(&self, url: &str) -> Option<String> {
-        let origin = crate::origin_of(url)?;
-        self.favicon(&origin)
-            .inspect_err(|e| tracing::debug!(origin, "favicon lookup failed: {e}"))
-            .ok()
-            .flatten()
+    /// not currently loaded anywhere. Many rows share a site, so each origin
+    /// is looked up once per call, not once per row: the store lock is held
+    /// while this runs.
+    fn fill_favicons<'a>(&self, rows: impl Iterator<Item = (&'a str, &'a mut Option<String>)>) {
+        let mut icons: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        for (url, slot) in rows {
+            let Some(origin) = crate::origin_of(url) else {
+                continue;
+            };
+            if let Some(known) = icons.get(&origin) {
+                slot.clone_from(known);
+                continue;
+            }
+            let key = self
+                .favicon(&origin)
+                .inspect_err(|e| tracing::debug!(origin, "favicon lookup failed: {e}"))
+                .ok()
+                .flatten();
+            slot.clone_from(&key);
+            icons.insert(origin, key);
+        }
     }
 
     // ----- settings -----
@@ -5245,6 +5297,90 @@ mod tests {
     }
 
     #[test]
+    fn history_page_walks_every_row_once() {
+        let store = Store::in_memory().unwrap();
+        let base = Timestamp::now();
+        // Every fifth row shares its moment with the ones around it, so the
+        // id has to break the tie.
+        let items: Vec<ImportedEntry> = (0..1234_i64)
+            .map(|i| ImportedEntry {
+                url: format!("https://a.dev/{i}"),
+                title: String::new(),
+                at: Timestamp(base.0 - time::Duration::seconds(i - i % 5)),
+            })
+            .collect();
+        store.import_history(&items).unwrap();
+
+        let mut seen: Vec<(i64, String)> = Vec::new();
+        let mut cursor: Option<(String, i64)> = None;
+        loop {
+            let page = store
+                .history_page(cursor.as_ref().map(|(at, id)| (at.as_str(), *id)), 500)
+                .unwrap();
+            let Some((id, last)) = page.last() else { break };
+            cursor = Some((last.last_visited_at.clone(), *id));
+            seen.extend(page.into_iter().map(|(id, e)| (id, e.last_visited_at)));
+        }
+        assert_eq!(seen.len(), 1234);
+        let mut ids: Vec<i64> = seen.iter().map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 1234);
+        assert!(seen.windows(2).all(|w| w[0].1 >= w[1].1), "newest first");
+    }
+
+    #[test]
+    fn history_page_stays_in_its_profile() {
+        let store = Store::in_memory().unwrap();
+        let (_, other) = two_profiles(&store);
+        let now = Timestamp::now();
+        store.record_visit("https://mine.dev/", "", now).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO urls (profile_id, url, url_hash, key_hash, last_visit, visit_count)
+                 VALUES (?1, 'https://theirs.dev/', 0, 0, ?2, 1)",
+                params![other.to_string(), now.to_rfc3339()],
+            )
+            .unwrap();
+        let urls: Vec<String> = store
+            .history_page(None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|(_, e)| e.url)
+            .collect();
+        assert_eq!(urls, ["https://mine.dev/"]);
+    }
+
+    #[test]
+    fn search_history_shares_one_favicon_lookup_per_site() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        let key = store
+            .set_favicon("https://a.dev", "data:image/png;base64,AAAA", "")
+            .unwrap();
+        for (url, at) in [
+            ("https://a.dev/one", 0),
+            ("https://a.dev/two", 1),
+            ("https://b.dev/one", 2),
+            ("https://b.dev/two", 3),
+        ] {
+            store
+                .record_visit(url, "Page", Timestamp(now.0 - time::Duration::seconds(at)))
+                .unwrap();
+        }
+        let found = store.search_history("", 10).unwrap();
+        assert_eq!(found.len(), 4);
+        for page in found {
+            let expected = page
+                .url
+                .starts_with("https://a.dev")
+                .then_some(key.as_str());
+            assert_eq!(page.favicon.as_deref(), expected, "{}", page.url);
+        }
+    }
+
+    #[test]
     fn workspace_counts_include_open_tabs_in_every_renderer_state() {
         let (store, w) = seeded();
         let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
@@ -5883,5 +6019,86 @@ mod tests {
             store.web_app("x").unwrap().unwrap().workspace_id,
             Some(elsewhere)
         );
+    }
+
+    /// Measurement, not a check: how long the history reads hold the store.
+    /// Slow (seeds 100,000 visits), so it only runs when asked:
+    /// `cargo test -p dive-core --release history_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "measurement harness; seeds 100,000 visits"]
+    fn history_timing() {
+        use std::hash::{Hash, Hasher};
+        use std::time::Instant;
+
+        let dir = tempfile_dir();
+        let store = Store::open(dir.join("dive.db")).unwrap();
+        // A fixed start, so the digests below are comparable between runs.
+        let base = Timestamp::parse("2026-01-01T00:00:00Z").unwrap();
+        let icon = "data:image/png;base64,QUFB";
+        for origin in 0..2000 {
+            store
+                .set_favicon(
+                    &format!("https://site{origin}.test"),
+                    &format!("{icon}{origin}"),
+                    "links-1",
+                )
+                .unwrap();
+        }
+        let mut n = 0_i64;
+        while n < 100_000 {
+            let batch: Vec<ImportedEntry> = (n..n + 500)
+                .map(|i| ImportedEntry {
+                    url: format!("https://site{}.test/page/{i}", i % 2000),
+                    title: format!("Page {i}"),
+                    at: Timestamp(base.0 - time::Duration::seconds(i)),
+                })
+                .collect();
+            store.import_history(&batch).unwrap();
+            n += 500;
+        }
+
+        let digest = |rows: &[HistoryEntry]| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for r in rows {
+                (&r.url, &r.title, &r.last_visited_at, r.visits, &r.favicon).hash(&mut h);
+            }
+            h.finish()
+        };
+        for (label, query, limit) in [
+            ("search_history(\"\", 200)", "", 200),
+            ("search_history(\"\", 5000)", "", 5000),
+            ("search_history(\"page\", 20)", "page", 20),
+            ("search_history(\"zz-no-match\", 20)", "zz-no-match", 20),
+        ] {
+            let t = Instant::now();
+            let rows = store.search_history(query, limit).unwrap();
+            println!(
+                "{label}: {:?} ({} rows, digest {:016x})",
+                t.elapsed(),
+                rows.len(),
+                digest(&rows)
+            );
+        }
+        let t = Instant::now();
+        let all = store.all_history(100_000).unwrap();
+        println!(
+            "all_history(100_000): {:?} ({} rows)",
+            t.elapsed(),
+            all.len()
+        );
+
+        let urls: Vec<String> = store
+            .search_history("", 5000)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.url)
+            .collect();
+        let t = Instant::now();
+        for url in &urls {
+            let _ = store.favicon(&origin_of(url).unwrap());
+        }
+        println!("{} site_favicon calls: {:?}", urls.len(), t.elapsed());
+        drop(store);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

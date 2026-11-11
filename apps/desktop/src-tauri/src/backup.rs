@@ -107,14 +107,53 @@ pub struct RestoreSummary {
 }
 
 /// Gather everything worth keeping from the active profile.
+///
+/// The history can be a hundred thousand rows, and the store is the lock
+/// every tab switch also takes, so it is read a page at a time with the lock
+/// let go between pages; everything else is small and read in one hold. A
+/// visit that lands while the export runs may or may not be in the file: a
+/// backup is a point-in-time-ish copy.
 pub fn export(state: &AppState) -> AppResult<Backup> {
-    export_from(&lock(&state.store))
+    export_from(&state.store)
 }
 
-/// Everything worth keeping from the profile the store is scoped to: the
-/// same profile its history and bookmarks are read for, so every section
-/// of the file describes one profile.
-pub(crate) fn export_from(store: &Store) -> AppResult<Backup> {
+/// [`export`] over just the store, so it can be tried without an app.
+pub(crate) fn export_from(store: &Mutex<Store>) -> AppResult<Backup> {
+    let (mut backup, profile) = export_without_history(&lock(store))?;
+    let mut cursor: Option<(String, i64)> = None;
+    while backup.history.len() < HISTORY_LIMIT {
+        let store = lock(store);
+        // The store files history under whichever profile is active, and the
+        // lock is let go between pages: stop rather than mix two profiles.
+        if scoped_profile(&store)? != profile {
+            return Err(AppError::new(
+                "the profile changed while it was being backed up",
+            ));
+        }
+        let want = MERGE_CHUNK.min(HISTORY_LIMIT - backup.history.len());
+        let page = store.history_page(cursor.as_ref().map(|(at, id)| (at.as_str(), *id)), want)?;
+        drop(store);
+        let Some((id, last)) = page.last() else { break };
+        cursor = Some((last.last_visited_at.clone(), *id));
+        let short = page.len() < want;
+        backup
+            .history
+            .extend(page.into_iter().map(|(_, entry)| BackupVisit {
+                url: entry.url,
+                title: entry.title,
+                last_visited_at: entry.last_visited_at,
+            }));
+        if short {
+            break;
+        }
+    }
+    Ok(backup)
+}
+
+/// Everything worth keeping from the profile the store is scoped to, except
+/// its history: the same profile its bookmarks are read for, so every section
+/// of the file describes one profile. Returns that profile too.
+fn export_without_history(store: &Store) -> AppResult<(Backup, ProfileId)> {
     let profile = scoped_profile(store)?;
     let workspaces = store
         .workspaces_for_profile(profile)?
@@ -140,7 +179,7 @@ pub(crate) fn export_from(store: &Store) -> AppResult<Backup> {
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
-    Ok(Backup {
+    let backup = Backup {
         version: VERSION,
         exported_at: Timestamp::now().to_rfc3339(),
         app_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -154,15 +193,7 @@ pub(crate) fn export_from(store: &Store) -> AppResult<Backup> {
                 created_at: bookmark.created_at,
             })
             .collect(),
-        history: store
-            .all_history(HISTORY_LIMIT)?
-            .into_iter()
-            .map(|entry| BackupVisit {
-                url: entry.url,
-                title: entry.title,
-                last_visited_at: entry.last_visited_at,
-            })
-            .collect(),
+        history: Vec::new(),
         form_entries: store
             .form_entries(profile)?
             .into_iter()
@@ -173,7 +204,8 @@ pub(crate) fn export_from(store: &Store) -> AppResult<Backup> {
             })
             .collect(),
         workspaces,
-    })
+    };
+    Ok((backup, profile))
 }
 
 /// Whether a tab address is worth writing down: a page, not a blank view or
@@ -564,18 +596,39 @@ mod tests {
         store
             .set_setting(crate::state::ACTIVE_WORKSPACE, &home.id.to_string())
             .unwrap();
+        let store = Mutex::new(store);
         let exported = export_from(&store).unwrap();
         assert_eq!(exported.workspaces.len(), 1);
         assert_eq!(exported.workspaces[0].name, "Home");
         assert_eq!(exported.workspaces[0].tabs.len(), 1);
         assert_eq!(exported.workspaces[0].tabs[0].url, "https://a.example/");
 
-        store
+        lock(&store)
             .set_setting(crate::state::ACTIVE_WORKSPACE, &work.id.to_string())
             .unwrap();
         let exported = export_from(&store).unwrap();
         assert_eq!(exported.workspaces.len(), 1);
         assert_eq!(exported.workspaces[0].name, "Work");
+    }
+
+    #[test]
+    fn an_export_crosses_chunk_boundaries_without_losing_or_reordering_history() {
+        let store = Store::in_memory().unwrap();
+        store.ensure_default_profile().unwrap();
+        let base = Timestamp::now();
+        let items: Vec<ImportedEntry> = (0..1200_i64)
+            .map(|i| ImportedEntry {
+                url: format!("https://a.example/{i}"),
+                title: format!("Page {i}"),
+                at: Timestamp(base.0 - time::Duration::seconds(i)),
+            })
+            .collect();
+        store.import_history(&items).unwrap();
+        let exported = export_from(&Mutex::new(store)).unwrap();
+        assert_eq!(exported.history.len(), 1200);
+        for (i, visit) in exported.history.iter().enumerate() {
+            assert_eq!(visit.url, format!("https://a.example/{i}"), "row {i}");
+        }
     }
 
     #[test]
