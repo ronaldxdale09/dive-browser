@@ -22,6 +22,10 @@ updates:
         update-types: [minor, patch]
     ignore:
       - dependency-name: "@tauri-apps/cli-cef"
+      # Moves with the tauri git revision in Cargo.toml, not on its own:
+      # scripts/tests/test_tauri_versions.py fails if they disagree.
+      - dependency-name: "@tauri-apps/api"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
