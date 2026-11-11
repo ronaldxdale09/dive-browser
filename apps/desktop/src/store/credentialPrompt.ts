@@ -40,21 +40,25 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       await events.credentialPrompt.listen((e) => {
         set((s) => ({ byTab: { ...s.byTab, [e.payload.tab_id]: e.payload } }));
       });
-      // A prompt outlives nothing it was about. A closed tab lets its
-      // password go at once, instead of the host holding it until quit; a
-      // "missing" card for a site the tab has since left no longer applies.
+      // A "missing" card for a site the tab has since left no longer applies.
+      // A tab absent from the list is not closed: the list holds the active
+      // workspace only, so a workspace switch must not answer anything.
       useBrowser.subscribe((state, previous) => {
         if (state.tabs === previous.tabs) return;
         const byId = new Map(state.tabs.map((t) => [t.id, t]));
         for (const prompt of Object.values(get().byTab)) {
           const tab = byId.get(prompt.tab_id);
-          if (!tab) {
-            if (prompt.kind === "missing") get().dismiss(prompt.tab_id);
-            else void get().answer(prompt, false);
-          } else if (prompt.kind === "missing" && originOf(tab.url) !== prompt.origin) {
-            get().dismiss(prompt.tab_id);
-          }
+          if (tab && prompt.kind === "missing" && originOf(tab.url) !== prompt.origin) get().dismiss(prompt.tab_id);
         }
+      });
+      await events.stateChanged.listen((e) => {
+        if (e.payload.type !== "tab_closed") return;
+        const prompt = get().byTab[e.payload.data];
+        if (!prompt) return;
+        // A closed tab lets its password go at once, instead of the host
+        // holding it until quit.
+        if (prompt.kind === "missing") get().dismiss(prompt.tab_id);
+        else void get().answer(prompt, false);
       });
     } catch {
       // No host (a test, or a chrome without Tauri): nothing to listen to.

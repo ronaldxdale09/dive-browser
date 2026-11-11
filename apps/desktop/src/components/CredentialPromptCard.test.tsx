@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ipc } from "../lib/ipc";
-import type { CredentialPrompt } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
+import type { CoreEvent, CredentialPrompt } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
 import { useCredentialPrompt } from "../store/credentialPrompt";
@@ -116,10 +116,14 @@ describe("CredentialPromptCard", () => {
     vi.spyOn(ipc, "passwordsAnswer").mockResolvedValue(null);
     useCredentialPrompt.setState({ listening: false });
     vi.spyOn(await import("../lib/ipc").then((m) => m.events.credentialPrompt), "listen").mockResolvedValue(() => undefined);
-    useBrowser.setState({ tabs: [{ id: "t1", url: "https://github.com/login" } as never] });
+    let deliver!: (payload: CoreEvent) => void;
+    vi.spyOn(events.stateChanged, "listen").mockImplementation(async (callback) => {
+      deliver = (payload) => callback({ event: "state-changed", id: 0, payload });
+      return () => undefined;
+    });
     await useCredentialPrompt.getState().init();
     useCredentialPrompt.setState({ byTab: { t1: save } });
-    useBrowser.setState({ tabs: [] });
+    deliver({ type: "tab_closed", data: "t1" });
     await waitFor(() => expect(ipc.passwordsAnswer).toHaveBeenCalledWith("tok1", false));
     expect(useCredentialPrompt.getState().byTab.t1).toBeUndefined();
   });
