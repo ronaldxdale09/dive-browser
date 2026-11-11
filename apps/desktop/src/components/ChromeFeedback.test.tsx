@@ -69,7 +69,7 @@ describe("LiveRegions", () => {
     vi.useFakeTimers();
     const { container } = render(<LiveRegions />);
     act(() => announce("Saved"));
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => { vi.advanceTimersByTime(10_000); });
     expect(container.querySelector('[aria-live="polite"]')!.textContent).toBe("");
   });
 });
@@ -87,14 +87,14 @@ describe("notice timing", () => {
     act(() => useBrowser.getState().notify("Copied", 3000));
     const toast = screen.getByText("Copied").parentElement!;
     fireEvent.mouseEnter(toast);
-    act(() => vi.advanceTimersByTime(5000));
+    act(() => { vi.advanceTimersByTime(5000); });
     expect(useBrowser.getState().notice).toBe("Copied");
     fireEvent.mouseLeave(toast);
     fireEvent.focus(screen.getByRole("button", { name: "Dismiss notification" }));
-    act(() => vi.advanceTimersByTime(5000));
+    act(() => { vi.advanceTimersByTime(5000); });
     expect(useBrowser.getState().notice).toBe("Copied");
     fireEvent.blur(screen.getByRole("button", { name: "Dismiss notification" }));
-    act(() => vi.advanceTimersByTime(3000));
+    act(() => { vi.advanceTimersByTime(3000); });
     expect(useBrowser.getState().notice).toBeNull();
   });
 
@@ -102,9 +102,9 @@ describe("notice timing", () => {
     vi.useFakeTimers();
     render(<Toasts />);
     act(() => useBrowser.getState().notify("Closed 3 tabs", 3000, { label: "Undo", run: () => undefined }));
-    act(() => vi.advanceTimersByTime(NOTICE_ACTION_MS - 100));
+    act(() => { vi.advanceTimersByTime(NOTICE_ACTION_MS - 100); });
     expect(useBrowser.getState().notice).toBe("Closed 3 tabs");
-    act(() => vi.advanceTimersByTime(200));
+    act(() => { vi.advanceTimersByTime(200); });
     expect(useBrowser.getState().notice).toBeNull();
   });
 

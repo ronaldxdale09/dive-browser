@@ -170,8 +170,8 @@ describe("reduceLoad", () => {
   it("lets go of everything kept for a tab the engine closed on its own", () => {
     // No closeTab: an agent, a popout or the engine itself closed it.
     useBrowser.setState({ tabs: [tab("a"), tab("b")], zoom: { a: 1.5, b: 2 } });
-    useConsole.setState({ byTab: { a: [{ tab_id: "a", level: "log", source: "console-api", text: "hi", url: null, line: null, timestamp: null, id: 1 }] } });
-    useNetwork.getState().apply({ type: "sent", data: { tab_id: "a", request_id: "r1", url: "https://x/", method: "GET", resource_type: "Document", timestamp: 1, wall_time: 1 } });
+    useConsole.setState({ byTab: { a: [{ tab_id: "a", level: "info", source: "console-api", text: "hi", url: null, line: null, column: null, timestamp: null, id: 1 }] } });
+    useNetwork.getState().apply({ type: "sent", data: { tab_id: "a", request_id: "r1", url: "https://x/", method: "GET", resource_type: "Document", headers: {}, post_data: null, timestamp: 1, wall_time: 1 } });
     useTabAudio.setState({ byTab: { a: { tab_id: "a", audible: true, muted: false } } });
     useEmulation.setState({ scale: { a: 0.5 } });
     const forgotten = vi.fn();
@@ -198,11 +198,11 @@ describe("reduceLoad", () => {
 
 describe("reduceCrash", () => {
   it("remembers the crash until the tab finishes loading again", () => {
-    const crashed = { ...none, ...reduceCrash({ ...none, loading: { a: true } }, { tab_id: "a", attempt: 2, recovering: true }) };
-    expect(crashed.crashedTabs).toEqual({ a: { attempt: 2, recovering: true } });
+    const crashed = { ...none, ...reduceCrash({ ...none, loading: { a: true } }, { tab_id: "a", attempt: 2, recovering: true, reason: "crashed", deferred: false }) };
+    expect(crashed.crashedTabs).toEqual({ a: { attempt: 2, recovering: true, reason: "crashed", deferred: false } });
     expect(crashed.loading).toEqual({});
-    const gaveUp = { ...crashed, ...reduceCrash(crashed, { tab_id: "a", attempt: 3, recovering: false }) };
-    expect(gaveUp.crashedTabs.a).toEqual({ attempt: 3, recovering: false });
+    const gaveUp = { ...crashed, ...reduceCrash(crashed, { tab_id: "a", attempt: 3, recovering: false, reason: "crashed", deferred: false }) };
+    expect(gaveUp.crashedTabs.a).toEqual({ attempt: 3, recovering: false, reason: "crashed", deferred: false });
     const back = { ...gaveUp, ...reduceLoad(gaveUp, load("a", "stopped")) };
     expect(back.crashedTabs).toEqual({});
   });
@@ -549,8 +549,8 @@ describe("boot", () => {
 
     onLoad({ event: "tab-load", id: 1, payload: load("a", "started") });
     expect(useBrowser.getState().loading).toEqual({ a: true });
-    onCrash({ event: "tab-crashed", id: 2, payload: { tab_id: "a", attempt: 1, recovering: true } });
-    expect(useBrowser.getState().crashedTabs).toEqual({ a: { attempt: 1, recovering: true } });
+    onCrash({ event: "tab-crashed", id: 2, payload: { tab_id: "a", attempt: 1, recovering: true, reason: "crashed", deferred: false } });
+    expect(useBrowser.getState().crashedTabs).toEqual({ a: { attempt: 1, recovering: true, reason: "crashed", deferred: false } });
 
     useBrowser.setState(initial, true);
     vi.restoreAllMocks();
@@ -1004,7 +1004,7 @@ describe("savePage", () => {
 describe("readerView", () => {
   it("does not open reader view on a detached tab as this window's", async () => {
     const open = vi.spyOn(ipc, "pageReaderOpen").mockResolvedValue(false);
-    const read = vi.spyOn(ipc, "pageReader").mockResolvedValue({ ok: false, reason: "no-article" });
+    const read = vi.spyOn(ipc, "pageReader").mockResolvedValue({ ok: false, reason: "no-article", words: null, already: false });
     useBrowser.setState({ activeTab: "r1", detached: ["r1"], tabs: [tab("r1")], notice: null });
     expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
     await useBrowser.getState().readerView();
@@ -1037,7 +1037,7 @@ describe("translatePage", () => {
   });
 
   it("does not translate a detached tab as this window's", async () => {
-    const translate = vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: false, reason: "no-text" });
+    const translate = vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: false, reason: "no-text", from: null, target: null, changed: null });
     useBrowser.setState({ activeTab: "t1", detached: ["t1"], tabs: [tab("t1")], notice: null });
     expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
     await useBrowser.getState().translatePage();

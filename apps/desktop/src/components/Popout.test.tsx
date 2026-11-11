@@ -175,9 +175,9 @@ describe("detached window prompts", () => {
     const reload = vi.spyOn(ipc, "tabReload").mockResolvedValue(null as never);
     render(<Popout tabId="a" />);
     await waitFor(() => expect(tabCrashed).toBeDefined());
-    act(() => tabCrashed({ tab_id: "other", attempt: 3, recovering: false }));
+    act(() => tabCrashed({ tab_id: "other", attempt: 3, recovering: false, reason: "crashed", deferred: false }));
     expect(screen.queryByText(/renderer crashed/)).toBeNull();
-    act(() => tabCrashed({ tab_id: "a", attempt: 3, recovering: false }));
+    act(() => tabCrashed({ tab_id: "a", attempt: 3, recovering: false, reason: "crashed", deferred: false }));
     const banner = (await screen.findByText(/renderer crashed and Dive stopped reloading it/)).closest("[role=status]") as HTMLElement;
     fireEvent.click(within(banner).getByRole("button", { name: "Reload" }));
     expect(reload).toHaveBeenCalledWith("a");
@@ -251,12 +251,12 @@ describe("detached page ownership and input", () => {
   it("synchronously focuses and selects its address on the native focus handoff", () => {
     render(<Popout tabId="a" />);
     const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
-    act(() => window.dispatchEvent(new Event("dive-native-focus-address")));
+    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
     fireEvent.change(input, { target: { value: "new draft" } });
     input.setSelectionRange(4, 4);
-    act(() => window.dispatchEvent(new Event("dive-native-focus-address")));
+    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, 9]);
   });
 

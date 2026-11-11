@@ -7,7 +7,7 @@ import { runDetachedCommand } from "./detachedCommands";
 /** The commands menu.rs sends a focused detached window. */
 function popoutCommands(): string[] {
   const block = /const POPOUT_COMMANDS: \[&str; \d+\] = \[([\s\S]*?)\];/.exec(menuSource)?.[1] ?? "";
-  return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  return [...block.matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
 }
 
 const initial = useBrowser.getState();

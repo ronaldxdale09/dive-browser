@@ -91,7 +91,7 @@ describe("Toolbar", () => {
     function NativeToolbar() { useShortcuts(); return <Toolbar />; }
     render(<NativeToolbar />);
     const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
-    act(() => window.dispatchEvent(new Event("dive-native-focus-address")));
+    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe(tab.url);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, tab.url.length]);

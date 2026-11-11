@@ -127,15 +127,15 @@ describe("Tooltip", () => {
       const wrapper = tip.parentElement!;
       fireEvent.mouseEnter(wrapper);
       expect(tip.className).toContain("pointer-events-none");
-      act(() => vi.advanceTimersByTime(500));
+      act(() => { vi.advanceTimersByTime(500); });
       expect(tip.className).toContain("pointer-events-auto");
       fireEvent.mouseLeave(wrapper);
-      act(() => vi.advanceTimersByTime(100));
+      act(() => { vi.advanceTimersByTime(100); });
       fireEvent.mouseEnter(wrapper);
-      act(() => vi.advanceTimersByTime(500));
+      act(() => { vi.advanceTimersByTime(500); });
       expect(tip.className).toContain("flex");
       fireEvent.mouseLeave(wrapper);
-      act(() => vi.advanceTimersByTime(200));
+      act(() => { vi.advanceTimersByTime(200); });
       expect(tip.className).toContain("hidden");
     } finally {
       vi.useRealTimers();

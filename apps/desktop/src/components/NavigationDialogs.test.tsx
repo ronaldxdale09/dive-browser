@@ -128,7 +128,7 @@ describe("foreground navigation dialogs", () => {
   it("removes the direct native listener when chrome unmounts", () => {
     const { unmount } = render(<NavigationDialogs />);
     unmount();
-    act(() => window.dispatchEvent(new Event("dive-native-new-tab")));
+    act(() => { window.dispatchEvent(new Event("dive-native-new-tab")); });
     expect(useBrowser.getState().open.palette).toBe(false);
   });
 

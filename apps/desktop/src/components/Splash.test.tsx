@@ -44,17 +44,17 @@ afterEach(() => {
 describe("Splash", () => {
   it("never paints for a boot that completes inside the delay", () => {
     render(<Splash />);
-    act(() => vi.advanceTimersByTime(SPLASH_DELAY_MS - 1));
+    act(() => { vi.advanceTimersByTime(SPLASH_DELAY_MS - 1); });
     expect(screen.queryByText("Starting engine")).toBeNull();
     act(() => useBrowser.setState({ ready: true }));
-    act(() => vi.runAllTimers());
+    act(() => { vi.runAllTimers(); });
     expect(screen.queryByText("Starting engine")).toBeNull();
   });
 
   it("appears only when startup actually takes time", () => {
     render(<Splash />);
     expect(screen.queryByText("Starting engine")).toBeNull();
-    act(() => vi.advanceTimersByTime(SPLASH_DELAY_MS));
+    act(() => { vi.advanceTimersByTime(SPLASH_DELAY_MS); });
     expect(screen.getByText("Starting engine")).toBeTruthy();
   });
 
@@ -70,11 +70,11 @@ describe("Splash", () => {
   it("waits until the visible splash has fully faded and the next frame rendered", async () => {
     observePaint();
     render(<Splash />);
-    act(() => vi.advanceTimersByTime(SPLASH_DELAY_MS));
+    act(() => { vi.advanceTimersByTime(SPLASH_DELAY_MS); });
     act(() => useBrowser.setState({ ready: true }));
     await act(() => vi.advanceTimersByTimeAsync(SPLASH_MIN_VISIBLE_MS + SPLASH_FADE_MS - 1));
     expect(invoke).toHaveBeenCalledTimes(1);
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(screen.queryByText("Starting engine")).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(40));
     expect(invoke).toHaveBeenLastCalledWith("report_startup_milestone", { milestone: "controls_ready" });

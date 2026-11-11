@@ -28,8 +28,8 @@ vi.mock("../FeatureReel", () => ({ FeatureReel: () => <div>reel</div> }));
 const profile: Profile = { id: "p1", name: "Personal", color: "#7FD8C8", avatar: "someone", note: "", container_id: "c1", position: 0, created_at: "2026-09-07T00:00:00Z" };
 const workspace: Workspace = { id: "w1", name: "Home", color: "#7FD8C8", icon: "aurora", container_id: "c1", profile_id: "p1", position: 0, created_at: "2026-09-07T00:00:00Z" };
 
-const updateProfile = vi.fn(async () => undefined);
-const updateWorkspace = vi.fn(async () => undefined);
+const updateProfile = vi.fn(async () => true);
+const updateWorkspace = vi.fn(async () => true);
 
 beforeEach(() => {
   useBrowser.setState({ ready: true, profiles: [profile], activeProfile: "p1", workspaces: [workspace], activeWorkspace: "w1", updateProfile, updateWorkspace });

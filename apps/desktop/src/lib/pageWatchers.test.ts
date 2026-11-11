@@ -100,7 +100,7 @@ describe("audible-tab watcher and the page's audio hooks", () => {
     class Context extends page.EventTarget {
       state = "suspended";
     }
-    page.AudioContext = Context;
+    Object.defineProperty(page, "AudioContext", { value: Context, configurable: true, writable: true });
     const sent: boolean[] = [];
     page.__diveAudio = (payload: string) => sent.push(JSON.parse(payload).audible);
     // Two worlds in the browser, one window here: the hooks in the page's,

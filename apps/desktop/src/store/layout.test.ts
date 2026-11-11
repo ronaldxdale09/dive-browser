@@ -109,7 +109,7 @@ describe("panel layout persistence", () => {
 
   it("clamps sizes read back from storage", () => {
     uiStorage.setItem("dive.layout", JSON.stringify({ state: { splits: {}, dockHeight: 5, sidecarWidth: 9999, dockPanel: "meta" }, version: 1 }));
-    useLayout.persist.rehydrate();
+    void useLayout.persist.rehydrate();
     expect(useLayout.getState().dockHeight).toBe(160);
     expect(useLayout.getState().sidecarWidth).toBe(720);
     expect(useLayout.getState().dockPanel).toBe("meta");

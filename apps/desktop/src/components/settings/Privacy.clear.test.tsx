@@ -9,7 +9,7 @@ const initialPrefs = usePrefs.getState();
 beforeEach(() => {
   vi.spyOn(ipc, "browsingDataClear").mockResolvedValue({ summary: "Cleared 3 history entries and 2 form entries.", failures: [], restart_needed: false });
   vi.spyOn(ipc, "networkRestartNeeded").mockResolvedValue(false);
-  vi.spyOn(ipc, "permissionsList").mockResolvedValue({ profile_name: "Personal", container_name: "Personal", legacy_ignored: false, permissions: [] });
+  vi.spyOn(ipc, "permissionsList").mockResolvedValue({ scope: { profile_id: "p1", container_id: "c1" }, profile_name: "Personal", container_name: "Personal", legacy_ignored: false, permissions: [] });
 });
 
 afterEach(() => {

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-// @ts-expect-error Vitest runs in Node; the browser-only tsconfig intentionally omits Node types.
 import { readFileSync } from "node:fs";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "./browser";

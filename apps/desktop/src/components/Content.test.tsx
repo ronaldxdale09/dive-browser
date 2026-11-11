@@ -177,29 +177,29 @@ describe("Content automatic retry", () => {
   it("retries a page that failed for want of a network, backing off, and then stops", () => {
     useBrowser.setState({ navError: { t1: { url: "https://news.example/", error: "net::ERR_INTERNET_DISCONNECTED" } } });
     const { unmount } = render(<Content />);
-    act(() => vi.advanceTimersByTime(2000));
+    act(() => { vi.advanceTimersByTime(2000); });
     expect(ipc.tabReload).toHaveBeenCalledTimes(1);
     // The retry fails again: a new panel picks the schedule up where it was.
     unmount();
     const again = render(<Content />);
-    act(() => vi.advanceTimersByTime(4999));
+    act(() => { vi.advanceTimersByTime(4999); });
     expect(ipc.tabReload).toHaveBeenCalledTimes(1);
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(ipc.tabReload).toHaveBeenCalledTimes(2);
     again.unmount();
     const third = render(<Content />);
-    act(() => vi.advanceTimersByTime(15000));
+    act(() => { vi.advanceTimersByTime(15000); });
     expect(ipc.tabReload).toHaveBeenCalledTimes(3);
     third.unmount();
     render(<Content />);
-    act(() => vi.advanceTimersByTime(60000));
+    act(() => { vi.advanceTimersByTime(60000); });
     expect(ipc.tabReload).toHaveBeenCalledTimes(3);
   });
 
   it("retries once when the network comes back", () => {
     useBrowser.setState({ navError: { t1: { url: "https://nope.example/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Content />);
-    act(() => vi.advanceTimersByTime(30000));
+    act(() => { vi.advanceTimersByTime(30000); });
     expect(ipc.tabReload).not.toHaveBeenCalled();
     act(() => void window.dispatchEvent(new Event("online")));
     expect(ipc.tabReload).toHaveBeenCalledTimes(1);
@@ -208,13 +208,13 @@ describe("Content automatic retry", () => {
   it("never resends a form or retries a refused site on its own", () => {
     useBrowser.setState({ navError: { t1: { url: "https://shop.example/pay", error: "net::ERR_INTERNET_DISCONNECTED", method: "POST" } } });
     const { unmount } = render(<Content />);
-    act(() => vi.advanceTimersByTime(30000));
+    act(() => { vi.advanceTimersByTime(30000); });
     act(() => void window.dispatchEvent(new Event("online")));
     expect(ipc.tabReload).not.toHaveBeenCalled();
     unmount();
     useBrowser.setState({ navError: { t1: { url: "http://localhost:3000/", error: "net::ERR_CONNECTION_REFUSED" } } });
     render(<Content />);
-    act(() => vi.advanceTimersByTime(30000));
+    act(() => { vi.advanceTimersByTime(30000); });
     expect(ipc.tabReload).not.toHaveBeenCalled();
   });
 });

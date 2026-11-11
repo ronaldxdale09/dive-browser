@@ -9,7 +9,7 @@
     "build": "tauri build --config src-tauri/tauri.no-updater.conf.json",
     "vite": "vite",
     "vite:build": "tsc -b && vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src",
     "test": "vitest run",
     "tauri": "tauri"
@@ -40,6 +40,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli-cef": "3.0.0-alpha.26",
     "@testing-library/react": "^16",
+    "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",

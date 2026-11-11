@@ -13,7 +13,7 @@ const initial = useBrowser.getState();
 beforeEach(() => {
   useBrowser.setState({ tabs: [tab], activeTab: "t1", toggle: vi.fn() });
   vi.spyOn(ipc, "tabFind").mockResolvedValue({ current: 1, total: 3 });
-  vi.spyOn(ipc, "tabFocus").mockResolvedValue(undefined);
+  vi.spyOn(ipc, "tabFocus").mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -30,7 +30,7 @@ describe("FindBar", () => {
     fireEvent.change(field, { target: { value: "hello" } });
     field.blur();
     expect(document.activeElement).not.toBe(field);
-    UI_COMMANDS["find.open"]!();
+    void UI_COMMANDS["find.open"]!();
     expect(document.activeElement).toBe(field);
     expect([field.selectionStart, field.selectionEnd]).toEqual([0, 5]);
   });
@@ -81,8 +81,8 @@ describe("FindBar", () => {
     render(<FindBar />);
     fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
     await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, false));
-    UI_COMMANDS["find.next"]!();
-    UI_COMMANDS["find.prev"]!();
+    void UI_COMMANDS["find.next"]!();
+    void UI_COMMANDS["find.prev"]!();
     expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, true);
     expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", false, true);
   });

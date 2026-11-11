@@ -251,8 +251,8 @@ describe("Library dialog", () => {
     useDownloads.setState({
       items: [
         { name: "report.json", path: "/tmp/report.json", url: "http://a.dev/report.json", status: "finished", at: Date.now(), startedAt: Date.now() },
-        { name: "big.iso", path: null, url: "http://a.dev/big.iso", status: "started", at: Date.now(), startedAt: Date.now() },
-        { name: "gone.zip", path: null, url: "http://a.dev/gone.zip", status: "failed", at: Date.now(), startedAt: Date.now() },
+        { name: "big.iso", path: "", url: "http://a.dev/big.iso", status: "started", at: Date.now(), startedAt: Date.now() },
+        { name: "gone.zip", path: "", url: "http://a.dev/gone.zip", status: "failed", at: Date.now(), startedAt: Date.now() },
       ],
     });
     render(<Library />);

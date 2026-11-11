@@ -25,7 +25,7 @@ describe("browser import", () => {
 
   it("loads sources, imports from the chosen one and reports what came in", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave, chrome]);
-    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 12, history: 340, passwords: 0, forms: 0 });
+    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 12, history: 340, passwords: 0, forms: 0, warnings: [] });
     await useBrowserImport.getState().load();
     expect(useBrowserImport.getState().selected).toBe("chrome:Default");
     // Opened again for a particular browser, that browser wins over the earlier pick.
@@ -35,7 +35,7 @@ describe("browser import", () => {
     useBrowserImport.getState().setHistory(false);
     await useBrowserImport.getState().run();
     expect(run).toHaveBeenCalledWith("chrome:Default", true, false, true, true);
-    expect(useBrowserImport.getState().outcome).toEqual({ source: chrome, summary: { bookmarks: 12, history: 340, passwords: 0, forms: 0 } });
+    expect(useBrowserImport.getState().outcome).toEqual({ source: chrome, summary: { bookmarks: 12, history: 340, passwords: 0, forms: 0, warnings: [] } });
   });
 
   it("starts on a protected source without running anything", async () => {

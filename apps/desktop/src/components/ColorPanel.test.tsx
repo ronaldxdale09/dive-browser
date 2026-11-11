@@ -36,7 +36,7 @@ describe("ColorPanel", () => {
   });
 
   it("says whether a copy worked, for picked colours and recent ones alike", async () => {
-    const colour = (hex: string) => ({ hex, rgb: "rgb(0, 0, 0)", hsl: "hsl(0, 0%, 0%)", on_white: 21, on_black: 1 });
+    const colour = (hex: string) => ({ hex, rgb: "rgb(0, 0, 0)", hsl: "hsl(0, 0%, 0%)", luminance: 0, on_white: 21, on_black: 1 });
     vi.spyOn(ipc, "tabEyedropper").mockResolvedValueOnce(colour("#000000")).mockResolvedValueOnce(colour("#ffffff"));
     const write = vi.spyOn(ipc, "clipboardWriteText").mockRejectedValue(new Error("no clipboard"));
     const fallback = navigator.clipboard;

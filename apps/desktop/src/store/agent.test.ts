@@ -320,7 +320,7 @@ describe("a conversation that belongs to a tab", () => {
     await vi.waitFor(() => expect(save).toHaveBeenCalledWith("tab-1", "book the table", expect.stringContaining("book the table")));
     const saves = save.mock.calls.length;
     emit({ type: "tool_call", data: { id: "s1", name: "click", input: "{}" } } as ChatDeltaOut);
-    emit({ type: "tool_done", data: { id: "s1", summary: "Clicked Reserve", error: null } } as ChatDeltaOut);
+    emit({ type: "tool_done", data: { id: "s1", summary: "Clicked Reserve", error: false } } as ChatDeltaOut);
     await vi.waitFor(() => expect(save.mock.calls.length).toBeGreaterThan(saves));
     expect(save.mock.calls.at(-1)?.[2]).toContain("Clicked Reserve");
     finish();
