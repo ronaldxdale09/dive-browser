@@ -1051,6 +1051,7 @@ export const events = {
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
 	permissionDismissed: makeEvent<PermissionDismissed>("permission-dismissed"),
+	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
 	privacyEvent: makeEvent<PrivacyEvent>("privacy-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
@@ -2738,6 +2739,17 @@ export type Prefs = {
 	 *  [`parse_stored`] treats its absence as done.
 	 */
 	onboarded?: boolean,
+};
+
+/**
+ *  Preferences changed by the host itself -- an http allowance, an
+ *  "always open" choice -- rather than by a chrome's `prefs_set`. Every
+ *  chrome window takes the stored copy, so its next save does not write
+ *  its stale one over the change.
+ */
+export type PrefsChanged = {
+	/**  The preferences as stored. */
+	prefs: Prefs,
 };
 
 /**  A named device, as the chrome's simulator and `page_resize` both see it. */

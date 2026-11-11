@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "./browser";
-import { DEFAULT_APPEARANCE, DEFAULT_PREFS, accentInk, applyAppearance, isDefaultAppearance, resolveMotion, usePrefs, watchReducedMotion } from "./prefs";
+import { DEFAULT_APPEARANCE, DEFAULT_PREFS, accentInk, adoptHostPrefs, applyAppearance, isDefaultAppearance, resolveMotion, usePrefs, watchReducedMotion } from "./prefs";
 
 const styles = readFileSync("src/styles.css", "utf8");
 
@@ -14,6 +14,38 @@ afterEach(() => {
 });
 
 describe("preference persistence", () => {
+  it("keeps an allowance the host added when a later setting is saved", async () => {
+    const write = vi.spyOn(ipc, "prefsSet").mockImplementation((prefs) => Promise.resolve(prefs));
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    adoptHostPrefs({ ...DEFAULT_PREFS, https_only_allowed: ["example.test"] });
+    await usePrefs.getState().update({ density: "compact" });
+    expect(write.mock.calls[0]?.[0]).toMatchObject({ https_only_allowed: ["example.test"], density: "compact" });
+  });
+
+  it("keeps a pending patch on top of host-pushed preferences", async () => {
+    let started!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { started = resolve; });
+    let finish!: (prefs: typeof DEFAULT_PREFS) => void;
+    vi.spyOn(ipc, "prefsSet").mockImplementationOnce(() => {
+      started();
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    const pending = usePrefs.getState().update({ do_not_track: true });
+    await firstStarted;
+    const entry = "https://example.test|zoommtg";
+    adoptHostPrefs({ ...DEFAULT_PREFS, external_link_allowed: [entry] });
+    expect(usePrefs.getState().prefs).toMatchObject({ do_not_track: true, external_link_allowed: [entry] });
+    finish({ ...DEFAULT_PREFS, do_not_track: true, external_link_allowed: [entry] });
+    await pending;
+  });
+
+  it("applies host-pushed appearance", () => {
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    adoptHostPrefs({ ...DEFAULT_PREFS, theme: "light" });
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
   it("does not replay a rejected activation through a later unrelated preference write", async () => {
     let rejectActivation!: (error: Error) => void;
     let started!: () => void;

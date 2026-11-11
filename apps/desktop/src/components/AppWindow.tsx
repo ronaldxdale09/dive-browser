@@ -11,7 +11,7 @@ import { events, ipc } from "../lib/ipc";
 import type { WebApp } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { useBrowser } from "../store/browser";
-import { usePrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
+import { usePrefs, watchHostPrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
@@ -65,7 +65,8 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
     void loadPrefs();
     const stopTheme = watchSystemTheme();
     const stopMotion = watchReducedMotion();
-    return () => { stopTheme(); stopMotion(); };
+    const stopHost = watchHostPrefs();
+    return () => { stopTheme(); stopMotion(); stopHost(); };
   }, [loadPrefs]);
 
   useEffect(() => {

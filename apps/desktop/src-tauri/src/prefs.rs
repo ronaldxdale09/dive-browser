@@ -11,6 +11,8 @@ use dive_cdp::CdpSession;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
+use tauri::Manager;
+use tauri_specta::Event;
 
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
@@ -793,6 +795,39 @@ impl Registry {
         *crate::state::lock(&self.cached) = Some(Arc::new(prefs.clone()));
         Ok(prefs)
     }
+}
+
+/// Preferences changed by the host itself -- an http allowance, an
+/// "always open" choice -- rather than by a chrome's `prefs_set`. Every
+/// chrome window takes the stored copy, so its next save does not write
+/// its stale one over the change.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PrefsChanged {
+    /// The preferences as stored.
+    pub prefs: Prefs,
+}
+
+/// Serialises host-side edits against each other.
+static HOST_EDITS: Mutex<()> = Mutex::new(());
+
+/// Change preferences from the host and tell every chrome window.
+/// `change` returns whether it changed anything; nothing is written or
+/// announced when it did not.
+pub fn modify(
+    app: &tauri::AppHandle<crate::Runtime>,
+    change: impl FnOnce(&mut Prefs) -> bool,
+) -> AppResult<()> {
+    let state = app.state::<AppState>();
+    let _serialised = lock(&HOST_EDITS);
+    let mut prefs = state.prefs.get(&state);
+    if !change(&mut prefs) {
+        return Ok(());
+    }
+    let stored = state.prefs.set(&state, prefs)?;
+    if let Err(error) = (PrefsChanged { prefs: stored }).emit(app) {
+        tracing::warn!(%error, "could not announce changed preferences");
+    }
+    Ok(())
 }
 
 /// Defaults for a profile that has never stored preferences. Disposable

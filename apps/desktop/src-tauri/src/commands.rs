@@ -1042,6 +1042,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::engine::DownloadProgress,
             crate::engine::UpdateProgress,
             crate::engine::TabZoom,
+            crate::prefs::PrefsChanged,
         ])
 }
 
@@ -2482,15 +2483,17 @@ pub(crate) fn https_only_allow(
     let host = crate::https_only::upgraded_host_for(id, &url).ok_or_else(|| {
         AppError::new("this page was not upgraded to https, so there is nothing to allow")
     })?;
-    let mut prefs = state.prefs.get(&state);
-    if !prefs
-        .https_only_allowed
-        .iter()
-        .any(|known| known.eq_ignore_ascii_case(&host))
-    {
+    crate::prefs::modify(&app, |prefs| {
+        if prefs
+            .https_only_allowed
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(&host))
+        {
+            return false;
+        }
         prefs.https_only_allowed.push(host);
-        state.prefs.set(&state, prefs)?;
-    }
+        true
+    })?;
     crate::https_only::forget(id);
     let mut plain = parsed;
     plain

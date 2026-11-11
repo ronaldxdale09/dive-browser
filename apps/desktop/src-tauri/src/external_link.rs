@@ -295,14 +295,14 @@ fn closed(app: &AppHandle<Runtime>, tab_id: TabId, token: String) {
 }
 
 fn remember(app: &AppHandle<Runtime>, origin: &str, scheme: &str) -> AppResult<()> {
-    let state = app.state::<AppState>();
-    let mut prefs = state.prefs.get(&state);
     let entry = allowance(origin, scheme);
-    if !prefs.external_link_allowed.contains(&entry) {
+    crate::prefs::modify(app, |prefs| {
+        if prefs.external_link_allowed.contains(&entry) {
+            return false;
+        }
         prefs.external_link_allowed.push(entry);
-        state.prefs.set(&state, prefs)?;
-    }
-    Ok(())
+        true
+    })
 }
 
 /// Hand the URL to the system, which starts whichever app claims the scheme.

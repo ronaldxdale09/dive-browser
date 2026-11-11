@@ -22,7 +22,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { clampSize, dockLimitsFor } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
-import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
+import { usePrefs, watchHostPrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
 import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
@@ -114,9 +114,11 @@ export function App() {
     void loadPrefs();
     const stopTheme = watchSystemTheme();
     const stopMotion = watchReducedMotion();
+    const stopHost = watchHostPrefs();
     return () => {
       stopTheme();
       stopMotion();
+      stopHost();
     };
   }, [loadPrefs]);
   useShortcuts();

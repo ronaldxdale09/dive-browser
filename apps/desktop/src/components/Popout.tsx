@@ -12,7 +12,7 @@ import { flushSync } from "react-dom";
 import { events, ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { useBrowser } from "../store/browser";
-import { usePrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
+import { usePrefs, watchHostPrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { Favicon } from "./Favicon";
 import { tabLabel } from "./TabStrip";
@@ -89,9 +89,11 @@ export function Popout({ tabId }: { tabId: string }) {
     void loadPrefs();
     const stopTheme = watchSystemTheme();
     const stopMotion = watchReducedMotion();
+    const stopHost = watchHostPrefs();
     return () => {
       stopTheme();
       stopMotion();
+      stopHost();
     };
   }, [loadPrefs]);
   useEffect(() => {

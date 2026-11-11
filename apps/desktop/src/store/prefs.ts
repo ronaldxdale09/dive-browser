@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ipc } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
 import { APPEARANCE_KEYS, THEME_VARS, UI_SCALE_MAX, UI_SCALE_MIN, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
@@ -182,6 +182,34 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     await persisted;
   },
 }));
+
+let hostListening: Promise<() => void> | null = null;
+
+/**
+ * Take preferences the host changed on its own. They become the confirmed
+ * copy that pending patches are replayed over, so the next save carries them
+ * instead of writing the old lists back.
+ */
+export function watchHostPrefs(): () => void {
+  hostListening ??= events.prefsChanged
+    .listen((e) => adoptHostPrefs(complete(e.payload.prefs)))
+    .catch(() => {
+      hostListening = null;
+      return () => undefined;
+    });
+  return () => {
+    void hostListening?.then((off) => off());
+    hostListening = null;
+  };
+}
+
+/** Exported for tests. */
+export function adoptHostPrefs(stored: Prefs) {
+  confirmedPrefs = stored;
+  const current = applyPending(confirmedPrefs);
+  usePrefs.setState({ prefs: current });
+  applyAppearance(current);
+}
 
 /**
  * Show `patch` on the chrome without saving it, while a colour or the size
