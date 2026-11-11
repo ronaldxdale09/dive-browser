@@ -428,8 +428,11 @@ function DetailPane({ tabId, requestId, status, finished }: { tabId: string; req
         )}
         <div className="flex items-center gap-2">
           <h4 className="flex-1 text-10 tracking-wider text-ink-3 uppercase">Request headers</h4>
-          <button type="button" onClick={() => void copy("cURL command", toCurl(detail))} className={chip} title="Copy this request as a cURL command">
+          <button type="button" onClick={() => void copy("cURL command", toCurl(detail))} className={chip} title="Copy this request as a cURL command, without cookies or auth headers">
             <Icon icon={Terminal} size={10} /> Copy as cURL
+          </button>
+          <button type="button" onClick={() => void copy("cURL command", toCurl(detail, { credentials: true }))} className={chip} title="Copy as cURL including cookies and auth headers — do not paste it anywhere shared">
+            <Icon icon={Terminal} size={10} /> Copy with credentials
           </button>
         </div>
         <Headers headers={detail.request_headers} />

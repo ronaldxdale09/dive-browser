@@ -167,6 +167,22 @@ describe("NetworkPanel", () => {
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('{\n  "ok": true\n}'));
   });
 
+  it("copies cURL without cookies, and with them only on the separate button", async () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(2) } });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({
+      method: "GET", url: "https://a.dev/api/item-1", status: 200, mime_type: "application/json",
+      request_headers: { accept: "application/json", cookie: "sid=1" }, request_body: null,
+      response_headers: {}, response_body: null, response_body_note: null, rewrites: [],
+    });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-1").closest("tr")!);
+    const writeText = vi.spyOn(ipc, "clipboardWriteText").mockResolvedValue(null);
+    fireEvent.click(await screen.findByRole("button", { name: "Copy as cURL" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("curl 'https://a.dev/api/item-1' \\\n  -H 'accept: application/json'"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy with credentials" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining("-H 'cookie: sid=1'")));
+  });
+
   it("says what a workspace rule did to the request, since the headers shown are the page's own", async () => {
     useNetwork.setState({ byTab: { "tab-1": rows(2) } });
     vi.spyOn(ipc, "requestDetail").mockResolvedValue({
