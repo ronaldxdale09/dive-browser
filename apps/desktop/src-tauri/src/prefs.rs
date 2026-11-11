@@ -1034,7 +1034,7 @@ pub fn chrome_only_change(previous: &Prefs, next: &Prefs) -> bool {
 pub struct ClearRequest {
     /// Visited pages.
     pub history: bool,
-    /// Cookies of every profile with an open tab.
+    /// Cookies of this profile's containers.
     pub cookies: bool,
     /// HTTP cache.
     pub cache: bool,
@@ -1266,8 +1266,12 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<ClearOutco
             .checked_sub(time::Duration::hours(i64::from(hours)))
             .map(dive_core::Timestamp)
     });
-    let (mut done, mut failures) = clear_records(state, what, since);
-    let containers = open_containers(state);
+    let profile = {
+        let store = lock(&state.store);
+        crate::commands::active_profile(&store, *lock(&state.active_workspace))?.id
+    };
+    let (mut done, mut failures) = clear_records(state, what, since, profile);
+    let containers = open_containers(state, profile);
     for (session, origins) in containers.values() {
         if what.cookies
             && let Err(error) = session.call0("Network.clearBrowserCookies").await
@@ -1306,16 +1310,8 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<ClearOutco
     }
     let restart_needed = what.cookies || what.cache || what.site_data;
     if restart_needed {
-        let queued = lock(&state.store).containers().map(|containers| {
-            containers
-                .into_iter()
-                .map(|container| container.cache_dir)
-                .collect::<Vec<String>>()
-        });
-        match queued
-            .map_err(AppError::from)
-            .and_then(|profiles| queue_profile_clear(&profiles, what))
-        {
+        let queued = containers_to_queue(&lock(&state.store), profile);
+        match queued.and_then(|profiles| queue_profile_clear(&profiles, what)) {
             Ok(()) => {}
             Err(error) => failures.push(format!("Closed profiles: {error}")),
         }
@@ -1331,24 +1327,41 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<ClearOutco
     })
 }
 
+/// The cache folders of the containers a clear for `profile` must queue for
+/// the next launch: that profile's own, never another's.
+fn containers_to_queue(
+    store: &dive_core::Store,
+    profile: dive_core::ProfileId,
+) -> AppResult<Vec<String>> {
+    Ok(store
+        .containers_of_profile(profile)?
+        .into_iter()
+        .map(|container| container.cache_dir)
+        .collect())
+}
+
 /// Clear what Dive keeps itself -- history, download records, form entries
 /// -- and say what went and what could not.
 fn clear_records(
     state: &AppState,
     what: ClearRequest,
     since: Option<dive_core::Timestamp>,
+    profile: dive_core::ProfileId,
 ) -> (Vec<String>, Vec<String>) {
     let mut done: Vec<String> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     if what.history {
         let store = crate::state::lock(&state.store);
-        let cleared = store.clear_history_since(since).and_then(|n| {
+        let cleared = store.history_origins(profile).and_then(|origins| {
+            // Read before the delete: the rows are what name the sites.
+            let n = store.clear_history_for(profile, since)?;
             // Icons record which sites were visited, but not when; they go
-            // with the whole of history, not with the last hour of it.
+            // with the whole of history, not with the last hour of it, and
+            // stay where another profile still reaches the same site.
             if since.is_none() {
-                store.clear_favicons()?;
+                store.clear_favicons_for(&origins)?;
             }
-            let downloads = store.clear_downloads_since(since)?;
+            let downloads = store.clear_downloads_for(profile, since)?;
             Ok((n, downloads))
         });
         drop(store);
@@ -1364,16 +1377,9 @@ fn clear_records(
     }
     if what.forms {
         let store = crate::state::lock(&state.store);
-        let active = *crate::state::lock(&state.active_workspace);
-        let profile = active
-            .and_then(|id| store.workspace(id).ok())
-            .map(|w| w.profile_id)
-            .or_else(|| store.profiles().ok()?.into_iter().next().map(|p| p.id));
-        if let Some(profile) = profile {
-            match store.clear_form_entries_since(profile, since) {
-                Ok(n) => done.push(counted(n, "form entry", "form entries")),
-                Err(error) => failures.push(format!("Form entries: {error}")),
-            }
+        match store.clear_form_entries_since(profile, since) {
+            Ok(n) => done.push(counted(n, "form entry", "form entries")),
+            Err(error) => failures.push(format!("Form entries: {error}")),
         }
     }
     (done, failures)
@@ -1383,6 +1389,7 @@ fn clear_records(
 /// page open in that container.
 fn open_containers(
     state: &AppState,
+    profile: dive_core::ProfileId,
 ) -> std::collections::HashMap<
     dive_core::ContainerId,
     (CdpSession, std::collections::BTreeSet<String>),
@@ -1401,6 +1408,9 @@ fn open_containers(
         else {
             continue;
         };
+        if workspace.profile_id != profile {
+            continue;
+        }
         let (_, origins) = containers
             .entry(workspace.container_id)
             .or_insert_with(|| (session, std::collections::BTreeSet::new()));
@@ -1681,6 +1691,32 @@ mod tests {
         );
         assert!(targets.iter().any(|path| path.ends_with("Network/Cookies")));
         assert!(!targets.iter().any(|path| path.ends_with("IndexedDB")));
+    }
+
+    #[test]
+    fn a_clear_queues_only_the_active_profile_s_containers() {
+        use dive_core::{Container, Profile, Store, Workspace};
+        let store = Store::in_memory().unwrap();
+        let mut made = Vec::new();
+        for (position, name) in [(0, "one"), (1, "two")] {
+            let home = Container::new(name);
+            let own = Container::new(format!("{name}-own"));
+            store.upsert_container(&home).unwrap();
+            store.upsert_container(&own).unwrap();
+            let profile = Profile::new(name, home.id, position);
+            store.upsert_profile(&profile).unwrap();
+            store
+                .upsert_workspace(&Workspace::new(name, own.id, profile.id, 0))
+                .unwrap();
+            made.push((profile.id, [home.cache_dir, own.cache_dir]));
+        }
+        for (profile, dirs) in made {
+            let mut queued = containers_to_queue(&store, profile).unwrap();
+            queued.sort();
+            let mut want = dirs.to_vec();
+            want.sort();
+            assert_eq!(queued, want);
+        }
     }
 
     #[test]

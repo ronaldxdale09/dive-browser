@@ -4,6 +4,7 @@
 //! the store is `Send` but not `Sync`, so wrap it in a mutex or dedicate a
 //! thread to it.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -2392,11 +2393,48 @@ impl Store {
     /// Delete every visit of this profile; returns how many rows went.
     pub fn clear_history(&self) -> Result<usize> {
         let scope = self.scope()?;
+        self.clear_all_history_in(&scope)
+    }
+
+    fn clear_all_history_in(&self, profile: &str) -> Result<usize> {
         let tx = self.conn.unchecked_transaction()?;
-        let gone = tx.execute("DELETE FROM history WHERE profile_id = ?1", [&scope])?;
-        tx.execute("DELETE FROM urls WHERE profile_id = ?1", [&scope])?;
+        let gone = tx.execute("DELETE FROM history WHERE profile_id = ?1", [profile])?;
+        tx.execute("DELETE FROM urls WHERE profile_id = ?1", [profile])?;
         tx.commit()?;
         Ok(gone)
+    }
+
+    /// Delete `profile`'s visits made at or after `since`, or every visit
+    /// when `since` is `None`; the profile is named, not read from the
+    /// active-workspace setting.
+    pub fn clear_history_for(&self, profile: ProfileId, since: Option<Timestamp>) -> Result<usize> {
+        self.clear_history_in(&profile.to_string(), since)
+    }
+
+    /// The origins of every page `profile` has visited.
+    pub fn history_origins(&self, profile: ProfileId) -> Result<BTreeSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT url FROM history WHERE profile_id = ?1")?;
+        let rows = stmt.query_map([profile.to_string()], |r| r.get::<_, String>(0))?;
+        let mut origins = BTreeSet::new();
+        for url in rows {
+            if let Some(origin) = crate::origin_of(&url?) {
+                origins.insert(origin);
+            }
+        }
+        Ok(origins)
+    }
+
+    /// The containers `profile` browses in: its own plus its workspaces'.
+    pub fn containers_of_profile(&self, profile: ProfileId) -> Result<Vec<Container>> {
+        let mut ids = vec![self.profile(profile)?.container_id];
+        for workspace in self.workspaces_for_profile(profile)? {
+            if !ids.contains(&workspace.container_id) {
+                ids.push(workspace.container_id);
+            }
+        }
+        ids.into_iter().map(|id| self.container(id)).collect()
     }
 
     /// Forget every cached site icon. Icons record which origins were
@@ -2405,6 +2443,39 @@ impl Store {
     pub fn clear_favicons(&self) -> Result<usize> {
         let tx = self.conn.unchecked_transaction()?;
         let gone = tx.execute("DELETE FROM favicons", [])?;
+        tx.execute(
+            "DELETE FROM favicon_images
+             WHERE key NOT IN (SELECT favicon FROM tabs WHERE favicon IS NOT NULL)",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(gone)
+    }
+
+    /// Forget the cached icons of `origins` -- the sites a profile's cleared
+    /// history named -- except where a remaining history or bookmark row
+    /// still reaches the same origin. Icons are stored once per origin for
+    /// every profile, so deleting one another profile shows would take it
+    /// from them.
+    pub fn clear_favicons_for(&self, origins: &BTreeSet<String>) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut gone = 0;
+        {
+            // A range, not LIKE: `_` and `%` are legal in an address. '0'
+            // is the character after '/', so this matches `origin/...` only.
+            let mut used = tx.prepare(
+                "SELECT EXISTS(SELECT 1 FROM history WHERE url >= ?1 AND url < ?2)
+                     OR EXISTS(SELECT 1 FROM bookmarks WHERE url >= ?1 AND url < ?2)",
+            )?;
+            let mut forget = tx.prepare("DELETE FROM favicons WHERE origin = ?1")?;
+            for origin in origins {
+                let low = format!("{origin}/");
+                let high = format!("{origin}0");
+                if !used.query_row(params![low, high], |r| r.get::<_, bool>(0))? {
+                    gone += forget.execute([origin])?;
+                }
+            }
+        }
         tx.execute(
             "DELETE FROM favicon_images
              WHERE key NOT IN (SELECT favicon FROM tabs WHERE favicon IS NOT NULL)",
@@ -2474,11 +2545,15 @@ impl Store {
     /// both before and after keeps its row, counted and dated by the visits
     /// that are left.
     pub fn clear_history_since(&self, since: Option<Timestamp>) -> Result<usize> {
+        let scope = self.scope()?;
+        self.clear_history_in(&scope, since)
+    }
+
+    fn clear_history_in(&self, scope: &str, since: Option<Timestamp>) -> Result<usize> {
         let Some(since) = since else {
-            return self.clear_history();
+            return self.clear_all_history_in(scope);
         };
         let since = since.to_rfc3339();
-        let scope = self.scope()?;
         let tx = self.conn.unchecked_transaction()?;
         let touched: Vec<String> = {
             let mut stmt = tx.prepare(
@@ -2734,6 +2809,19 @@ impl Store {
     /// Only the list: every file stays where it was saved.
     pub fn clear_downloads_since(&self, since: Option<Timestamp>) -> Result<usize> {
         let scope = self.scope()?;
+        self.clear_downloads_in(&scope, since)
+    }
+
+    /// [`Self::clear_downloads_since`] for a named profile.
+    pub fn clear_downloads_for(
+        &self,
+        profile: ProfileId,
+        since: Option<Timestamp>,
+    ) -> Result<usize> {
+        self.clear_downloads_in(&profile.to_string(), since)
+    }
+
+    fn clear_downloads_in(&self, scope: &str, since: Option<Timestamp>) -> Result<usize> {
         Ok(match since {
             None => self
                 .conn
@@ -4470,6 +4558,126 @@ mod tests {
         assert!(store.remove_bookmark("https://a.dev/").unwrap());
         assert!(!store.remove_bookmark("https://a.dev/").unwrap());
         assert!(!store.is_bookmarked("https://a.dev/").unwrap());
+    }
+
+    /// Two profiles, each with its own container, for the clearing tests.
+    fn two_profiles(store: &Store) -> (ProfileId, ProfileId) {
+        let now = Timestamp::now();
+        let (a, b) = (ProfileId::new(), ProfileId::new());
+        for (profile, name, position) in [(a, "A", 0), (b, "B", 1)] {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO containers (id, name, cache_dir) VALUES (?1, ?2, ?3)",
+                    params![profile.to_string(), name, format!("c-{name}")],
+                )
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO profiles (id, name, color, avatar, container_id, position, created_at)
+                     VALUES (?1, ?2, '#000', 'a', ?1, ?3, ?4)",
+                    params![profile.to_string(), name, position, now.to_rfc3339()],
+                )
+                .unwrap();
+        }
+        (a, b)
+    }
+
+    fn visit_as(store: &Store, profile: ProfileId, url: &str) {
+        store
+            .conn
+            .execute(
+                "INSERT INTO history (url, title, visited_at, profile_id) VALUES (?1, '', ?2, ?3)",
+                params![url, Timestamp::now().to_rfc3339(), profile.to_string()],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn clearing_one_profile_s_history_keeps_icons_another_profile_uses() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = two_profiles(&store);
+        visit_as(&store, a, "https://shared.test/x");
+        visit_as(&store, a, "https://only-a.test/");
+        visit_as(&store, b, "https://shared.test/y");
+        for origin in [
+            "https://shared.test",
+            "https://only-a.test",
+            "https://b.test",
+        ] {
+            store
+                .set_favicon(origin, "data:image/png;base64,AA", "t")
+                .unwrap();
+        }
+        let origins = store.history_origins(a).unwrap();
+        assert_eq!(origins.len(), 2);
+        assert_eq!(store.clear_history_for(a, None).unwrap(), 2);
+        assert_eq!(store.clear_favicons_for(&origins).unwrap(), 1);
+        assert!(store.favicon("https://only-a.test").unwrap().is_none());
+        assert!(store.favicon("https://shared.test").unwrap().is_some());
+        assert!(store.favicon("https://b.test").unwrap().is_some());
+        let left: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM history WHERE profile_id = ?1",
+                [b.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 1);
+    }
+
+    #[test]
+    fn an_origin_prefix_is_not_a_match() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = two_profiles(&store);
+        visit_as(&store, a, "https://a.test/");
+        visit_as(&store, b, "https://a.test.evil/");
+        store
+            .set_favicon("https://a.test", "data:image/png;base64,AA", "t")
+            .unwrap();
+        let origins = store.history_origins(a).unwrap();
+        store.clear_history_for(a, None).unwrap();
+        assert_eq!(store.clear_favicons_for(&origins).unwrap(), 1);
+        assert!(store.favicon("https://a.test").unwrap().is_none());
+    }
+
+    #[test]
+    fn containers_of_profile_lists_only_that_profile_s() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = two_profiles(&store);
+        let now = Timestamp::now();
+        for (profile, name) in [(a, "wa"), (b, "wb")] {
+            let container = ContainerId::new();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO containers (id, name, cache_dir) VALUES (?1, ?2, ?3)",
+                    params![container.to_string(), name, format!("c-{name}")],
+                )
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO workspaces (id, name, color, icon, container_id, profile_id, position, created_at)
+                     VALUES (?1, 'w', '#000', 'i', ?2, ?3, 0, ?4)",
+                    params![WorkspaceId::new().to_string(), container.to_string(), profile.to_string(), now.to_rfc3339()],
+                )
+                .unwrap();
+        }
+        let dirs = |profile| {
+            let mut dirs: Vec<String> = store
+                .containers_of_profile(profile)
+                .unwrap()
+                .into_iter()
+                .map(|c| c.cache_dir)
+                .collect();
+            dirs.sort();
+            dirs
+        };
+        assert_eq!(dirs(a), ["c-A", "c-wa"]);
+        assert_eq!(dirs(b), ["c-B", "c-wb"]);
     }
 
     #[test]

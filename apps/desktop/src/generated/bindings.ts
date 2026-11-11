@@ -1445,7 +1445,7 @@ export type ClearOutcome = {
 export type ClearRequest = {
 	/**  Visited pages. */
 	history: boolean,
-	/**  Cookies of every profile with an open tab. */
+	/**  Cookies of this profile's containers. */
 	cookies: boolean,
 	/**  HTTP cache. */
 	cache: boolean,

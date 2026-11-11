@@ -43,7 +43,7 @@ describe("Settings › Privacy › Clear browsing data", () => {
       restart_needed: true,
     });
     render(<Privacy />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Cookies and signed-in sessions" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Cookies and signed-in sessions in this profile" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear now…" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(await screen.findByText(/Cleared 3 history entries and cookies/)).toBeTruthy();

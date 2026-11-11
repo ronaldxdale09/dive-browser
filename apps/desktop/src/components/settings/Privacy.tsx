@@ -636,7 +636,7 @@ function ClearData() {
     <Group
       id="clear-browsing-data"
       title="Clear browsing data"
-      description="Open profiles clear immediately. Cookies, cache and site data in profiles that are not open go when Dive next starts."
+      description="Clears this profile only. Its open tabs clear at once; cookies, cache and site data of its tabs that are not open go when Dive next starts."
     >
       <div className="flex flex-col gap-2 py-3">
         <label className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
@@ -652,9 +652,9 @@ function ClearData() {
           />
         </label>
         <Check label="Browsing and download history in this profile" checked={what.history} onChange={(history) => pick({ history })} />
-        <Check label="Cookies and signed-in sessions" checked={what.cookies} onChange={(cookies) => pick({ cookies })} />
-        <Check label="Cached files" checked={what.cache} onChange={(cache) => pick({ cache })} />
-        <Check label="Site data (local storage, IndexedDB) — sites open now at once, the rest when Dive restarts" checked={what.site_data} onChange={(site_data) => pick({ site_data })} />
+        <Check label="Cookies and signed-in sessions in this profile" checked={what.cookies} onChange={(cookies) => pick({ cookies })} />
+        <Check label="Cached files in this profile" checked={what.cache} onChange={(cache) => pick({ cache })} />
+        <Check label="Site data (local storage, IndexedDB) in this profile — open sites at once, the rest when Dive restarts" checked={what.site_data} onChange={(site_data) => pick({ site_data })} />
         <Check label="Form entries in this profile" checked={what.forms} onChange={(forms) => pick({ forms })} />
         <p className="text-10.5 text-ink-3">
           The time range applies to history, downloads and form entries. Cookies, cached files and site data have no dates Chromium can clear by, so they are always cleared in full. Saved passwords are not touched here; manage them under Passwords &amp; forms.
