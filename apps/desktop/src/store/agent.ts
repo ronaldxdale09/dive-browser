@@ -249,11 +249,6 @@ function batchDeltas(apply: (deltas: ChatDeltaOut[]) => void) {
   return { push, flush };
 }
 
-/** The provider currently selected in preferences, with its catalog row. */
-export function currentProvider(providers: ProviderInfo[]): ProviderInfo | undefined {
-  const id = usePrefs.getState().prefs.agent_provider;
-  return providers.find((p) => p.id === id);
-}
 
 /** Whether `provider` can be used right now: it has a key, or needs none. */
 export function isReady(provider: ProviderInfo | undefined, keyed: Provider[]): boolean {

@@ -59,14 +59,6 @@ const APPS: AppEntry[] = [
   { id: "library", name: "Library", blurb: "Bookmarks, history, downloads and recordings, by profile.", category: "yours", command: "library.open", keywords: "bookmarks history downloads recordings" },
 ];
 
-/** Registry ids some cards run that the command list itself does not carry. */
-const EXTRA: Record<string, () => void> = {};
-
-/** Register a chrome-side action for a card whose command lives outside the registry. */
-export function registerAppAction(command: string, run: () => void) {
-  EXTRA[command] = run;
-}
-
 /** The cards this window can show: a private window keeps its own list short. */
 export function appsFor(privateWindow = isPrivateWindow()): AppEntry[] {
   const refused = new Set(["sidecar.toggle", "extensions.open", "subtitles.open", "settings.passwords", "library.open"]);
@@ -90,7 +82,5 @@ export function searchApps(apps: AppEntry[], query: string): AppEntry[] {
 
 /** Run a card. */
 export function launchApp(app: AppEntry) {
-  const extra = EXTRA[app.command];
-  if (extra) extra();
-  else runCommand(app.command);
+  runCommand(app.command);
 }

@@ -203,6 +203,3 @@ function belongsToWindow(tabId: string | null | undefined, tabIds: ReadonlySet<s
   if (tabId == null || tabId === "") return true;
   return tabIds.has(tabId);
 }
-
-/** Session-wide in-flight count. Prefer `selectActiveInWindow` for chrome. */
-export const selectActive = (s: DownloadsState) => s.items.filter((d) => d.status === "started").length;

@@ -153,17 +153,3 @@ export const selectEntries = (tabId: string | null) => (s: ConsoleState) => (tab
 export function isNoise(e: ConsoleEntry): boolean {
   return e.level === "error" && (e.url?.endsWith("/favicon.ico") === true || e.text.includes("favicon.ico"));
 }
-
-/**
- * Errors and exceptions for a tab, newest last. Builds a new array per call, so
- * derive from `selectEntries` with `useMemo` in components rather than passing
- * this to the store hook directly.
- */
-export const selectErrors = (tabId: string | null) => (s: ConsoleState) => {
-  const list = tabId ? (s.byTab[tabId] ?? EMPTY) : EMPTY;
-  return list === EMPTY ? EMPTY : list.filter((e) => e.level === "error" && !isNoise(e));
-};
-
-/** Count of error-level entries for a tab; stable primitive for selectors. */
-export const selectErrorCount = (tabId: string | null) => (s: ConsoleState) =>
-  tabId ? (s.byTab[tabId] ?? EMPTY).reduce((n, e) => (e.level === "error" && !isNoise(e) ? n + 1 : n), 0) : 0;

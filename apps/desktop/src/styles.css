@@ -231,26 +231,6 @@ button:not(:disabled):active,
 }
 
 /* Agent panel and onboarding animations */
-@keyframes agent-pulse {
-  0%, 100% {
-    opacity: 0.6;
-    transform: scale(0.96);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.04);
-  }
-}
-
-@keyframes agent-float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-2.5px);
-  }
-}
-
 @keyframes agent-slide-up {
   from {
     opacity: 0;
@@ -262,34 +242,8 @@ button:not(:disabled):active,
   }
 }
 
-@keyframes agent-pop {
-  0% {
-    transform: scale(0.7);
-    opacity: 0;
-  }
-  60% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.animate-agent-pulse {
-  animation: agent-pulse 3s ease-in-out infinite;
-}
-
-.animate-agent-float {
-  animation: agent-float 3.5s ease-in-out infinite;
-}
-
 .animate-agent-slide-up {
   animation: agent-slide-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-agent-pop {
-  animation: agent-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 /* Dialogs and menus over the page. The page itself is a native view that the
@@ -438,23 +392,6 @@ button:not(:disabled):active,
   will-change: transform, opacity;
 }
 
-/* Progress indicator for omnibox loading */
-@keyframes loading-progress {
-  0% {
-    transform: translateX(-100%);
-  }
-  50% {
-    transform: translateX(30%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-.animate-loading-bar {
-  animation: loading-progress 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  will-change: transform;
-}
-
 /* Tab dragging stays compositor-only: the lifted pill and split affordances
    animate with opacity/transform, never layout, filters or large repaints. */
 @keyframes tab-lift-in {
@@ -527,10 +464,7 @@ button:not(:disabled):active,
     --dialog-fade: 0ms;
   }
   :root:not([data-motion="full"]) :is(
-    .animate-agent-pulse,
-    .animate-agent-float,
     .animate-agent-slide-up,
-    .animate-agent-pop,
     .animate-pulse,
     .animate-ping,
     .animate-spin,
@@ -543,7 +477,6 @@ button:not(:disabled):active,
     .popover-leave,
     .surface-enter,
     .skeleton-enter,
-    .animate-loading-bar,
     .tab-drag-ghost,
     .tab-drop-zone,
     .privacy-motion,
@@ -570,10 +503,7 @@ button:not(:disabled):active,
   --dialog-fade: 0ms;
 }
 :root[data-motion="reduce"] :is(
-  .animate-agent-pulse,
-  .animate-agent-float,
   .animate-agent-slide-up,
-  .animate-agent-pop,
   .animate-pulse,
   .animate-ping,
   .animate-spin,
@@ -586,7 +516,6 @@ button:not(:disabled):active,
   .popover-leave,
   .surface-enter,
   .skeleton-enter,
-  .animate-loading-bar,
   .tab-drag-ghost,
   .tab-drop-zone,
   .privacy-motion,
