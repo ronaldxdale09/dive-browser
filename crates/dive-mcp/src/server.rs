@@ -9,7 +9,7 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
-    Implementation, JsonObject, ServerCapabilities, ServerInfo,
+    Implementation, InitializeResult, JsonObject, ServerCapabilities,
 };
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
@@ -1565,8 +1565,8 @@ impl<B: Browser> ServerHandler for DiveServer<B> {
         .into())
     }
 
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> InitializeResult {
+        InitializeResult::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_prompts()

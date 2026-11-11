@@ -11,19 +11,15 @@
 # must say which of our dependencies pulls it in, so the list can be re-checked
 # on a dependency bump rather than accumulating forever.
 ignore = [
-    # gtk-rs GTK3 bindings, all unmaintained with no successor for GTK3.
-    # Transitive via tauri's Linux backend; Dive ships macOS only today, so
-    # none of this is in the shipped binary. Revisit when Linux is a target.
-    "RUSTSEC-2024-0412",
-    "RUSTSEC-2024-0413",
-    "RUSTSEC-2024-0415",
-    "RUSTSEC-2024-0416",
-    "RUSTSEC-2024-0418",
-    "RUSTSEC-2024-0419",
-    "RUSTSEC-2024-0420",
     "RUSTSEC-2025-0057", # fxhash, transitive via selectors -> kuchikiki
     "RUSTSEC-2024-0436", # paste, transitive via specta
     "RUSTSEC-2024-0370", # proc-macro-error, transitive via glib
+    # zbus D-Bus stack, merged into zbus 6 with no 5.x successor. Transitive via
+    # rfd -> ashpd (the Linux XDG portal file dialog); not compiled for the
+    # macOS or Windows targets Dive ships.
+    "RUSTSEC-2026-0370", # zvariant
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0372", # zvariant_derive
     # ttf-parser, transitive via ab_glyph -> sctk-adwaita -> winit (Linux
     # windowing again). `skrifa` is the successor but nothing upstream has
     # moved yet.

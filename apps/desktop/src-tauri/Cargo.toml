@@ -47,7 +47,11 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = "0.2"
-tauri-plugin-updater = "2"
+# Without the default `zip` feature: the Windows update payload is the NSIS
+# installer itself and macOS reads .app.tar.gz (tar/flate2 stay on macOS), so
+# zip extraction is unused, and the zip 4 it pulls in carries advisories that
+# only tauri-plugin-updater >= 2.14 (needs tauri >= 2.12) fixes.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 rfd = "0.16"
 rusqlite = { workspace = true }
 plist = "1"
