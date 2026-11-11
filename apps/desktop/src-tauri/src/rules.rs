@@ -104,6 +104,10 @@ impl TopFrameContext {
         &self.document_url
     }
 
+    fn frame_id(&self) -> Option<&str> {
+        self.frame_id.as_deref()
+    }
+
     fn document_host(&self) -> Option<&str> {
         self.document_host.as_deref()
     }
@@ -797,7 +801,12 @@ pub fn attach(
             // the rules: it goes straight to the chrome, which asks the
             // person and answers it.
             if event.method == "Fetch.authRequired" {
-                crate::http_auth::on_auth_required(&app, tab_id, &event.params);
+                let origin = crate::http_auth::Origin {
+                    top_frame_id: top_frame.frame_id(),
+                    top_document_url: top_frame.document_url(),
+                };
+                crate::http_auth::on_auth_required(&app, &session, tab_id, &event.params, &origin)
+                    .await;
                 continue;
             }
             if event.method != "Fetch.requestPaused" {
@@ -1150,6 +1159,17 @@ mod tests {
         ));
 
         assert_eq!(context.document_url(), "");
+    }
+
+    #[test]
+    fn the_top_frame_id_is_known_after_navigation() {
+        let mut context = TopFrameContext::new("https://protected.test/");
+        assert_eq!(context.frame_id(), None);
+        context.observe(&event(
+            "Page.frameNavigated",
+            json!({"frame": {"id": "main", "url": "https://protected.test/"}}),
+        ));
+        assert_eq!(context.frame_id(), Some("main"));
     }
 
     #[test]
