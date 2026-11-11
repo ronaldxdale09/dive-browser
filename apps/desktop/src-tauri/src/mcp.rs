@@ -1589,6 +1589,38 @@ const COOKIE_ANSWER_TTL: std::time::Duration = std::time::Duration::from_mins(10
 /// How long a question waits for the person before it counts as a no.
 const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(2);
 
+/// The `Network.deleteCookies` calls that clear `cookies` (as returned for
+/// `url`) and nothing else. A cookie without a name cannot be addressed, so
+/// it is skipped.
+fn cookie_deletions(cookies: &[Value], url: &str) -> Vec<Value> {
+    cookies
+        .iter()
+        .filter_map(|cookie| {
+            let name = cookie["name"].as_str()?;
+            Some(json!({"name": name, "url": url, "domain": cookie["domain"], "path": cookie["path"]}))
+        })
+        .collect()
+}
+
+/// Whether the person already said yes, recently enough, to this kind of
+/// read for `origin`: a cookie yes also covers stored data, since a full read
+/// returns both; a stored-data yes covers stored data only.
+fn answered_yes_at(
+    answers: &std::collections::HashMap<String, std::time::Instant>,
+    origin: &str,
+    cookies: bool,
+    storage: bool,
+    now: std::time::Instant,
+) -> bool {
+    let storage_key = format!("{origin} storage");
+    let fresh = |key: &str| {
+        answers
+            .get(key)
+            .is_some_and(|at| now.saturating_duration_since(*at) < COOKIE_ANSWER_TTL)
+    };
+    (cookies && fresh(origin)) || (storage && (fresh(origin) || fresh(&storage_key)))
+}
+
 /// Sites whose cookies the person agreed a client may read, and when.
 fn cookie_answers()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>> {
@@ -1772,12 +1804,13 @@ impl Browser for AppBrowser {
         let storage = matches!(step, dive_mcp::Sensitive::ReadStorage { .. });
         let storage_key = format!("{origin} storage");
         let answered_yes = |answers: &std::collections::HashMap<String, std::time::Instant>| {
-            let fresh = |key: &str| {
-                answers
-                    .get(key)
-                    .is_some_and(|at| at.elapsed() < COOKIE_ANSWER_TTL)
-            };
-            (cookies && fresh(&origin)) || (storage && (fresh(&origin) || fresh(&storage_key)))
+            answered_yes_at(
+                answers,
+                &origin,
+                cookies,
+                storage,
+                std::time::Instant::now(),
+            )
         };
         if answered_yes(&lock(cookie_answers())) {
             return Ok(approved());
@@ -3310,15 +3343,9 @@ impl Browser for AppBrowser {
                 .map_err(|e| other(e.to_string()))?;
             let empty = Vec::new();
             let cookies = answer["cookies"].as_array().unwrap_or(&empty);
-            for cookie in cookies {
-                let Some(name) = cookie["name"].as_str() else {
-                    continue;
-                };
+            for deletion in cookie_deletions(cookies, &url) {
                 session
-                    .call(
-                        "Network.deleteCookies",
-                        json!({"name": name, "url": url, "domain": cookie["domain"], "path": cookie["path"]}),
-                    )
+                    .call("Network.deleteCookies", deletion)
                     .await
                     .map_err(|e| other(e.to_string()))?;
             }
@@ -4609,5 +4636,133 @@ mod tool_session_tests {
         wait.abort();
         assert!(wait.await.unwrap_err().is_cancelled());
         assert!(activity.ticket(tab).is_some());
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn clearing_cookies_deletes_each_named_cookie_of_this_page_and_no_other() {
+        let url = "https://a.test/app";
+        let cookies = vec![
+            json!({"name": "sid", "domain": "a.test", "path": "/", "value": "secret"}),
+            json!({"name": "pref", "domain": ".a.test", "path": "/app"}),
+        ];
+        let calls = cookie_deletions(&cookies, url);
+        assert_eq!(calls.len(), 2);
+        for (call, cookie) in calls.iter().zip(&cookies) {
+            assert_eq!(call["url"], url);
+            assert_eq!(call["name"], cookie["name"]);
+            assert_eq!(call["domain"], cookie["domain"]);
+            assert_eq!(call["path"], cookie["path"]);
+            // Nothing that would widen the call beyond that one cookie.
+            assert_eq!(call.as_object().unwrap().len(), 4, "{call}");
+        }
+    }
+
+    #[test]
+    fn a_cookie_without_a_name_is_skipped() {
+        let cookies = vec![
+            json!({"domain": "a.test", "path": "/"}),
+            json!({"name": 7, "domain": "a.test", "path": "/"}),
+            json!({"name": "sid", "domain": "a.test", "path": "/"}),
+        ];
+        let calls = cookie_deletions(&cookies, "https://a.test/");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "sid");
+    }
+
+    #[test]
+    fn no_cookies_means_no_deletions() {
+        assert!(cookie_deletions(&[], "https://a.test/").is_empty());
+    }
+
+    #[test]
+    fn a_cookie_answer_covers_its_own_site_only() {
+        let at = Instant::now();
+        let answers = HashMap::from([("https://a.test".to_owned(), at)]);
+        assert!(answered_yes_at(&answers, "https://a.test", true, false, at));
+        assert!(!answered_yes_at(
+            &answers,
+            "https://b.test",
+            true,
+            false,
+            at
+        ));
+        assert!(!answered_yes_at(
+            &answers,
+            "https://b.test",
+            false,
+            true,
+            at
+        ));
+    }
+
+    #[test]
+    fn a_cookie_answer_stands_for_ten_minutes_and_no_longer() {
+        let at = Instant::now();
+        let answers = HashMap::from([("https://a.test".to_owned(), at)]);
+        let after = |minutes| at + Duration::from_mins(minutes);
+        assert!(answered_yes_at(
+            &answers,
+            "https://a.test",
+            true,
+            false,
+            after(9)
+        ));
+        assert!(!answered_yes_at(
+            &answers,
+            "https://a.test",
+            true,
+            false,
+            after(10)
+        ));
+        assert!(!answered_yes_at(
+            &answers,
+            "https://a.test",
+            true,
+            false,
+            after(11)
+        ));
+    }
+
+    #[test]
+    fn a_cookie_yes_covers_stored_data_but_a_storage_yes_does_not_cover_cookies() {
+        let at = Instant::now();
+        let cookie_yes = HashMap::from([("https://a.test".to_owned(), at)]);
+        assert!(answered_yes_at(
+            &cookie_yes,
+            "https://a.test",
+            false,
+            true,
+            at
+        ));
+        let storage_yes = HashMap::from([("https://a.test storage".to_owned(), at)]);
+        assert!(answered_yes_at(
+            &storage_yes,
+            "https://a.test",
+            false,
+            true,
+            at
+        ));
+        assert!(!answered_yes_at(
+            &storage_yes,
+            "https://a.test",
+            true,
+            false,
+            at
+        ));
+        // Rule changes and uploads are neither, so a cached answer never covers them.
+        assert!(!answered_yes_at(
+            &cookie_yes,
+            "https://a.test",
+            false,
+            false,
+            at
+        ));
     }
 }

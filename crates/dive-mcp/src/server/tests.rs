@@ -100,6 +100,8 @@ struct Fake {
     expected: Mutex<Vec<Option<String>>>,
     /// How many times `page_storage_set` reached the browser.
     stored: std::sync::atomic::AtomicUsize,
+    /// What `page_text` answers instead of "hello", when set.
+    body: Mutex<Option<String>>,
 }
 
 #[async_trait]
@@ -159,7 +161,12 @@ impl Browser for Fake {
         Ok(())
     }
     async fn page_text(&self, _tab: TabId) -> Result<String, BrowserError> {
-        Ok("hello".into())
+        Ok(self
+            .body
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| "hello".into()))
     }
     async fn page_markdown(&self, _tab: TabId) -> Result<String, BrowserError> {
         Ok("# hello".into())
@@ -1366,4 +1373,314 @@ async fn cookie_writes_are_held_to_the_approved_origin() {
     let parsed: crate::params::StorageSetParams =
         serde_json::from_value(json!({"expect_origin": "https://evil.dev"})).unwrap();
     assert_eq!(parsed.expect_origin, None);
+}
+
+#[test]
+fn a_window_counts_characters_and_says_where_to_continue() {
+    let text = "é🙂".repeat(10);
+    let cut = window(&text, 0, 3);
+    assert!(cut.truncated);
+    assert_eq!(cut.next_cursor, Some(3));
+    assert_eq!(cut.total_chars, 20);
+    assert!(cut.text.starts_with("é🙂é\n\n["), "{}", cut.text);
+    assert!(
+        cut.text
+            .contains("[3 of 20 characters. Call again with cursor=3")
+    );
+    let body: String = cut.text.split("\n\n[").next().unwrap().into();
+    assert_eq!(body.chars().count(), 3);
+}
+
+#[test]
+fn a_cursor_past_the_end_gives_nothing_and_no_next_cursor() {
+    let cut = window("hello", 99, 10);
+    assert_eq!(cut.text, "");
+    assert!(!cut.truncated);
+    assert_eq!(cut.next_cursor, None);
+}
+
+#[test]
+fn the_character_budget_is_clamped_to_one_and_the_ceiling() {
+    let zero = window("abcdef", 0, 0);
+    assert_eq!(zero.next_cursor, Some(1));
+    assert!(zero.text.starts_with("a\n\n["), "{}", zero.text);
+    let long = "x".repeat(MAX_MAX_CHARS + 10);
+    let huge = window(&long, 0, usize::MAX);
+    assert_eq!(huge.next_cursor, Some(MAX_MAX_CHARS));
+    assert!(huge.truncated);
+}
+
+#[test]
+fn bounded_starts_a_text_block_at_the_cursor() {
+    let text: String = ('a'..='z').chain('A'..='D').collect();
+    assert_eq!(text.chars().count(), 30);
+    let response =
+        CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::text(text)]));
+    let CallToolResponse::Complete(result) = bounded(response, 10, 5) else {
+        panic!("a plain result stays complete");
+    };
+    let out = text_of(&result);
+    assert!(out.starts_with("klmno\n\n["), "{out}");
+    assert!(out.contains("Call again with cursor=15"), "{out}");
+}
+
+/// The JSON-RPC payload of a streamable-HTTP response, plain or one SSE frame.
+fn rpc_payload(body: &str) -> serde_json::Value {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        return v;
+    }
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
+        .find_map(|data| serde_json::from_str(data).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// A live MCP session over loopback HTTP, so calls go through `dispatch`.
+struct Session {
+    client: reqwest::Client,
+    url: String,
+    sid: Option<String>,
+    next: u64,
+    handle: crate::http::Handle,
+}
+
+impl Session {
+    /// `None` when the sandbox blocks loopback TCP.
+    async fn start(fake: Arc<Fake>) -> Option<Self> {
+        let handle = serve(fake, Config::default(), "127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let url = handle.url();
+        let client = reqwest::Client::new();
+        let body = json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "dispatch-test", "version": "0"}}
+        });
+        let sent = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .body(body.to_string())
+            .send()
+            .await;
+        let resp = match sent {
+            Ok(resp) => resp,
+            Err(e) => {
+                let msg = format!("{e:?}");
+                if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
+                    eprintln!("skipping test: sandbox blocked loopback TCP connection");
+                    handle.shutdown();
+                    return None;
+                }
+                panic!("initialize failed: {e:?}");
+            }
+        };
+        let sid = resp
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let text = resp.text().await.unwrap();
+        assert!(rpc_payload(&text).get("result").is_some(), "{text}");
+        Some(Self {
+            client,
+            url,
+            sid,
+            next: 1,
+            handle,
+        })
+    }
+
+    /// `tools/call`, answering the JSON-RPC `error` or the call's `result`.
+    async fn call(&mut self, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+        self.next += 1;
+        let body = json!({
+            "jsonrpc": "2.0", "id": self.next, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}
+        });
+        let mut req = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .body(body.to_string());
+        if let Some(sid) = &self.sid {
+            req = req.header("Mcp-Session-Id", sid);
+        }
+        let text = req.send().await.unwrap().text().await.unwrap();
+        let payload = rpc_payload(&text);
+        payload
+            .get("error")
+            .or_else(|| payload.get("result"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no result in {text}"))
+    }
+
+    fn finish(self) {
+        self.handle.shutdown();
+    }
+}
+
+/// What a call answered, as text: an error's message or a result's text blocks.
+fn answer_text(answer: &serde_json::Value) -> String {
+    if let Some(message) = answer["message"].as_str() {
+        return message.to_owned();
+    }
+    answer["content"]
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|b| b["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+fn only_tab(fake: &Fake) -> String {
+    fake.tabs.lock().unwrap()[0].id.clone()
+}
+
+#[tokio::test]
+async fn dispatch_refuses_another_holder_on_a_claimed_tab() {
+    let fake = Arc::new(seeded_fake());
+    let tab = only_tab(&fake);
+    let Some(mut session) = Session::start(Arc::clone(&fake)).await else {
+        return;
+    };
+    let claim = session
+        .call("tab_claim", json!({"tab_id": tab, "holder": "A"}))
+        .await;
+    assert_ne!(claim["isError"], true, "{claim}");
+    let refused = session
+        .call(
+            "tab_navigate",
+            json!({"tab_id": tab, "url": "https://b.dev", "holder": "B"}),
+        )
+        .await;
+    assert!(answer_text(&refused).contains("\"A\""), "{refused}");
+    assert!(fake.navigated.lock().unwrap().is_empty());
+    let allowed = session
+        .call(
+            "tab_navigate",
+            json!({"tab_id": tab, "url": "https://b.dev", "holder": "A"}),
+        )
+        .await;
+    assert_ne!(allowed["isError"], true, "{allowed}");
+    assert_eq!(fake.navigated.lock().unwrap().len(), 1);
+    session.finish();
+}
+
+#[tokio::test]
+async fn dispatch_gives_every_batch_step_the_batch_holder() {
+    let fake = Arc::new(seeded_fake());
+    let tab = only_tab(&fake);
+    let Some(mut session) = Session::start(Arc::clone(&fake)).await else {
+        return;
+    };
+    session
+        .call("tab_claim", json!({"tab_id": tab, "holder": "A"}))
+        .await;
+    let batch = session
+        .call(
+            "page_batch",
+            json!({"holder": "A", "steps": [
+                {"tool": "tab_navigate", "arguments": {"tab_id": tab, "url": "https://1.dev"}},
+                {"tool": "tab_navigate", "arguments": {"tab_id": tab, "url": "https://2.dev"}},
+            ]}),
+        )
+        .await;
+    assert_ne!(batch["isError"], true, "{batch}");
+    assert_eq!(batch["structuredContent"]["ok"], true, "{batch}");
+    assert_eq!(batch["structuredContent"]["steps"], 2, "{batch}");
+    let urls: Vec<String> = fake
+        .navigated
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, url)| url.clone())
+        .collect();
+    assert_eq!(urls, ["https://1.dev", "https://2.dev"]);
+    // Without the batch's holder the same steps would have been refused.
+    let other = session
+        .call(
+            "page_batch",
+            json!({"holder": "B", "steps": [
+                {"tool": "tab_navigate", "arguments": {"tab_id": tab, "url": "https://3.dev"}},
+            ]}),
+        )
+        .await;
+    assert_eq!(other["structuredContent"]["ok"], false, "{other}");
+    assert_eq!(fake.navigated.lock().unwrap().len(), 2);
+    session.finish();
+}
+
+#[tokio::test]
+async fn dispatch_stops_a_batch_at_the_first_failing_step() {
+    let fake = Arc::new(seeded_fake());
+    let tab = only_tab(&fake);
+    let Some(mut session) = Session::start(Arc::clone(&fake)).await else {
+        return;
+    };
+    let batch = session
+        .call(
+            "page_batch",
+            json!({"steps": [
+                {"tool": "tab_navigate", "arguments": {"tab_id": tab, "url": "https://1.dev"}},
+                {"tool": "tab_navigate", "arguments": {"id": "x", "url": "https://2.dev"}},
+                {"tool": "tab_navigate", "arguments": {"tab_id": tab, "url": "https://3.dev"}},
+            ]}),
+        )
+        .await;
+    assert_eq!(batch["isError"], true, "{batch}");
+    assert_eq!(batch["structuredContent"]["ok"], false, "{batch}");
+    assert_eq!(batch["structuredContent"]["failed_at"], 1, "{batch}");
+    let urls: Vec<String> = fake
+        .navigated
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, url)| url.clone())
+        .collect();
+    assert_eq!(urls, ["https://1.dev"]);
+    session.finish();
+}
+
+#[tokio::test]
+async fn dispatch_refuses_a_batch_inside_a_batch() {
+    let fake = Arc::new(seeded_fake());
+    let Some(mut session) = Session::start(Arc::clone(&fake)).await else {
+        return;
+    };
+    let answer = session
+        .call(
+            "page_batch",
+            json!({"steps": [{"tool": "page_batch", "arguments": {"steps": []}}]}),
+        )
+        .await;
+    assert!(
+        answer_text(&answer).contains("a batch cannot contain a batch"),
+        "{answer}"
+    );
+    assert!(fake.navigated.lock().unwrap().is_empty());
+    session.finish();
+}
+
+#[tokio::test]
+async fn dispatch_applies_the_callers_text_budget() {
+    let fake = Arc::new(seeded_fake());
+    *fake.body.lock().unwrap() = Some("0123456789".repeat(10));
+    let tab = only_tab(&fake);
+    let Some(mut session) = Session::start(Arc::clone(&fake)).await else {
+        return;
+    };
+    let cut = session
+        .call("page_text", json!({"tab_id": tab, "max_chars": 10}))
+        .await;
+    let text = answer_text(&cut);
+    assert!(text.starts_with("0123456789\n\n["), "{text}");
+    assert!(text.contains("Call again with cursor=10"), "{text}");
+    session.finish();
 }

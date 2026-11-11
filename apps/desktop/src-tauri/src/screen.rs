@@ -136,7 +136,12 @@ pub(crate) fn recordings_list() -> AppResult<Vec<RecordingInfo>> {
 
 /// A file the editor may touch: inside the captures directory only.
 fn captured(path: &str) -> AppResult<PathBuf> {
-    let dir = crate::commands::captures_dir()?.canonicalize()?;
+    captured_in(&crate::commands::captures_dir()?, path)
+}
+
+/// `captured` for an explicit captures directory.
+fn captured_in(dir: &Path, path: &str) -> AppResult<PathBuf> {
+    let dir = dir.canonicalize()?;
     let file = Path::new(path).canonicalize()?;
     if !file.starts_with(&dir) {
         return Err(AppError::new("not a recording"));
@@ -1088,5 +1093,61 @@ mod tests {
         assert_eq!(tempo_chain(1.0), "");
         assert_eq!(tempo_chain(0.25), ",atempo=0.5000,atempo=0.5000");
         assert_eq!(tempo_chain(3.0), ",atempo=3.0000");
+    }
+
+    #[test]
+    fn captured_refuses_a_file_in_a_sibling_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let captures = root.path().join("captures");
+        let sibling = root.path().join("captures-other");
+        std::fs::create_dir(&captures).unwrap();
+        std::fs::create_dir(&sibling).unwrap();
+        let outside = sibling.join("secret.mp4");
+        std::fs::write(&outside, b"x").unwrap();
+        // A shared name prefix is not containment.
+        assert!(captured_in(&captures, outside.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn captured_refuses_dot_dot_out_of_the_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let captures = root.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        std::fs::write(root.path().join("outside.mp4"), b"x").unwrap();
+        let sneaky = format!("{}/../outside.mp4", captures.display());
+        assert!(captured_in(&captures, &sneaky).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_refuses_a_symlink_pointing_outside() {
+        let root = tempfile::tempdir().unwrap();
+        let captures = root.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        let outside = root.path().join("outside.mp4");
+        std::fs::write(&outside, b"x").unwrap();
+        let link = captures.join("clip.mp4");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(captured_in(&captures, link.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn captured_accepts_a_real_file_inside_by_canonical_path() {
+        let root = tempfile::tempdir().unwrap();
+        let captures = root.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        let clip = captures.join("clip.mp4");
+        std::fs::write(&clip, b"x").unwrap();
+        let got = captured_in(&captures, clip.to_str().unwrap()).unwrap();
+        assert_eq!(got, clip.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn captured_refuses_a_missing_file() {
+        let root = tempfile::tempdir().unwrap();
+        let captures = root.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        let missing = captures.join("nope.mp4");
+        assert!(captured_in(&captures, missing.to_str().unwrap()).is_err());
     }
 }

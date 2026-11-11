@@ -109,6 +109,16 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo clippy -p dive-desktop --all-targets --no-default-features --features cef -- -D warnings
       - run: cargo test --workspace
+      - name: Media export tests (need ffmpeg)
+        if: runner.os == 'macOS'
+        run: |
+          command -v ffmpeg >/dev/null || brew install ffmpeg
+          # The import test wants an H.264 MP4 with audio; make a tiny one.
+          fixture="$RUNNER_TEMP/dive-import-fixture.mp4"
+          ffmpeg -v error -y -f lavfi -i color=c=blue:s=64x64:r=10:d=2 \
+            -f lavfi -i sine=frequency=440:duration=2 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$fixture"
+          DIVE_IMPORT_FIXTURE="$fixture" cargo test -p dive-desktop screen:: -- --ignored
       # The patched runtime is excluded from the workspace. Its native HWND
       # ownership tests must run on Windows, not just compile as a dependency.
       - name: Test the patched native runtime

@@ -5,7 +5,8 @@
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use dive_core::{Credential, ProfileId, Timestamp};
+use dive_core::{Credential, ProfileId, Store, Timestamp};
+use std::sync::Mutex;
 
 const SERVICE: &str = "app.dive.browser.passwords";
 
@@ -183,11 +184,21 @@ pub fn edit(
     username: &str,
     password: &str,
 ) -> AppResult<Credential> {
+    edit_in(&state.store, profile, id, username, password)
+}
+
+fn edit_in(
+    store: &Mutex<Store>,
+    profile: ProfileId,
+    id: &str,
+    username: &str,
+    password: &str,
+) -> AppResult<Credential> {
     let username = username.trim();
     if username.is_empty() {
         return Err(AppError::new("a login needs a username"));
     }
-    let before = crate::state::lock(&state.store)
+    let before = crate::state::lock(store)
         .credentials(profile)?
         .into_iter()
         .find(|c| c.id == id)
@@ -195,7 +206,7 @@ pub fn edit(
     let renamed = if username == before.username {
         before.clone()
     } else {
-        let clash = crate::state::lock(&state.store)
+        let clash = crate::state::lock(store)
             .credentials_for(profile, &before.origin)?
             .iter()
             .any(|c| c.username == username);
@@ -205,7 +216,7 @@ pub fn edit(
                 before.origin
             )));
         }
-        crate::state::lock(&state.store).rename_credential(id, username)?
+        crate::state::lock(store).rename_credential(id, username)?
     };
     if !password.is_empty() {
         let written = entry(id).and_then(|e| e.set_password(password).map_err(AppError::new));
@@ -213,7 +224,7 @@ pub fn edit(
             // Half an edit is a login whose name changed while its password
             // did not; put the name back so what is listed is what fills.
             if renamed.username != before.username {
-                let _ = crate::state::lock(&state.store).rename_credential(id, &before.username);
+                let _ = crate::state::lock(store).rename_credential(id, &before.username);
             }
             return Err(AppError::new(format!(
                 "{} would not take the new password: {}",
@@ -233,6 +244,25 @@ pub fn save(
     username: &str,
     password: &str,
 ) -> AppResult<Credential> {
+    save_in(
+        &state.store,
+        profile,
+        url,
+        username,
+        password,
+        &dive_core::TabId::new().to_string(),
+    )
+}
+
+/// `save` with the store and the id for a new row passed in.
+fn save_in(
+    store: &Mutex<Store>,
+    profile: ProfileId,
+    url: &str,
+    username: &str,
+    password: &str,
+    new_id: &str,
+) -> AppResult<Credential> {
     check_login(username, password)?;
     if crate::private_session::is_private() {
         // The private store is in memory; a Keychain item written now would
@@ -241,9 +271,8 @@ pub fn save(
     }
     let username = username.trim();
     let origin = origin_of(url)?;
-    let id = dive_core::TabId::new().to_string();
-    let row = crate::state::lock(&state.store).upsert_credential(
-        &id,
+    let row = crate::state::lock(store).upsert_credential(
+        new_id,
         profile,
         &origin,
         username,
@@ -253,8 +282,8 @@ pub fn save(
     if let Err(error) = written {
         // A new row with no password behind it would be listed but could
         // never fill, and every later sign-in would offer to "update" it.
-        if row.id == id {
-            let _ = crate::state::lock(&state.store).remove_credential(&row.id);
+        if row.id == new_id {
+            let _ = crate::state::lock(store).remove_credential(&row.id);
         }
         return Err(error);
     }
@@ -263,7 +292,7 @@ pub fn save(
 
 /// The password behind a login, for filling or showing.
 pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<String> {
-    owned(state, profile, id)?;
+    owned_in(&state.store, profile, id)?;
     entry(id)?.get_password().map_err(|e| match e {
         keyring_core::Error::NoEntry => AppError::new(missing_password_error()),
         e => AppError::new(password_read_error(e)),
@@ -272,7 +301,11 @@ pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<Strin
 
 /// Forget a login and its password.
 pub fn delete(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool> {
-    owned(state, profile, id)?;
+    delete_in(&state.store, profile, id)
+}
+
+fn delete_in(store: &Mutex<Store>, profile: ProfileId, id: &str) -> AppResult<bool> {
+    owned_in(store, profile, id)?;
     // The secret goes first, and the row only once it has. Removing the row
     // after a refused delete left the password in the OS store with nothing
     // in Dive that could ever name it again. An item already gone is what
@@ -286,7 +319,7 @@ pub fn delete(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool>
             )));
         }
     }
-    Ok(crate::state::lock(&state.store).remove_credential(id)?)
+    Ok(crate::state::lock(store).remove_credential(id)?)
 }
 
 /// Remove the password behind login `id`, whose row is about to go with its
@@ -348,7 +381,11 @@ pub fn touch(state: &AppState, id: &str) -> AppResult<()> {
 
 /// A login is only readable from the profile it was saved in.
 pub fn owned(state: &AppState, profile: ProfileId, id: &str) -> AppResult<()> {
-    let mine = crate::state::lock(&state.store)
+    owned_in(&state.store, profile, id)
+}
+
+fn owned_in(store: &Mutex<Store>, profile: ProfileId, id: &str) -> AppResult<()> {
+    let mine = crate::state::lock(store)
         .credentials(profile)?
         .iter()
         .any(|c| c.id == id);
@@ -668,6 +705,8 @@ pub fn write_private_file(path: &std::path::Path, text: &str) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn missing_password_error_names_this_os_store() {
         let windows = super::missing_password_error_for(true);
@@ -811,5 +850,114 @@ mod tests {
         assert_eq!(origin_of("example.org").unwrap(), "https://example.org");
         assert!(origin_of("mailto:someone@example.org").is_err());
         assert!(origin_of("not a url at all").is_err());
+    }
+
+    use crate::agent::test_keychain::with_mock_keychain;
+    use dive_core::model::{Container, Profile};
+
+    /// A store with two profiles, and the ids of both.
+    fn two_profiles() -> (Mutex<Store>, ProfileId, ProfileId) {
+        let store = Store::in_memory().unwrap();
+        let container = Container::new("Personal");
+        store.upsert_container(&container).unwrap();
+        let a = Profile::new("A", container.id, 0);
+        let b = Profile::new("B", container.id, 1);
+        store.upsert_profile(&a).unwrap();
+        store.upsert_profile(&b).unwrap();
+        (Mutex::new(store), a.id, b.id)
+    }
+
+    /// Make the next call on login `id`'s keychain item fail, once.
+    fn refuse_next(id: &str) {
+        let item = entry(id).unwrap();
+        item.as_any()
+            .downcast_ref::<keyring_core::mock::Cred>()
+            .expect("the mock store")
+            .set_error(keyring_core::Error::NoStorageAccess("refused".into()));
+    }
+
+    fn listed(store: &Mutex<Store>, profile: ProfileId) -> Vec<Credential> {
+        crate::state::lock(store).credentials(profile).unwrap()
+    }
+
+    const SITE: &str = "https://example.test/login";
+
+    #[test]
+    fn a_refused_save_leaves_no_row() {
+        with_mock_keychain(|| {
+            let (store, profile, _) = two_profiles();
+            refuse_next("fixed-id");
+            let saved = save_in(&store, profile, SITE, "alice", "pw", "fixed-id");
+            assert!(saved.is_err());
+            assert!(listed(&store, profile).is_empty());
+        });
+    }
+
+    #[test]
+    fn a_refused_update_of_an_existing_login_keeps_its_row() {
+        with_mock_keychain(|| {
+            let (store, profile, _) = two_profiles();
+            let first = save_in(&store, profile, SITE, "alice", "pw", "first-id").unwrap();
+            assert_eq!(first.id, "first-id");
+            refuse_next("first-id");
+            let again = save_in(&store, profile, SITE, "alice", "new", "second-id");
+            assert!(again.is_err());
+            let rows = listed(&store, profile);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "first-id");
+            // The refusal was a one-off: the old password was never overwritten.
+            assert_eq!(entry("first-id").unwrap().get_password().unwrap(), "pw");
+        });
+    }
+
+    #[test]
+    fn a_refused_password_in_an_edit_puts_the_old_username_back() {
+        with_mock_keychain(|| {
+            let (store, profile, _) = two_profiles();
+            let login = save_in(&store, profile, SITE, "alice", "pw", "edit-id").unwrap();
+            refuse_next(&login.id);
+            let edited = edit_in(&store, profile, &login.id, "bob", "newpass");
+            assert!(edited.is_err());
+            let rows = listed(&store, profile);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].username, "alice");
+        });
+    }
+
+    #[test]
+    fn a_refused_delete_keeps_the_row_and_the_password() {
+        with_mock_keychain(|| {
+            let (store, profile, _) = two_profiles();
+            let login = save_in(&store, profile, SITE, "alice", "pw", "keep-id").unwrap();
+            refuse_next(&login.id);
+            assert!(delete_in(&store, profile, &login.id).is_err());
+            assert_eq!(listed(&store, profile).len(), 1);
+            assert_eq!(entry(&login.id).unwrap().get_password().unwrap(), "pw");
+        });
+    }
+
+    #[test]
+    fn deleting_a_login_whose_secret_is_already_gone_succeeds() {
+        with_mock_keychain(|| {
+            let (store, profile, _) = two_profiles();
+            let login = save_in(&store, profile, SITE, "alice", "pw", "gone-id").unwrap();
+            entry(&login.id).unwrap().delete_credential().unwrap();
+            assert!(delete_in(&store, profile, &login.id).unwrap());
+            assert!(listed(&store, profile).is_empty());
+        });
+    }
+
+    #[test]
+    fn a_login_is_not_readable_from_another_profile() {
+        with_mock_keychain(|| {
+            let (store, a, b) = two_profiles();
+            let login = save_in(&store, a, SITE, "alice", "pw", "mine-id").unwrap();
+            let err = owned_in(&store, b, &login.id).unwrap_err();
+            assert_eq!(err.message, "no such login in this profile");
+            assert!(owned_in(&store, a, &login.id).is_ok());
+            // Nor can the other profile delete it.
+            assert!(delete_in(&store, b, &login.id).is_err());
+            assert_eq!(listed(&store, a).len(), 1);
+        });
     }
 }

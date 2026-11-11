@@ -1920,6 +1920,35 @@ fn rejection_text(provider: &str, error: &dive_agent::AgentError) -> String {
     }
 }
 
+/// A fresh in-memory credential store for tests that touch saved secrets.
+#[cfg(test)]
+pub(crate) mod test_keychain {
+    static KEYCHAIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Puts back whatever default store was installed, even on a panic.
+    struct Restore(Option<std::sync::Arc<keyring_core::api::CredentialStore>>);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(store) => keyring_core::set_default_store(store),
+                None => drop(keyring_core::unset_default_store()),
+            }
+        }
+    }
+
+    /// Run `f` with a fresh in-memory credential store as the process default,
+    /// restoring whatever was there. Holds a lock: the default store is global.
+    pub(crate) fn with_mock_keychain<T>(f: impl FnOnce() -> T) -> T {
+        let _held = KEYCHAIN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _restore = Restore(keyring_core::get_default_store());
+        super::init_keychain_with(true, || panic!("tests never use the native keychain"));
+        f()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1939,7 +1968,10 @@ mod tests {
 
     #[test]
     fn disposable_keychain_never_initializes_native_store() {
-        let previous = keyring_core::get_default_store();
+        test_keychain::with_mock_keychain(disposable_keychain_body);
+    }
+
+    fn disposable_keychain_body() {
         init_keychain_with(true, || panic!("test must not initialize native keychain"));
         let store = keyring_core::get_default_store().expect("mock store");
         assert!(store.as_any().is::<keyring_core::mock::Store>());
@@ -1951,11 +1983,6 @@ mod tests {
         assert!(!agent_key_present("anthropic".into()).unwrap());
         init_keychain_with(true, || panic!("restart must remain isolated"));
         assert!(agent_keys().is_empty());
-        if let Some(store) = previous {
-            keyring_core::set_default_store(store);
-        } else {
-            keyring_core::unset_default_store();
-        }
     }
 
     #[test]
