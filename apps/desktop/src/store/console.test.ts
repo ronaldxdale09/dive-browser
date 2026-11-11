@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { append, CLEARED_SOURCE, enqueueConsoleBatch, isNoise, selectEntries, useConsole } from "./console";
-import { ipc } from "../lib/ipc";
+import { append, CLEARED_SOURCE, enqueueConsoleBatch, isNoise, listenConsole, selectEntries, useConsole } from "./console";
+import { events, ipc } from "../lib/ipc";
 import type { ConsoleRow } from "./console";
-import type { ConsoleEntry } from "../lib/ipc";
+import type { ConsoleBatch, ConsoleEntry } from "../lib/ipc";
 
 const entry = (i: number): ConsoleEntry => ({ tab_id: "t", level: "info", text: String(i), source: "console", url: null, line: null, column: null, timestamp: i });
 
@@ -150,5 +150,28 @@ describe("clearing", () => {
     expect(useConsole.getState().byTab.t!.map((e) => e.text)).toEqual(["Console was cleared", "3", "Console was cleared"]);
     useConsole.setState({ preserve: false });
     host.mockRestore();
+  });
+});
+
+describe("typed console batch event", () => {
+  it("applies entries and a reset delivered through events.consoleBatch in order, and retries a failed subscription", async () => {
+    let deliver: ((batch: ConsoleBatch) => void) | null = null;
+    const listen = vi.spyOn(events.consoleBatch, "listen");
+    listen.mockRejectedValueOnce(new Error("no bridge"));
+    listen.mockImplementation((handler) => {
+      deliver = (payload) => handler({ event: "console-batch", id: 1, payload });
+      return Promise.resolve(() => {});
+    });
+    await expect(listenConsole()).rejects.toThrow("no bridge");
+    await listenConsole();
+    useConsole.setState({ byTab: {}, preserve: false });
+    const send = deliver as ((batch: ConsoleBatch) => void) | null;
+    expect(send).not.toBeNull();
+    send?.([entry(1), entry(2)]);
+    send?.({ reset: "t" });
+    send?.([entry(3)]);
+    useConsole.getState().flush();
+    expect(useConsole.getState().byTab.t?.map((row) => row.text)).toEqual(["3"]);
+    listen.mockRestore();
   });
 });

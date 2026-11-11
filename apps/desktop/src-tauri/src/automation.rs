@@ -5,7 +5,7 @@
 //! do for a person. Scrolling uses the page context because CEF can silently
 //! drop the response to CDP's `mouseWheel` command and stall the action.
 //!
-//! Actions are announced to the chrome before they happen ([`AgentPointer`])
+//! Actions are announced to the chrome before they happen ([`AgentPointer`], drawn as the in-page cursor)
 //! so the person watching sees a cursor move to the target instead of the
 //! page changing under them with no explanation.
 
@@ -14,16 +14,13 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
-use tauri::AppHandle;
-use tauri_specta::Event;
 
-use crate::Runtime;
 use crate::error::{AppError, AppResult};
 
 /// Where an agent is about to act, so the chrome can draw a cursor there.
-/// Emitted just before the input is dispatched. The `move` phase arrives
+/// Drawn by the page's own overlay just before the input is dispatched. The `move` phase arrives
 /// first, then `click` once the pointer has notionally arrived.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct AgentPointer {
     /// Tab being driven.
     pub tab_id: TabId,
@@ -182,15 +179,7 @@ pub fn key_events(key: &str, modifiers: u8) -> AppResult<(Value, Value)> {
 /// own overlay glides it there while this pause runs, so the movement is
 /// already finished by the time the input is dispatched -- the watching costs
 /// nothing beyond a pause that was here anyway.
-async fn announce(
-    session: &CdpSession,
-    app: Option<&AppHandle<Runtime>>,
-    hint: &AgentPointer,
-    visible: bool,
-) {
-    if let Some(app) = app {
-        let _ = hint.emit(app);
-    }
+async fn announce(session: &CdpSession, hint: &AgentPointer, visible: bool) {
     if !visible {
         return;
     }
@@ -236,7 +225,6 @@ async fn show_cursor(session: &CdpSession, hint: &AgentPointer) {
 /// Click at a viewport coordinate.
 pub async fn click_at(
     session: &CdpSession,
-    app: Option<&AppHandle<Runtime>>,
     tab: TabId,
     x: f64,
     y: f64,
@@ -245,7 +233,6 @@ pub async fn click_at(
 ) -> AppResult<()> {
     announce(
         session,
-        app,
         &AgentPointer {
             tab_id: tab,
             phase: "move".into(),
@@ -258,7 +245,6 @@ pub async fn click_at(
     .await;
     announce(
         session,
-        app,
         &AgentPointer {
             tab_id: tab,
             phase: "click".into(),
@@ -288,7 +274,6 @@ pub async fn click_at(
 /// tooltips and `:hover` styles.
 pub async fn hover_at(
     session: &CdpSession,
-    app: Option<&AppHandle<Runtime>>,
     tab: TabId,
     x: f64,
     y: f64,
@@ -297,7 +282,6 @@ pub async fn hover_at(
 ) -> AppResult<()> {
     announce(
         session,
-        app,
         &AgentPointer {
             tab_id: tab,
             phase: "move".into(),
@@ -326,7 +310,6 @@ pub async fn hover_at(
 /// here; pointer-based dragging is what the JavaScript libraries use.
 pub async fn drag_between(
     session: &CdpSession,
-    app: Option<&AppHandle<Runtime>>,
     tab: TabId,
     from: (f64, f64),
     to: (f64, f64),
@@ -340,7 +323,6 @@ pub async fn drag_between(
     let (x1, y1) = to;
     announce(
         session,
-        app,
         &AgentPointer {
             tab_id: tab,
             phase: "move".into(),
@@ -370,7 +352,6 @@ pub async fn drag_between(
     }
     announce(
         session,
-        app,
         &AgentPointer {
             tab_id: tab,
             phase: "click".into(),

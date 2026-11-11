@@ -3,11 +3,9 @@ import { events } from "../lib/ipc";
 import { listenConsole } from "./console";
 import { listenNetwork } from "./network";
 
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => undefined) }));
-
 describe("event listeners", () => {
   it("listenNetwork retries a failed subscription and caches the first successful one", async () => {
-    const listen = vi.spyOn(events.networkEvent, "listen")
+    const listen = vi.spyOn(events.networkEventBatch, "listen")
       .mockRejectedValueOnce(new Error("unavailable"))
       .mockResolvedValue(() => undefined);
     await expect(listenNetwork()).rejects.toThrow("unavailable");
@@ -18,7 +16,7 @@ describe("event listeners", () => {
   });
 
   it("listenConsole retries a failed subscription and caches the first successful one", async () => {
-    const listen = vi.spyOn(events.consoleEntry, "listen")
+    const listen = vi.spyOn(events.consoleBatch, "listen")
       .mockRejectedValueOnce(new Error("unavailable"))
       .mockResolvedValue(() => undefined);
     await expect(listenConsole()).rejects.toThrow("unavailable");

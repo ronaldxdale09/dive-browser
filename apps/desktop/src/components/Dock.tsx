@@ -300,7 +300,7 @@ const Row = memo(function Row({
   start: number;
   measure: (node: HTMLDivElement | null) => void;
 }) {
-  const preferredEditor = usePrefs((s) => s.prefs.preferred_editor || "vscode");
+  const preferredEditor = usePrefs((s) => s.prefs.preferred_editor);
   const loc = entry.url ? `${sourceName(entry.url)}${entry.line ? `:${entry.line}` : ""}` : "";
   const [jumping, setJumping] = useState(false);
   // The page clearing its console leaves a quiet note, as DevTools does.

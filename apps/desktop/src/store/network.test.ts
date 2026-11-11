@@ -1,9 +1,9 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { beginsAwaitedPage, enqueueNetworkBatch, fold, isMocked, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
-import type { NetworkEvent } from "../lib/ipc";
-import { ipc } from "../lib/ipc";
+import { beginsAwaitedPage, enqueueNetworkBatch, fold, isMocked, listenNetwork, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
+import type { NetworkEvent, NetworkEventBatch } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 
 type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
 
@@ -268,5 +268,26 @@ describe("navigation", () => {
     s.clear("t");
     expect(host).toHaveBeenLastCalledWith("t", null);
     host.mockRestore();
+  });
+});
+
+describe("typed network batch event", () => {
+  it("applies a batch delivered through events.networkEventBatch in order, and retries a failed subscription", async () => {
+    let deliver: ((batch: NetworkEventBatch) => void) | null = null;
+    const listen = vi.spyOn(events.networkEventBatch, "listen");
+    listen.mockRejectedValueOnce(new Error("no bridge"));
+    listen.mockImplementation((handler) => {
+      deliver = (payload) => handler({ event: "test", id: 1, payload });
+      return Promise.resolve(() => {});
+    });
+    await expect(listenNetwork()).rejects.toThrow("no bridge");
+    await listenNetwork();
+    const send = deliver as ((batch: NetworkEventBatch) => void) | null;
+    expect(send).not.toBeNull();
+    const enqueue = vi.spyOn(useNetwork.getState(), "enqueue");
+    send?.([sent("a", "https://a.dev/1"), sent("b", "https://a.dev/2")]);
+    expect(enqueue.mock.calls.map(([e]) => (e.type === "sent" ? e.data.request_id : ""))).toEqual(["a", "b"]);
+    enqueue.mockRestore();
+    listen.mockRestore();
   });
 });

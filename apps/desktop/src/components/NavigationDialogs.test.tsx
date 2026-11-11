@@ -11,6 +11,7 @@ import { useBrowser } from "../store/browser";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { Palette } from "./Palette";
 import { SettingsDialog } from "./SettingsDialog";
+import { NATIVE_NEW_TAB } from "../lib/nativeEvents";
 
 let nativeCommand: EventCallback<string>;
 const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
@@ -114,7 +115,7 @@ describe("foreground navigation dialogs", () => {
     render(<NavigationDialogs />);
     screen.getByRole("textbox", { name: "Home page" }).focus();
     act(() => {
-      window.dispatchEvent(new Event("dive-native-new-tab"));
+      window.dispatchEvent(new Event(NATIVE_NEW_TAB));
       // Assert inside the event turn: an eventual React commit is too late
       // when the following native key event is already queued for chrome.
       const input = screen.getByRole("combobox");
@@ -128,7 +129,7 @@ describe("foreground navigation dialogs", () => {
   it("removes the direct native listener when chrome unmounts", () => {
     const { unmount } = render(<NavigationDialogs />);
     unmount();
-    act(() => { window.dispatchEvent(new Event("dive-native-new-tab")); });
+    act(() => { window.dispatchEvent(new Event(NATIVE_NEW_TAB)); });
     expect(useBrowser.getState().open.palette).toBe(false);
   });
 

@@ -1030,11 +1030,10 @@ export const commands = {
 
 /** Events */
 export const events = {
-	agentPointer: makeEvent<AgentPointer>("agent-pointer"),
 	agentPresence: makeEvent<AgentPresence>("agent-presence"),
 	certErrorAsked: makeEvent<CertErrorAsked>("cert-error-asked"),
 	certErrorClosed: makeEvent<CertErrorClosed>("cert-error-closed"),
-	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
+	consoleBatch: makeEvent<ConsoleBatch>("console-batch"),
 	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	deviceEmulated: makeEvent<DeviceEmulated>("device-emulated"),
@@ -1048,7 +1047,7 @@ export const events = {
 	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
 	jsDialogClosed: makeEvent<JsDialogClosed>("js-dialog-closed"),
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
-	networkEvent: makeEvent<NetworkEvent>("network-event"),
+	networkEventBatch: makeEvent<NetworkEventBatch>("network-event-batch"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
 	permissionDismissed: makeEvent<PermissionDismissed>("permission-dismissed"),
 	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
@@ -1128,24 +1127,6 @@ export type Address = {
 	last_used_at: string | null,
 	/**  How many times it has been filled. */
 	uses: number,
-};
-
-/**
- *  Where an agent is about to act, so the chrome can draw a cursor there.
- *  Emitted just before the input is dispatched. The `move` phase arrives
- *  first, then `click` once the pointer has notionally arrived.
- */
-export type AgentPointer = {
-	/**  Tab being driven. */
-	tab_id: TabId,
-	/**  `move`, `click` or `type`. */
-	phase: string,
-	/**  Viewport x in CSS pixels. */
-	x: number | null,
-	/**  Viewport y in CSS pixels. */
-	y: number | null,
-	/**  What is being acted on, for the label beside the cursor. */
-	label: string,
 };
 
 /**  A tab an agent started or stopped driving. */
@@ -1513,6 +1494,15 @@ export type CommandScope =
 /**  Only inside the agent sidecar. */
 "agent";
 
+/**  Console entries for the chrome, or a navigation reset for one tab. */
+export type ConsoleBatch =
+/**  Entries in wire order. */
+ConsoleEntry[] |
+/**  The tab navigated; start its console over. */
+{
+/**  The tab that navigated. */
+reset: TabId };
+
 /**  One line in the console panel. */
 export type ConsoleEntry = {
 	/**  Tab that produced it. */
@@ -1600,6 +1590,9 @@ export type CoreEvent =
 { type: "profile_removed"; data: ProfileId } |
 /**  The active profile changed. */
 { type: "profile_activated"; data: ProfileId };
+
+/**  Corner rounding of chrome controls. */
+export type CornerRadius = "sharp" | "soft" | "round";
 
 /**  Why a renderer went away, as far as the engine could tell. */
 export type CrashReason =
@@ -1690,6 +1683,9 @@ export type DefaultBrowserStatus = {
 	/**  Bundle id of whatever handles `https` today, when known. */
 	current: string | null,
 };
+
+/**  Row heights and gaps. */
+export type Density = "compact" | "comfortable" | "relaxed";
 
 /**  One technology found on a page. */
 export type Detection = {
@@ -2383,6 +2379,9 @@ export type ModelInfo = {
 	output_per_mtok: number | null,
 };
 
+/**  Chrome motion: follow the system, reduce, or always full. */
+export type Motion = "system" | "reduce" | "full";
+
 export type NavigationEntry = {
 	id: number,
 	url: string,
@@ -2481,6 +2480,9 @@ export type NetworkEvent =
 	/**  Seconds. */
 	timestamp: number | null,
 } };
+
+/**  Network events for the chrome, in wire order, at most one IPC message per flush. */
+export type NetworkEventBatch = NetworkEvent[];
 
 /**  Network condition presets, matching Chrome's `DevTools` throttling menu. */
 export type NetworkProfile = "offline" | "slow3g" | "fast3g";
@@ -2618,13 +2620,16 @@ export type Pick = {
 	picked_at: string,
 };
 
+/**  Code editor for Jump-to-Source. */
+export type PreferredEditor = "vscode" | "cursor" | "zed";
+
 /**
  *  Every preference, with the defaults a fresh profile starts on. Stored blobs
  *  from older builds are merged with [`Prefs::default`] when they are loaded.
  */
 export type Prefs = {
 	/**  Chrome theme: `system` | `dark` | `light`. Applied by the chrome. */
-	theme: string,
+	theme: ThemeMode,
 	/**  Accent color as a CSS hex string. Applied by the chrome. */
 	accent: string,
 	/**
@@ -2637,7 +2642,7 @@ export type Prefs = {
 	 *  session ended on, or `none` for the welcome screen. A `home` start with
 	 *  no homepage set is the welcome screen.
 	 */
-	startup: string,
+	startup: StartupMode,
 	/**  Home page URL; empty means the welcome screen. */
 	homepage: string,
 	/**  Search engine key, or `custom` to use [`Prefs::search_template`]. */
@@ -2720,7 +2725,7 @@ export type Prefs = {
 	/**  Hosts that skip the proxy, comma separated. */
 	proxy_bypass?: string,
 	/**  Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`. */
-	preferred_editor?: string,
+	preferred_editor?: PreferredEditor,
 	/**  Chrome palette template; one of [`APPEARANCE_PRESETS`] or `custom`. */
 	appearance_preset?: string,
 	/**  Custom template seed: the ground (window) colour as CSS hex. */
@@ -2734,15 +2739,15 @@ export type Prefs = {
 	/**  Chrome size multiplier, 0.8 to 2.0; everything in the chrome scales, text included. */
 	ui_scale?: number | null,
 	/**  Row heights and gaps: `compact` | `comfortable` | `relaxed`. */
-	density?: string,
+	density?: Density,
 	/**  Corner rounding of chrome controls: `sharp` | `soft` | `round`. */
-	corner_radius?: string,
+	corner_radius?: CornerRadius,
 	/**  Tab strip look: `pill` | `flat`. */
-	tab_style?: string,
+	tab_style?: TabStyle,
 	/**  Chrome motion: follow the `system`, `reduce`, or always `full`. */
-	motion?: string,
+	motion?: Motion,
 	/**  Welcome screen backdrop: `orbs` | `plain` | `gradient`. */
-	welcome_background?: string,
+	welcome_background?: WelcomeBackground,
 	/**
 	 *  Offer a hover control that fills the tab with a video, without
 	 *  leaving the window.
@@ -3247,6 +3252,9 @@ export type StackReport = {
 	packages: string[],
 };
 
+/**  What opens at launch. */
+export type StartupMode = "restore" | "home" | "none";
+
 /**  Emitted whenever core state changes; carries the change itself. */
 export type StateChanged = CoreEvent;
 
@@ -3495,6 +3503,9 @@ export type TabState =
 /**  Renderer torn down; only metadata kept. */
 "discarded";
 
+/**  Tab strip look. */
+export type TabStyle = "pill" | "flat";
+
 /**  Which strip a tab lives in. */
 export type TabTier =
 /**  Global, shown in every workspace. */
@@ -3558,6 +3569,9 @@ export type TaskRow = {
 	/**  The tab is making a sound. */
 	audible: boolean,
 };
+
+/**  Chrome theme. */
+export type ThemeMode = "system" | "dark" | "light";
 
 /**  A tool call, as shown in the thread. */
 export type ToolStep = {
@@ -3764,6 +3778,9 @@ export type WebAppProbe = {
 	/**  Set when an installed app already covers this page. */
 	installed?: WebApp | null,
 };
+
+/**  Welcome screen backdrop. */
+export type WelcomeBackground = "orbs" | "plain" | "gradient";
 
 /**  Request and response shape a provider speaks. */
 export type Wire =

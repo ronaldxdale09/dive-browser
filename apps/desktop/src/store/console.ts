@@ -1,7 +1,6 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
 import { events, ipc } from "../lib/ipc";
-import type { ConsoleEntry } from "../lib/ipc";
+import type { ConsoleBatch, ConsoleEntry } from "../lib/ipc";
 import { ignored } from "../lib/chromeErrors";
 
 const CAP = 500;
@@ -116,10 +115,9 @@ function startsOver(entry: ConsoleEntry, preserve: boolean): boolean {
 
 let listening: Promise<() => void> | null = null;
 let nativeBatchActive = false;
-type ConsoleWireBatch = ConsoleEntry[] | { reset: string };
 
 /** Apply a native batch in wire order through the same bounded UI queue. */
-export function enqueueConsoleBatch(batch: ConsoleWireBatch) {
+export function enqueueConsoleBatch(batch: ConsoleBatch) {
   nativeBatchActive = true;
   if (!Array.isArray(batch)) {
     useConsole.getState().navigated(batch.reset);
@@ -137,14 +135,7 @@ export function usesNativeConsoleBatch() {
 export function listenConsole() {
   if (listening) return listening;
   const request = (async () => {
-    const offLegacy = await events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
-    try {
-      const offBatch = await listen<ConsoleWireBatch>("console-entry-batch", (e) => enqueueConsoleBatch(e.payload));
-      return () => { offBatch(); offLegacy(); };
-    } catch (error) {
-      offLegacy();
-      throw error;
-    }
+    return events.consoleBatch.listen((e) => enqueueConsoleBatch(e.payload));
   })();
   listening = request;
   // A failed subscription is not cached: the next call tries again.

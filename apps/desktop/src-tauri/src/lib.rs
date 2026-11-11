@@ -1246,14 +1246,14 @@ enum Startup<'a> {
 /// A home page that was never set means the welcome screen, not a silent
 /// fallback to the last session: someone who chose to start fresh should not
 /// be handed yesterday's tab because the field was left blank.
-fn startup_plan<'a>(startup: &str, homepage: &'a str) -> Startup<'a> {
+fn startup_plan(startup: prefs::StartupMode, homepage: &str) -> Startup<'_> {
     match startup {
-        "none" => Startup::Welcome,
-        "home" => match homepage.trim() {
+        prefs::StartupMode::None => Startup::Welcome,
+        prefs::StartupMode::Home => match homepage.trim() {
             "" => Startup::Welcome,
             url => Startup::Home(url),
         },
-        _ => Startup::Restore,
+        prefs::StartupMode::Restore => Startup::Restore,
     }
 }
 
@@ -1310,7 +1310,7 @@ fn restore_session(app: &tauri::App<Runtime>) {
     };
     let prefs = state.prefs.get(&state);
     let safe = recovery::safe_start();
-    match startup_plan(&prefs.startup, &prefs.homepage) {
+    match startup_plan(prefs.startup, &prefs.homepage) {
         Startup::Welcome => {
             if safe {
                 recovery::defer(recovery::Deferred::Nothing);
@@ -1480,6 +1480,7 @@ mod tests {
         );
     }
     use super::{Startup, startup_plan, startup_urls};
+    use crate::prefs::StartupMode;
 
     #[test]
     fn an_open_home_page_is_found_across_redirect_differences() {
@@ -1512,15 +1513,18 @@ mod tests {
 
     #[test]
     fn a_home_start_with_no_home_page_lands_on_the_welcome_screen() {
-        assert_eq!(startup_plan("home", ""), Startup::Welcome);
-        assert_eq!(startup_plan("home", "   "), Startup::Welcome);
+        assert_eq!(startup_plan(StartupMode::Home, ""), Startup::Welcome);
+        assert_eq!(startup_plan(StartupMode::Home, "   "), Startup::Welcome);
         assert_eq!(
-            startup_plan("home", " https://dive.dev "),
+            startup_plan(StartupMode::Home, " https://dive.dev "),
             Startup::Home("https://dive.dev")
         );
-        assert_eq!(startup_plan("none", "https://dive.dev"), Startup::Welcome);
         assert_eq!(
-            startup_plan("restore", "https://dive.dev"),
+            startup_plan(StartupMode::None, "https://dive.dev"),
+            Startup::Welcome
+        );
+        assert_eq!(
+            startup_plan(StartupMode::Restore, "https://dive.dev"),
             Startup::Restore
         );
     }

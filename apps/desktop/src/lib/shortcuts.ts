@@ -5,6 +5,7 @@ import { selectAllInChromeField } from "./chromeEditing";
 import { isMac, runCommand, shortcutFor } from "./commands";
 import { contentCoverDepth } from "./overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
+import { NATIVE_NEW_TAB, NATIVE_FOCUS_ADDRESS } from "./nativeEvents";
 
 /**
  * Global key chords, routed through the shared command dispatcher.
@@ -40,13 +41,13 @@ export function useShortcuts() {
       flushSync(() => runCommand("tab.new", "native-menu"));
     };
     const onNativeFocusAddress = () => runCommand("address.focus", "native-menu");
-    window.addEventListener("dive-native-focus-address", onNativeFocusAddress);
+    window.addEventListener(NATIVE_FOCUS_ADDRESS, onNativeFocusAddress);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("dive-native-new-tab", onNativeNewTab);
+    window.addEventListener(NATIVE_NEW_TAB, onNativeNewTab);
     return () => {
-      window.removeEventListener("dive-native-focus-address", onNativeFocusAddress);
+      window.removeEventListener(NATIVE_FOCUS_ADDRESS, onNativeFocusAddress);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("dive-native-new-tab", onNativeNewTab);
+      window.removeEventListener(NATIVE_NEW_TAB, onNativeNewTab);
     };
   }, []);
 

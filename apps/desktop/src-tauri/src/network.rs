@@ -11,8 +11,13 @@ use tauri_specta::Event;
 
 use crate::Runtime;
 
+/// Network events for the chrome, in wire order, at most one IPC message per flush.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(transparent)]
+pub struct NetworkEventBatch(pub Vec<NetworkEvent>);
+
 /// One step in a request's life. The chrome merges these by `request_id`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum NetworkEvent {
     /// A request left the browser.
@@ -175,13 +180,7 @@ pub fn attach(
                 Some(events.recv().await)
             };
             let Some(incoming) = incoming else {
-                crate::cdp_feed::emit_batch(
-                    &app,
-                    &session,
-                    "network-event-batch",
-                    &mut batch,
-                    tab_id,
-                );
+                crate::cdp_feed::emit_batch(&app, &session, NetworkEventBatch, &mut batch, tab_id);
                 continue;
             };
             match incoming {
@@ -193,7 +192,7 @@ pub fn attach(
                         crate::cdp_feed::emit_batch(
                             &app,
                             &session,
-                            "network-event-batch",
+                            NetworkEventBatch,
                             &mut batch,
                             tab_id,
                         );
@@ -240,7 +239,7 @@ pub fn attach(
                             crate::cdp_feed::emit_batch(
                                 &app,
                                 &session,
-                                "network-event-batch",
+                                NetworkEventBatch,
                                 &mut batch,
                                 tab_id,
                             );

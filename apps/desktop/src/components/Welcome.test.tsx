@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
+import type { Prefs } from "../store/prefs";
 import { Welcome, tourRevealBehavior, visibleDevServers } from "./Welcome";
 
 // The feature reel is a Remotion Player with its own tests; jsdom cannot
@@ -54,7 +55,7 @@ afterEach(() => {
 });
 
 describe("Welcome", () => {
-  it.each([
+  it.each<{ motion: Prefs["motion"]; osReduced: boolean; moves: boolean }>([
     { motion: "system", osReduced: false, moves: true },
     { motion: "system", osReduced: true, moves: false },
     { motion: "reduce", osReduced: false, moves: false },

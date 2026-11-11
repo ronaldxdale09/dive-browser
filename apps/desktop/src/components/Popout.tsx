@@ -24,6 +24,7 @@ import { errorMessage } from "../lib/errors";
 import { PageErrorPanels } from "./Content";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
+import { NATIVE_FOCUS_ADDRESS } from "../lib/nativeEvents";
 
 /** Keep commands in a detached window on the same visible error path as the main chrome. */
 function run(action: Promise<unknown>) {
@@ -173,8 +174,8 @@ export function Popout({ tabId }: { tabId: string }) {
       flushSync(() => inputRef.current?.focus());
       inputRef.current?.select();
     };
-    window.addEventListener("dive-native-focus-address", focusAddress);
-    return () => window.removeEventListener("dive-native-focus-address", focusAddress);
+    window.addEventListener(NATIVE_FOCUS_ADDRESS, focusAddress);
+    return () => window.removeEventListener(NATIVE_FOCUS_ADDRESS, focusAddress);
   }, []);
 
   const privateStart = isPrivateWindow() && url === "about:blank";

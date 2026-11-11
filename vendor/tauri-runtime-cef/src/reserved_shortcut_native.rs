@@ -6,6 +6,14 @@ use std::sync::Weak;
 
 use crate::reserved_shortcut::TargetBinding;
 
+/// DOM event the chrome listens for to open the New Tab launcher. The chrome
+/// spells it in `apps/desktop/src/lib/nativeEvents.ts`; a test there keeps the two equal.
+#[cfg(target_os = "macos")]
+pub const NEW_TAB_EVENT: &str = "dive-native-new-tab";
+/// DOM event the chrome listens for to focus the address bar (see `NEW_TAB_EVENT`).
+#[cfg(target_os = "macos")]
+pub const FOCUS_ADDRESS_EVENT: &str = "dive-native-focus-address";
+
 /// Owned by AppWebview, never by its CEF client. Client bindings are weak so
 /// closing a chrome does not leave Browser -> client -> Browser reference cycles.
 pub(crate) struct NewTabTarget {
@@ -213,10 +221,11 @@ pub(crate) fn dispatch(
   // Submit to the chrome's renderer directly, before subsequent native input.
   // Submission is asynchronous; the chrome listener commits the launcher with
   // flushSync. No arbitrary script, command payload or page data crosses here.
-  let script = CefString::from(match action {
-    ShortcutAction::NewTab => "window.dispatchEvent(new Event('dive-native-new-tab'))",
-    ShortcutAction::FocusAddress => "window.dispatchEvent(new Event('dive-native-focus-address'))",
-  });
+  let event = match action {
+    ShortcutAction::NewTab => NEW_TAB_EVENT,
+    ShortcutAction::FocusAddress => FOCUS_ADDRESS_EVENT,
+  };
+  let script = CefString::from(format!("window.dispatchEvent(new Event('{event}'))").as_str());
   let script_url = CefString::from("");
   submit_then_focus(
     || {

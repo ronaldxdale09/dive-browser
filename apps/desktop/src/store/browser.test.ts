@@ -528,8 +528,8 @@ describe("boot", () => {
     const askedListen = vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (cb) => ((onAsked = cb), () => undefined));
     const windowListen = vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
     const downloadListen = vi.spyOn(events.downloadNotice, "listen").mockResolvedValue(() => undefined);
-    vi.spyOn(events.consoleEntry, "listen").mockResolvedValue(() => undefined);
-    vi.spyOn(events.networkEvent, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(events.consoleBatch, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(events.networkEventBatch, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
     vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
 

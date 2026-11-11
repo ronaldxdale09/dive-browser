@@ -66,13 +66,92 @@ fn normalize_quick_links(links: Vec<QuickLink>) -> Vec<QuickLink> {
         .collect()
 }
 
+/// Tab strip look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TabStyle {
+    #[default]
+    Pill,
+    Flat,
+}
+
+/// Corner rounding of chrome controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CornerRadius {
+    Sharp,
+    Soft,
+    #[default]
+    Round,
+}
+
+/// Row heights and gaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+    Relaxed,
+}
+
+/// Chrome motion: follow the system, reduce, or always full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Motion {
+    #[default]
+    System,
+    Reduce,
+    Full,
+}
+
+/// Welcome screen backdrop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum WelcomeBackground {
+    #[default]
+    Orbs,
+    Plain,
+    Gradient,
+}
+
+/// What opens at launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartupMode {
+    Restore,
+    #[default]
+    Home,
+    None,
+}
+
+/// Code editor for Jump-to-Source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum PreferredEditor {
+    #[default]
+    Vscode,
+    Cursor,
+    Zed,
+}
+
+/// Chrome theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeMode {
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
 /// Every preference, with the defaults a fresh profile starts on. Stored blobs
 /// from older builds are merged with [`Prefs::default`] when they are loaded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[allow(clippy::struct_excessive_bools)] // These are independent user-facing toggles.
 pub struct Prefs {
     /// Chrome theme: `system` | `dark` | `light`. Applied by the chrome.
-    pub theme: String,
+    pub theme: ThemeMode,
     /// Accent color as a CSS hex string. Applied by the chrome.
     pub accent: String,
     /// Force pages to see the chrome's color scheme. Ignored while the theme
@@ -81,7 +160,7 @@ pub struct Prefs {
     /// What opens at launch: the `home` page, `restore` for the tab the last
     /// session ended on, or `none` for the welcome screen. A `home` start with
     /// no homepage set is the welcome screen.
-    pub startup: String,
+    pub startup: StartupMode,
     /// Home page URL; empty means the welcome screen.
     pub homepage: String,
     /// Search engine key, or `custom` to use [`Prefs::search_template`].
@@ -168,8 +247,8 @@ pub struct Prefs {
     #[serde(default)]
     pub proxy_bypass: String,
     /// Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`.
-    #[serde(default = "default_editor")]
-    pub preferred_editor: String,
+    #[serde(default)]
+    pub preferred_editor: PreferredEditor,
     /// Chrome palette template; one of [`APPEARANCE_PRESETS`] or `custom`.
     #[serde(default = "default_preset")]
     pub appearance_preset: String,
@@ -189,20 +268,20 @@ pub struct Prefs {
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f64,
     /// Row heights and gaps: `compact` | `comfortable` | `relaxed`.
-    #[serde(default = "default_density")]
-    pub density: String,
+    #[serde(default)]
+    pub density: Density,
     /// Corner rounding of chrome controls: `sharp` | `soft` | `round`.
-    #[serde(default = "default_radius")]
-    pub corner_radius: String,
+    #[serde(default)]
+    pub corner_radius: CornerRadius,
     /// Tab strip look: `pill` | `flat`.
-    #[serde(default = "default_tab_style")]
-    pub tab_style: String,
+    #[serde(default)]
+    pub tab_style: TabStyle,
     /// Chrome motion: follow the `system`, `reduce`, or always `full`.
-    #[serde(default = "default_motion")]
-    pub motion: String,
+    #[serde(default)]
+    pub motion: Motion,
     /// Welcome screen backdrop: `orbs` | `plain` | `gradient`.
-    #[serde(default = "default_welcome_background")]
-    pub welcome_background: String,
+    #[serde(default)]
+    pub welcome_background: WelcomeBackground,
     /// Offer a hover control that fills the tab with a video, without
     /// leaving the window.
     #[serde(default = "default_true")]
@@ -257,21 +336,6 @@ fn default_ui_font() -> String {
 fn default_ui_scale() -> f64 {
     1.0
 }
-fn default_density() -> String {
-    "comfortable".into()
-}
-fn default_radius() -> String {
-    "round".into()
-}
-fn default_tab_style() -> String {
-    "pill".into()
-}
-fn default_motion() -> String {
-    "system".into()
-}
-fn default_welcome_background() -> String {
-    "orbs".into()
-}
 
 /// Ask about the steps that look costly, and let the rest run. Asking about
 /// everything is what makes people turn approvals off.
@@ -298,10 +362,6 @@ fn default_proxy_mode() -> String {
     "system".into()
 }
 
-fn default_editor() -> String {
-    "vscode".into()
-}
-
 fn default_youtube_protection() -> bool {
     true
 }
@@ -309,10 +369,10 @@ fn default_youtube_protection() -> bool {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            theme: "system".into(),
+            theme: ThemeMode::default(),
             accent: "#7FD8C8".into(),
             tell_pages_theme: false,
-            startup: "home".into(),
+            startup: StartupMode::default(),
             homepage: String::new(),
             search_engine: default_search_engine(),
             search_template: String::new(),
@@ -347,18 +407,18 @@ impl Default for Prefs {
             proxy_server: String::new(),
             proxy_pac_url: String::new(),
             proxy_bypass: String::new(),
-            preferred_editor: default_editor(),
+            preferred_editor: PreferredEditor::default(),
             appearance_preset: default_preset(),
             custom_ground: default_custom_ground(),
             custom_ink: default_custom_ink(),
             custom_highlight: default_custom_highlight(),
             ui_font: default_ui_font(),
             ui_scale: default_ui_scale(),
-            density: default_density(),
-            corner_radius: default_radius(),
-            tab_style: default_tab_style(),
-            motion: default_motion(),
-            welcome_background: default_welcome_background(),
+            density: Density::default(),
+            corner_radius: CornerRadius::default(),
+            tab_style: TabStyle::default(),
+            motion: Motion::default(),
+            welcome_background: WelcomeBackground::default(),
             video_fill_tab: true,
             onboarded: false,
         }
@@ -398,9 +458,6 @@ impl Prefs {
         let d = Self::default();
         self = self.clamp_agent(&d);
         self = self.clamp_network(&d);
-        if !matches!(self.theme.as_str(), "system" | "dark" | "light") {
-            self.theme = d.theme;
-        }
         if !is_hex_color(&self.accent) {
             self.accent = d.accent;
         }
@@ -420,27 +477,6 @@ impl Prefs {
             self.ui_font = d.ui_font;
         }
         self = self.clamp_ranges();
-        if !matches!(self.density.as_str(), "compact" | "comfortable" | "relaxed") {
-            self.density = d.density;
-        }
-        if !matches!(self.corner_radius.as_str(), "sharp" | "soft" | "round") {
-            self.corner_radius = d.corner_radius;
-        }
-        if !matches!(self.tab_style.as_str(), "pill" | "flat") {
-            self.tab_style = d.tab_style;
-        }
-        if !matches!(self.motion.as_str(), "system" | "reduce" | "full") {
-            self.motion = d.motion;
-        }
-        if !matches!(
-            self.welcome_background.as_str(),
-            "orbs" | "plain" | "gradient"
-        ) {
-            self.welcome_background = d.welcome_background;
-        }
-        if !matches!(self.startup.as_str(), "restore" | "home" | "none") {
-            self.startup = d.startup;
-        }
         if self.search_engine != "custom"
             && !ENGINES.iter().any(|(key, _)| *key == self.search_engine)
         {
@@ -459,9 +495,6 @@ impl Prefs {
         self.privacy_exceptions = normalize_privacy_exceptions(self.privacy_exceptions);
         self.external_link_allowed = normalize_external_link_allowed(self.external_link_allowed);
         self.quick_links = normalize_quick_links(self.quick_links);
-        if !matches!(self.preferred_editor.as_str(), "vscode" | "cursor" | "zed") {
-            self.preferred_editor = d.preferred_editor;
-        }
         self
     }
 
@@ -945,8 +978,11 @@ pub fn calls_for(
             json!({"value": !prefs.javascript}),
         ),
     ];
-    let scheme =
-        chrome_scheme.or_else(|| (prefs.theme != "system").then_some(prefs.theme.as_str()));
+    let scheme = chrome_scheme.or(match prefs.theme {
+        ThemeMode::System => None,
+        ThemeMode::Dark => Some("dark"),
+        ThemeMode::Light => Some("light"),
+    });
     match page {
         PageScheme::Follow => {
             if prefs.tell_pages_theme
@@ -1017,13 +1053,11 @@ pub fn chrome_only_change(previous: &Prefs, next: &Prefs) -> bool {
         .clone_from(&previous.custom_highlight);
     masked.ui_font.clone_from(&previous.ui_font);
     masked.ui_scale = previous.ui_scale;
-    masked.density.clone_from(&previous.density);
-    masked.corner_radius.clone_from(&previous.corner_radius);
-    masked.tab_style.clone_from(&previous.tab_style);
-    masked.motion.clone_from(&previous.motion);
-    masked
-        .welcome_background
-        .clone_from(&previous.welcome_background);
+    masked.density = previous.density;
+    masked.corner_radius = previous.corner_radius;
+    masked.tab_style = previous.tab_style;
+    masked.motion = previous.motion;
+    masked.welcome_background = previous.welcome_background;
     masked.rail_expanded = previous.rail_expanded;
     masked == *previous
 }
@@ -1649,7 +1683,7 @@ mod tests {
     fn a_restore_keeps_this_machines_network_and_agent_safety() {
         let current = Prefs::default();
         let incoming = Prefs {
-            theme: "light".into(),
+            theme: ThemeMode::Light,
             agent_custom_base_url: "https://elsewhere.example/v1".into(),
             agent_approvals: "never".into(),
             proxy_mode: "fixed".into(),
@@ -1658,7 +1692,7 @@ mod tests {
             ..Prefs::default()
         };
         let restored = restorable(&incoming, &current);
-        assert_eq!(restored.theme, "light");
+        assert_eq!(restored.theme, ThemeMode::Light);
         assert_eq!(
             restored.agent_custom_base_url,
             current.agent_custom_base_url
@@ -1828,7 +1862,7 @@ mod tests {
     #[test]
     fn defaults_survive_a_partial_blob() {
         let prefs = parse_stored(r#"{"theme":"dark"}"#);
-        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.theme, ThemeMode::Dark);
         assert_eq!(prefs.search_engine, "google");
         assert!(prefs.javascript);
     }
@@ -1840,16 +1874,154 @@ mod tests {
         let prefs = parse_stored(
             r#"{"theme":"dark","search_engine":"bing","default_zoom":"big","javascript":false,"history_days":"forever"}"#,
         );
-        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.theme, ThemeMode::Dark);
         assert_eq!(prefs.search_engine, "bing");
         assert!(!prefs.javascript);
         let defaults = Prefs::default();
         assert!((prefs.default_zoom - defaults.default_zoom).abs() < f64::EPSILON);
         assert_eq!(prefs.history_days, defaults.history_days);
         // Unknown keys and junk that is not an object fall back cleanly too.
-        assert_eq!(parse_stored(r#"{"theme":"dark","future":1}"#).theme, "dark");
+        assert_eq!(
+            parse_stored(r#"{"theme":"dark","future":1}"#).theme,
+            ThemeMode::Dark
+        );
         assert_eq!(parse_stored("[1,2]"), Prefs::default());
         assert_eq!(parse_stored("not json"), Prefs::default());
+    }
+
+    #[test]
+    fn a_stored_tab_style_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"tab_style":"flat"}"#).tab_style,
+            TabStyle::Flat
+        );
+        let prefs = parse_stored(r#"{"tab_style":"tabs","theme":"dark"}"#);
+        assert_eq!(prefs.tab_style, TabStyle::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_corner_radius_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"corner_radius":"sharp"}"#).corner_radius,
+            CornerRadius::Sharp
+        );
+        assert_eq!(
+            parse_stored(r#"{"corner_radius":"soft"}"#).corner_radius,
+            CornerRadius::Soft
+        );
+        assert_eq!(
+            parse_stored(r#"{"corner_radius":"round"}"#).corner_radius,
+            CornerRadius::Round
+        );
+        let prefs = parse_stored(r#"{"corner_radius":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.corner_radius, CornerRadius::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_density_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"density":"compact"}"#).density,
+            Density::Compact
+        );
+        assert_eq!(
+            parse_stored(r#"{"density":"comfortable"}"#).density,
+            Density::Comfortable
+        );
+        assert_eq!(
+            parse_stored(r#"{"density":"relaxed"}"#).density,
+            Density::Relaxed
+        );
+        let prefs = parse_stored(r#"{"density":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.density, Density::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_motion_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"motion":"system"}"#).motion,
+            Motion::System
+        );
+        assert_eq!(
+            parse_stored(r#"{"motion":"reduce"}"#).motion,
+            Motion::Reduce
+        );
+        assert_eq!(parse_stored(r#"{"motion":"full"}"#).motion, Motion::Full);
+        let prefs = parse_stored(r#"{"motion":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.motion, Motion::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_welcome_background_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"welcome_background":"orbs"}"#).welcome_background,
+            WelcomeBackground::Orbs
+        );
+        assert_eq!(
+            parse_stored(r#"{"welcome_background":"plain"}"#).welcome_background,
+            WelcomeBackground::Plain
+        );
+        assert_eq!(
+            parse_stored(r#"{"welcome_background":"gradient"}"#).welcome_background,
+            WelcomeBackground::Gradient
+        );
+        let prefs = parse_stored(r#"{"welcome_background":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.welcome_background, WelcomeBackground::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_startup_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"startup":"restore"}"#).startup,
+            StartupMode::Restore
+        );
+        assert_eq!(
+            parse_stored(r#"{"startup":"home"}"#).startup,
+            StartupMode::Home
+        );
+        assert_eq!(
+            parse_stored(r#"{"startup":"none"}"#).startup,
+            StartupMode::None
+        );
+        let prefs = parse_stored(r#"{"startup":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.startup, StartupMode::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_preferred_editor_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"preferred_editor":"vscode"}"#).preferred_editor,
+            PreferredEditor::Vscode
+        );
+        assert_eq!(
+            parse_stored(r#"{"preferred_editor":"cursor"}"#).preferred_editor,
+            PreferredEditor::Cursor
+        );
+        assert_eq!(
+            parse_stored(r#"{"preferred_editor":"zed"}"#).preferred_editor,
+            PreferredEditor::Zed
+        );
+        let prefs = parse_stored(r#"{"preferred_editor":"bogus","theme":"dark"}"#);
+        assert_eq!(prefs.preferred_editor, PreferredEditor::default());
+        assert_eq!(prefs.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn a_stored_theme_loads_and_a_bogus_one_keeps_the_default() {
+        assert_eq!(
+            parse_stored(r#"{"theme":"system"}"#).theme,
+            ThemeMode::System
+        );
+        assert_eq!(parse_stored(r#"{"theme":"dark"}"#).theme, ThemeMode::Dark);
+        assert_eq!(parse_stored(r#"{"theme":"light"}"#).theme, ThemeMode::Light);
+        let prefs = parse_stored(r#"{"theme":"bogus","homepage":"https://x.dev"}"#);
+        assert_eq!(prefs.theme, ThemeMode::default());
+        assert_eq!(prefs.homepage, "https://x.dev");
     }
 
     #[test]
@@ -2003,27 +2175,21 @@ mod tests {
     #[test]
     fn clamp_rejects_nonsense() {
         let prefs = Prefs {
-            theme: "neon".into(),
             accent: "red".into(),
-            startup: "whatever".into(),
             search_engine: "askjeeves".into(),
             default_zoom: 99.0,
             history_days: -5,
             blocked_patterns: vec!["  ads.dev ".into(), "   ".into()],
             agent_model: "  ".into(),
-            preferred_editor: "notepad".into(),
             ..Prefs::default()
         }
         .clamp();
-        assert_eq!(prefs.theme, "system");
         assert_eq!(prefs.accent, Prefs::default().accent);
-        assert_eq!(prefs.startup, Prefs::default().startup);
         assert_eq!(prefs.search_engine, "google");
         assert!((prefs.default_zoom - 3.0).abs() < f64::EPSILON);
         assert_eq!(prefs.history_days, 0);
         assert_eq!(prefs.blocked_patterns, vec!["ads.dev".to_owned()]);
         assert_eq!(prefs.agent_model, dive_agent::DEFAULT_MODEL);
-        assert_eq!(prefs.preferred_editor, "vscode");
     }
 
     #[test]
@@ -2107,7 +2273,7 @@ mod tests {
         let prefs = Prefs {
             do_not_track: true,
             javascript: false,
-            theme: "dark".into(),
+            theme: ThemeMode::Dark,
             tell_pages_theme: true,
             ..Prefs::default()
         };
@@ -2171,7 +2337,7 @@ mod tests {
         assert!(!chrome_only_change(&before, &javascript));
         // The mode can reach pages through "Tell pages the theme".
         let theme = Prefs {
-            theme: "light".into(),
+            theme: ThemeMode::Light,
             ..before.clone()
         };
         assert!(!chrome_only_change(&before, &theme));
@@ -2187,11 +2353,6 @@ mod tests {
             custom_ground: "not-a-colour".into(),
             ui_font: "comic".into(),
             ui_scale: 9.0,
-            density: "cramped".into(),
-            corner_radius: "square".into(),
-            tab_style: "tabs".into(),
-            motion: "lots".into(),
-            welcome_background: "video".into(),
             ..Prefs::default()
         }
         .clamp();
@@ -2200,11 +2361,6 @@ mod tests {
         assert_eq!(wild.custom_ground, d.custom_ground);
         assert_eq!(wild.ui_font, d.ui_font);
         assert!((wild.ui_scale - UI_SCALE_RANGE.1).abs() < f64::EPSILON);
-        assert_eq!(wild.density, d.density);
-        assert_eq!(wild.corner_radius, d.corner_radius);
-        assert_eq!(wild.tab_style, d.tab_style);
-        assert_eq!(wild.motion, d.motion);
-        assert_eq!(wild.welcome_background, d.welcome_background);
         let fine = Prefs {
             appearance_preset: "custom".into(),
             custom_ground: "#0b0f14".into(),

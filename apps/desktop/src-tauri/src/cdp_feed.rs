@@ -3,7 +3,7 @@
 
 use dive_cdp::{CdpEvent, CdpSession};
 use dive_core::TabId;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::Runtime;
 use crate::state::AppState;
@@ -46,32 +46,32 @@ impl<T> IpcBatch<T> {
     }
 }
 
-pub(crate) fn emit_batch<T: serde::Serialize>(
+pub(crate) fn emit_batch<T, E: tauri_specta::Event + serde::Serialize + Clone>(
     app: &AppHandle<Runtime>,
     session: &CdpSession,
-    event: &str,
+    wrap: fn(Vec<T>) -> E,
     batch: &mut IpcBatch<T>,
     tab_id: TabId,
 ) {
     let items = batch.take();
     if !session.is_closed()
         && !items.is_empty()
-        && let Err(error) = app.emit(event, &items)
+        && let Err(error) = wrap(items).emit(app)
     {
-        tracing::warn!(%tab_id, %error, event, "batch emit failed");
+        tracing::warn!(%tab_id, %error, event = std::any::type_name::<E>(), "batch emit failed");
     }
 }
 
-fn emit_navigation_reset(
+fn emit_navigation_reset<E: tauri_specta::Event + serde::Serialize + Clone>(
     app: &AppHandle<Runtime>,
     session: &CdpSession,
-    event: &str,
+    reset: fn(TabId) -> E,
     tab_id: TabId,
 ) {
     if !session.is_closed()
-        && let Err(error) = app.emit(event, serde_json::json!({ "reset": tab_id }))
+        && let Err(error) = reset(tab_id).emit(app)
     {
-        tracing::warn!(%tab_id, %error, event, "navigation reset emit failed");
+        tracing::warn!(%tab_id, %error, event = std::any::type_name::<E>(), "navigation reset emit failed");
     }
 }
 
@@ -85,17 +85,19 @@ fn emit_navigation_reset(
 /// the domains afterwards cannot lose an event to the task not having
 /// started yet.
 #[allow(clippy::too_many_arguments)] // Each hook is one feed-specific step; a struct of them would only rename the list.
-pub fn attach<T, M, R, N>(
+pub fn attach<T, E, M, R, N>(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
     methods: &'static [&'static str],
-    batch_event: &'static str,
+    wrap: fn(Vec<T>) -> E,
+    reset: fn(TabId) -> E,
     map: M,
     record: R,
     navigated: N,
 ) where
-    T: serde::Serialize + Clone + Send + 'static,
+    T: Send + 'static,
+    E: tauri_specta::Event + serde::Serialize + Clone + 'static,
     M: Fn(TabId, &CdpEvent) -> Option<T> + Send + 'static,
     R: Fn(&AppState, &T) + Send + 'static,
     N: Fn(&AppState, TabId) + Send + 'static,
@@ -113,7 +115,7 @@ pub fn attach<T, M, R, N>(
                 Some(events.recv().await)
             };
             let Some(incoming) = incoming else {
-                emit_batch(&app, &session, batch_event, &mut batch, tab_id);
+                emit_batch(&app, &session, wrap, &mut batch, tab_id);
                 continue;
             };
             match incoming {
@@ -121,14 +123,14 @@ pub fn attach<T, M, R, N>(
                     if event.method == "Page.frameNavigated"
                         && event.params["frame"]["parentId"].is_null()
                     {
-                        emit_batch(&app, &session, batch_event, &mut batch, tab_id);
+                        emit_batch(&app, &session, wrap, &mut batch, tab_id);
                         navigated(&app.state::<AppState>(), tab_id);
-                        emit_navigation_reset(&app, &session, batch_event, tab_id);
+                        emit_navigation_reset(&app, &session, reset, tab_id);
                     }
                     if let Some(item) = map(tab_id, &event) {
                         record(&app.state::<AppState>(), &item);
                         if batch.push(item) {
-                            emit_batch(&app, &session, batch_event, &mut batch, tab_id);
+                            emit_batch(&app, &session, wrap, &mut batch, tab_id);
                         }
                     }
                 }

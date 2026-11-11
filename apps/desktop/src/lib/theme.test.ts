@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PREFS } from "../store/prefs";
+import type { Prefs } from "../store/prefs";
 import {
   DENSITY,
   FONTS,
@@ -115,7 +116,7 @@ describe("resolveScheme", () => {
 
 describe("themeCss", () => {
   it("maps corner radius to the six Tailwind radius tokens", () => {
-    const pick = (corner_radius: string) => Object.fromEntries(themeCss({ ...DEFAULT_PREFS, corner_radius }, "dark"));
+    const pick = (corner_radius: Prefs["corner_radius"]) => Object.fromEntries(themeCss({ ...DEFAULT_PREFS, corner_radius }, "dark"));
     expect(pick("sharp")["--radius-lg"]).toBe(RADII.sharp[2]);
     expect(pick("soft")["--radius-2xl"]).toBe("8px");
     expect(pick("round")["--radius-sm"]).toBe("0.25rem");
@@ -123,7 +124,7 @@ describe("themeCss", () => {
   });
 
   it("maps density to the row height and gap", () => {
-    const pick = (density: string) => Object.fromEntries(themeCss({ ...DEFAULT_PREFS, density }, "dark"));
+    const pick = (density: Prefs["density"]) => Object.fromEntries(themeCss({ ...DEFAULT_PREFS, density }, "dark"));
     expect(pick("compact")["--row-h"]).toBe("1.875rem");
     expect(pick("compact")["--ui-gap"]).toBe("0.125rem");
     expect(pick("comfortable")["--row-h"]).toBe(DENSITY.comfortable.row);
@@ -143,7 +144,7 @@ describe("themeCss", () => {
 
 describe("sharing", () => {
   it("round-trips the appearance fields and nothing else", () => {
-    const prefs = { ...DEFAULT_PREFS, appearance_preset: "sepia", ui_scale: 1.1, density: "compact", accent: "#F0B35E", homepage: "https://x" };
+    const prefs: Prefs = { ...DEFAULT_PREFS, appearance_preset: "sepia", ui_scale: 1.1, density: "compact", accent: "#F0B35E", homepage: "https://x" };
     const json = exportTheme(prefs);
     expect(json).not.toContain("homepage");
     const back = importTheme(json);

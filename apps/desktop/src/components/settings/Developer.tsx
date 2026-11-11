@@ -70,7 +70,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
             <Select
               id="pref-editor"
               label="Preferred editor"
-              value={prefs.preferred_editor || "vscode"}
+              value={prefs.preferred_editor}
               onChange={(preferred_editor) => void set({ preferred_editor })}
               options={[
                 { value: "vscode", label: "VS Code (vscode://)" },

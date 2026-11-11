@@ -6,6 +6,7 @@ import type { DevServer } from "../lib/ipc";
 import { useReducedMotion } from "../lib/useReducedMotion";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
+import type { Prefs } from "../store/prefs";
 import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
 import { AgentIcon } from "./agent/AgentIcon";
@@ -78,8 +79,6 @@ export function Welcome() {
   );
 }
 
-type WelcomeBackground = "orbs" | "plain" | "gradient";
-
 /**
  * Whether the window is in front and showing. The start page is where Dive
  * sits idle, often for hours behind other windows, and its artwork kept
@@ -101,10 +100,9 @@ function useWindowActive(): boolean {
   return active;
 }
 
-/** The backdrop preference, with anything unknown falling back to the orbs. */
-function useWelcomeBackground(): WelcomeBackground {
-  const value = usePrefs((s) => s.prefs.welcome_background);
-  return value === "plain" || value === "gradient" ? value : "orbs";
+/** The backdrop preference; the host only ever stores one of the three. */
+function useWelcomeBackground(): Prefs["welcome_background"] {
+  return usePrefs((s) => s.prefs.welcome_background);
 }
 
 /** Instant when motion is off; a smooth slide only when the chrome is allowed to move. */

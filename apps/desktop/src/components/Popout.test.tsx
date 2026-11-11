@@ -9,6 +9,7 @@ import { events, ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
 import { Popout } from "./Popout";
+import { NATIVE_FOCUS_ADDRESS } from "../lib/nativeEvents";
 
 vi.mock("../lib/ipc", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/ipc")>();
@@ -251,12 +252,12 @@ describe("detached page ownership and input", () => {
   it("synchronously focuses and selects its address on the native focus handoff", () => {
     render(<Popout tabId="a" />);
     const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
-    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
+    act(() => { window.dispatchEvent(new Event(NATIVE_FOCUS_ADDRESS)); });
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
     fireEvent.change(input, { target: { value: "new draft" } });
     input.setSelectionRange(4, 4);
-    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
+    act(() => { window.dispatchEvent(new Event(NATIVE_FOCUS_ADDRESS)); });
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, 9]);
   });
 

@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
 import { events, ipc } from "../lib/ipc";
 import type { NetworkEvent } from "../lib/ipc";
 import { ignored } from "../lib/chromeErrors";
@@ -307,14 +306,7 @@ export function enqueueNetworkBatch(entries: NetworkEvent[]) {
 export function listenNetwork() {
   if (listening) return listening;
   const request = (async () => {
-    const offLegacy = await events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload));
-    try {
-      const offBatch = await listen<NetworkEvent[]>("network-event-batch", (e) => enqueueNetworkBatch(e.payload));
-      return () => { offBatch(); offLegacy(); };
-    } catch (error) {
-      offLegacy();
-      throw error;
-    }
+    return events.networkEventBatch.listen((e) => enqueueNetworkBatch(e.payload));
   })();
   listening = request;
   // A failed subscription is not cached: the next call tries again.

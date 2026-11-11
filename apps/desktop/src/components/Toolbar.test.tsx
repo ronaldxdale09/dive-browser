@@ -12,6 +12,7 @@ import { useSubtitles } from "../store/subtitles";
 import { useRecorder } from "../store/recorder";
 import { Toolbar } from "./Toolbar";
 import { useShortcuts } from "../lib/shortcuts";
+import { NATIVE_FOCUS_ADDRESS } from "../lib/nativeEvents";
 
 const tab: Tab = {
   id: "tab-1",
@@ -91,7 +92,7 @@ describe("Toolbar", () => {
     function NativeToolbar() { useShortcuts(); return <Toolbar />; }
     render(<NativeToolbar />);
     const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
-    act(() => { window.dispatchEvent(new Event("dive-native-focus-address")); });
+    act(() => { window.dispatchEvent(new Event(NATIVE_FOCUS_ADDRESS)); });
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe(tab.url);
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, tab.url.length]);

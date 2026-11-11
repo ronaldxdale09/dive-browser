@@ -73,7 +73,7 @@ export function Appearance() {
                 label="Mode"
                 // A fixed template or Custom's ground decides the scheme, so
                 // show that rather than a leftover System / Light / Dark pref.
-                value={fixed ? preset.scheme : custom ? scheme : prefs.theme}
+                value={fixed || custom ? scheme : prefs.theme}
                 onChange={(theme) => !(fixed || custom) && set({ theme })}
                 options={[
                   { value: "system", label: "System" },

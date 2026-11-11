@@ -33,7 +33,7 @@ pub enum Level {
 }
 
 /// One line in the console panel.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct ConsoleEntry {
     /// Tab that produced it.
     pub tab_id: TabId,
@@ -53,6 +53,19 @@ pub struct ConsoleEntry {
     pub column: Option<u32>,
 }
 
+/// Console entries for the chrome, or a navigation reset for one tab.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(untagged)]
+pub enum ConsoleBatch {
+    /// Entries in wire order.
+    Entries(Vec<ConsoleEntry>),
+    /// The tab navigated; start its console over.
+    Reset {
+        /// The tab that navigated.
+        reset: TabId,
+    },
+}
+
 /// Forward every entry to the chrome. The `Runtime` and `Log` domains are
 /// enabled by the tab's setup, once, with everything else it listens on.
 pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
@@ -66,7 +79,8 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
             "Log.entryAdded",
             "Page.frameNavigated",
         ],
-        "console-entry-batch",
+        ConsoleBatch::Entries,
+        |tab_id| ConsoleBatch::Reset { reset: tab_id },
         map_event,
         |state, entry| {
             // The page clearing its console starts it over, as a navigation

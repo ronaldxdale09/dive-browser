@@ -240,11 +240,11 @@ export const FONTS = {
 } as const;
 
 /** Tailwind's radius scale per corner preference: sm, md, lg, xl, 2xl, 3xl. */
-export const RADII = {
+export const RADII: Record<Prefs["corner_radius"], readonly string[]> = {
   sharp: ["1px", "2px", "3px", "4px", "6px", "8px"],
   soft: ["2px", "3px", "4px", "6px", "8px", "12px"],
   round: ["0.25rem", "0.375rem", "0.5rem", "0.75rem", "1rem", "1.5rem"],
-} as const;
+};
 
 /** How far the page's own corners are rounded for each corner preference, in px. */
 export function contentCornerRadius(pref: string): number {
@@ -262,11 +262,11 @@ export const UI_SCALE_MAX = 2;
 
 // Rows in rem, like the type in them: a row sized in px kept its height as
 // the Interface size grew its text, and the text overflowed it.
-export const DENSITY = {
+export const DENSITY: Record<Prefs["density"], { readonly row: string; readonly gap: string }> = {
   compact: { row: "1.875rem", gap: "0.125rem" },
   comfortable: { row: "2.25rem", gap: "0.25rem" },
   relaxed: { row: "2.5rem", gap: "0.375rem" },
-} as const;
+};
 
 const PALETTE_VARS: Record<keyof Palette, string> = {
   ground: "--color-ground",
@@ -297,9 +297,9 @@ export function themeCss(prefs: Prefs, scheme: Scheme = resolveScheme(prefs)): [
   const palette = resolvePalette(prefs, scheme);
   const pairs: [string, string][] = (Object.keys(PALETTE_VARS) as (keyof Palette)[]).map((key) => [PALETTE_VARS[key], palette[key]]);
   pairs.push(["--font-sans", FONTS[prefs.ui_font as keyof typeof FONTS] ?? FONTS.geist]);
-  const radii = RADII[prefs.corner_radius as keyof typeof RADII] ?? RADII.round;
+  const radii = RADII[prefs.corner_radius];
   RADIUS_VARS.forEach((name, i) => pairs.push([name, radii[i]!]));
-  const density = DENSITY[prefs.density as keyof typeof DENSITY] ?? DENSITY.comfortable;
+  const density = DENSITY[prefs.density];
   pairs.push(["--row-h", density.row], ["--ui-gap", density.gap]);
   return pairs;
 }
@@ -324,12 +324,14 @@ export const APPEARANCE_KEYS = [
 export type AppearanceKey = (typeof APPEARANCE_KEYS)[number];
 export type Appearance = Pick<Prefs, AppearanceKey>;
 
-const ENUMS: Partial<Record<AppearanceKey, readonly string[]>> = {
+/** The choices each text-valued appearance field accepts; the unions come from the generated `Prefs`. */
+type EnumKey = "theme" | "appearance_preset" | "ui_font" | "density" | "corner_radius" | "tab_style" | "motion" | "welcome_background";
+const ENUMS: { [K in EnumKey]: readonly Prefs[K][] } = {
   theme: ["system", "dark", "light"],
   appearance_preset: [...PRESETS.map((p) => p.id), CUSTOM_PRESET_ID],
   ui_font: Object.keys(FONTS),
-  density: Object.keys(DENSITY),
-  corner_radius: Object.keys(RADII),
+  density: ["compact", "comfortable", "relaxed"],
+  corner_radius: ["sharp", "soft", "round"],
   tab_style: ["pill", "flat"],
   motion: ["system", "reduce", "full"],
   welcome_background: ["orbs", "plain", "gradient"],
@@ -371,9 +373,9 @@ export function importTheme(json: string): Partial<Appearance> {
       if (typeof value !== "number" || !Number.isFinite(value) || value < UI_SCALE_MIN || value > UI_SCALE_MAX) throw new Error(`Not a theme: ui_scale must be a number from ${UI_SCALE_MIN} to ${UI_SCALE_MAX}.`);
       out.ui_scale = value;
     } else {
-      const allowed = ENUMS[key]!;
+      const allowed: readonly string[] = ENUMS[key as EnumKey];
       if (typeof value !== "string" || !allowed.includes(value)) throw new Error(`Not a theme: ${key} must be one of ${allowed.join(", ")}.`);
-      out[key as "theme"] = value;
+      Object.assign(out, { [key]: value });
     }
   }
   if (Object.keys(out).length === 0) throw new Error("Not a theme: none of the appearance fields are present.");

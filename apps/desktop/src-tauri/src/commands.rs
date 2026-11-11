@@ -1004,7 +1004,6 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_thread_clear,
         ])
         .events(collect_events![
-            crate::automation::AgentPointer,
             crate::agent_presence::AgentPresence,
             crate::crash::TabCrashed,
             crate::crash::TabUnresponsive,
@@ -1019,8 +1018,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::menu::MenuCommand,
             StateChanged,
             TabWindowChanged,
-            crate::console::ConsoleEntry,
-            crate::network::NetworkEvent,
+            crate::console::ConsoleBatch,
+            crate::network::NetworkEventBatch,
             crate::engine::DownloadNotice,
             crate::loading::TabLoad,
             crate::navigation::TabHistoryChanged,

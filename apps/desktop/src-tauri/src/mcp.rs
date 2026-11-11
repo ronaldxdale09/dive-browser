@@ -2279,17 +2279,9 @@ impl Browser for AppBrowser {
                 tab,
                 async {
                     let (x, y, label) = self.point_for(tab, &session, &target).await?;
-                    automation::click_at(
-                        &session,
-                        Some(&self.app),
-                        tab,
-                        x,
-                        y,
-                        &label,
-                        self.on_screen(tab),
-                    )
-                    .await
-                    .map_err(|e| other(e.message))?;
+                    automation::click_at(&session, tab, x, y, &label, self.on_screen(tab))
+                        .await
+                        .map_err(|e| other(e.message))?;
                     Ok(json!({"clicked": label, "x": x, "y": y}))
                 },
                 |dialog| Ok(dialog_opened(dialog, "The click")),
@@ -2460,7 +2452,6 @@ impl Browser for AppBrowser {
                     let (x, y, label) = self.point_for(tab, &session, &target).await?;
                     automation::hover_at(
                         &session,
-                        Some(&self.app),
                         tab,
                         x,
                         y,
@@ -3184,7 +3175,6 @@ impl Browser for AppBrowser {
                     let end = locator::point(&session, &to).await?;
                     automation::drag_between(
                         &session,
-                        Some(&self.app),
                         tab,
                         (start.x, start.y),
                         (end.x, end.y),
