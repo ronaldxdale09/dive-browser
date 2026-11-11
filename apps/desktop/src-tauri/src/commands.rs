@@ -1581,9 +1581,11 @@ pub(crate) fn workspace_delete(
     state: State<'_, AppState>,
     id: WorkspaceId,
 ) -> AppResult<()> {
-    let (tab_ids, next) = {
+    let (tab_ids, next, container) = {
         let store = lock(&state.store);
-        let profile = store.workspace(id)?.profile_id;
+        let workspace = store.workspace(id)?;
+        let profile = workspace.profile_id;
+        let container = workspace.container_id;
         let all = store.workspaces_for_profile(profile)?;
         if all.len() <= 1 {
             return Err(AppError::new(
@@ -1598,10 +1600,18 @@ pub(crate) fn workspace_delete(
                 .map(|t| t.id)
                 .collect::<Vec<_>>(),
             next,
+            container,
         )
     };
     close_views(&app, &state, &tab_ids);
-    lock(&state.store).remove_workspace(id)?;
+    {
+        let store = lock(&state.store);
+        store.remove_workspace(id)?;
+        // A workspace made with cookies of its own -- an agent's clean
+        // session, an MCP context -- takes them with it. One that shares
+        // its profile's container leaves it alone.
+        crate::state::release_unused_containers(&store, [container])?;
+    }
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));
     }
@@ -1904,13 +1914,7 @@ pub(crate) fn profile_delete(
         }
         store.remove_profile(id)?;
         store.remove_profile_data(id)?;
-        let mut freed = Vec::new();
-        for container in containers {
-            if let Some(container) = store.remove_container_if_unused(container)? {
-                freed.push(container.cache_dir);
-            }
-        }
-        crate::state::queue_container_deletions(&store, &freed)?;
+        crate::state::release_unused_containers(&store, containers)?;
     }
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));

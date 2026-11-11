@@ -219,6 +219,22 @@ fn is_plain_folder_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':', '\0'])
 }
 
+/// Forget the containers in `ids` that no workspace or profile uses any
+/// more, and queue their folders to go at the next launch. A container
+/// still in use (a profile's own, or one another workspace shares) stays.
+pub(crate) fn release_unused_containers(
+    store: &Store,
+    ids: impl IntoIterator<Item = dive_core::ContainerId>,
+) -> dive_core::Result<()> {
+    let mut freed = Vec::new();
+    for id in ids {
+        if let Some(container) = store.remove_container_if_unused(id)? {
+            freed.push(container.cache_dir);
+        }
+    }
+    queue_container_deletions(store, &freed)
+}
+
 /// Delete these container folders at the next launch.
 ///
 /// Not now: the engine keeps a container's request context, and with it
@@ -423,5 +439,58 @@ mod tests {
         assert!(root.path().join(&kept.cache_dir).exists());
         assert!(root.path().join("neighbour").exists());
         assert!(pending_container_deletions(&store).is_empty());
+    }
+
+    #[test]
+    fn a_workspace_with_its_own_container_takes_it_when_removed() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let shared = Workspace::new("Shared", profile.container_id, profile.id, 0);
+        store.upsert_workspace(&shared).unwrap();
+
+        let own = Container::new("Agent");
+        store.upsert_container(&own).unwrap();
+        let isolated = Workspace::new("Agent", own.id, profile.id, 1);
+        store.upsert_workspace(&isolated).unwrap();
+
+        let both = Container::new("Both");
+        store.upsert_container(&both).unwrap();
+        let first = Workspace::new("First", both.id, profile.id, 2);
+        let second = Workspace::new("Second", both.id, profile.id, 3);
+        store.upsert_workspace(&first).unwrap();
+        store.upsert_workspace(&second).unwrap();
+
+        // Its own container goes, and its folder is queued.
+        store.remove_workspace(isolated.id).unwrap();
+        release_unused_containers(&store, [own.id]).unwrap();
+        assert!(!store.containers().unwrap().iter().any(|c| c.id == own.id));
+        assert_eq!(
+            pending_container_deletions(&store),
+            vec![own.cache_dir.clone()]
+        );
+
+        // The profile's own container stays, and is not queued.
+        store.remove_workspace(shared.id).unwrap();
+        release_unused_containers(&store, [profile.container_id]).unwrap();
+        assert!(
+            store
+                .containers()
+                .unwrap()
+                .iter()
+                .any(|c| c.id == profile.container_id)
+        );
+        assert_eq!(
+            pending_container_deletions(&store),
+            vec![own.cache_dir.clone()]
+        );
+
+        // A container another workspace still shares stays too.
+        store.remove_workspace(first.id).unwrap();
+        release_unused_containers(&store, [both.id]).unwrap();
+        assert!(store.containers().unwrap().iter().any(|c| c.id == both.id));
+        assert_eq!(
+            pending_container_deletions(&store),
+            vec![own.cache_dir.clone()]
+        );
     }
 }
