@@ -278,9 +278,19 @@ pub enum AgentError {
     /// No base URL for a custom endpoint.
     #[error("no base URL configured for the custom endpoint")]
     MissingBaseUrl,
-    /// HTTP-level failure.
+    /// The client is set up wrong (a bad base URL, an HTTP client that could
+    /// not be built). Fails the same way every time until settings change.
+    #[error("{0}")]
+    Config(String),
+    /// HTTP-level failure. For a request, only a failed connect: nothing
+    /// reached the provider, so it is safe to send again.
     #[error("request failed: {0}")]
     Http(String),
+    /// The request went out but no usable answer came back (headers timed
+    /// out, connection dropped after sending). The provider may have acted
+    /// on it, so it is not repeated automatically.
+    #[error("request failed: {0}")]
+    Unanswered(String),
     /// Non-2xx response.
     #[error("api {status}: {message}")]
     Api {
@@ -308,7 +318,10 @@ impl AgentError {
     /// Whether trying the same request again could plausibly work.
     ///
     /// Rate limits and the 5xx family are the provider asking for patience;
-    /// a transport failure is usually a dropped connection. Everything else —
+    /// a transport failure counts only when nothing was sent (a failed
+    /// connect); once the request body may have reached the provider it could
+    /// already be acting on it, so sending again risks running it twice.
+    /// Everything else —
     /// a bad key, a malformed request, a model that does not exist — fails the
     /// same way however many times it is sent, so retrying only wastes the
     /// person's time and their tokens.
@@ -316,7 +329,9 @@ impl AgentError {
         match self {
             Self::Api { status, .. } => *status == 408 || *status == 429 || *status >= 500,
             Self::Http(_) => true,
-            Self::MissingKey | Self::MissingBaseUrl => false,
+            Self::Unanswered(_) | Self::Config(_) | Self::MissingKey | Self::MissingBaseUrl => {
+                false
+            }
         }
     }
 
@@ -432,7 +447,7 @@ impl Client {
             return Err(AgentError::MissingKey);
         }
         let url = reqwest::Url::parse(&self.base_url)
-            .map_err(|error| AgentError::Http(format!("invalid base URL: {error}")))?;
+            .map_err(|error| AgentError::Config(format!("invalid base URL: {error}")))?;
         if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
@@ -440,7 +455,7 @@ impl Client {
             || url.query().is_some()
             || url.fragment().is_some()
         {
-            return Err(AgentError::Http(
+            return Err(AgentError::Config(
                 "base URL must be an HTTP(S) origin or path without credentials, query, or fragment"
                     .into(),
             ));
@@ -449,7 +464,7 @@ impl Client {
         // servers (Ollama, LM Studio, a box on the LAN) are fine; anything
         // else has to be https once there is a key to send.
         if url.scheme() == "http" && !self.api_key.trim().is_empty() && !is_local_host(&url) {
-            return Err(AgentError::Http(
+            return Err(AgentError::Config(
                 "an API key is only sent over https, or over http to this machine or the local network"
                     .into(),
             ));
@@ -459,9 +474,9 @@ impl Client {
     }
 
     fn http(&self) -> Result<&reqwest::Client, AgentError> {
-        self.http
-            .as_ref()
-            .map_err(|error| AgentError::Http(format!("could not configure HTTP client: {error}")))
+        self.http.as_ref().map_err(|error| {
+            AgentError::Config(format!("could not configure HTTP client: {error}"))
+        })
     }
 
     async fn send(
@@ -477,11 +492,12 @@ impl Client {
             (Err(Some(error)), Some(again)) if error.is_connect() => Self::send_once(again).await,
             (first, _) => first,
         };
-        outcome.map_err(|error| {
-            AgentError::Http(error.map_or_else(
-                || "request timed out waiting for response headers".into(),
-                |error| error.to_string(),
-            ))
+        outcome.map_err(|error| match error {
+            // Never connected: nothing reached the provider.
+            Some(error) if error.is_connect() => AgentError::Http(error.to_string()),
+            // Sent, but no usable answer: the provider may have acted on it.
+            Some(error) => AgentError::Unanswered(error.to_string()),
+            None => AgentError::Unanswered("request timed out waiting for response headers".into()),
         })
     }
 
@@ -630,7 +646,7 @@ impl Client {
         }
         tokio::time::timeout(JSON_BODY_TIMEOUT, read_json_body(response))
             .await
-            .map_err(|_| AgentError::Http("JSON response body timed out".into()))?
+            .map_err(|_| AgentError::Unanswered("JSON response body timed out".into()))?
     }
 }
 
@@ -840,7 +856,12 @@ mod tests {
         assert!(api(500).is_transient());
         assert!(api(503).is_transient());
         assert!(api(408).is_transient());
-        assert!(AgentError::Http("connection reset".into()).is_transient());
+        assert!(AgentError::Http("connection refused".into()).is_transient());
+        assert!(
+            !AgentError::Unanswered("request timed out waiting for response headers".into())
+                .is_transient()
+        );
+        assert!(!AgentError::Config("invalid base URL: empty host".into()).is_transient());
         // These fail identically however many times they are sent.
         assert!(!api(401).is_transient());
         assert!(!api(403).is_transient());

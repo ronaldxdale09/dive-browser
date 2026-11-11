@@ -92,6 +92,10 @@ pub struct StreamState {
     /// Partial JSON for `tool_use` inputs, by index.
     partial_inputs: BTreeMap<usize, String>,
     stop_reason: Option<String>,
+    /// The first tool call whose arguments did not parse, as (name, error).
+    /// Held until the stop reason is known: a call cut off by the output
+    /// limit is reported as that, not as bad JSON.
+    pending_error: Option<(String, String)>,
     usage: Usage,
     finished: bool,
 }
@@ -163,25 +167,7 @@ impl StreamState {
                     _ => Vec::new(),
                 }
             }
-            "content_block_stop" => {
-                let index = index_of(&v);
-                let Some(raw) = self.partial_inputs.remove(&index) else {
-                    return Vec::new();
-                };
-                let Some(block) = self.blocks.get_mut(&index) else {
-                    return Vec::new();
-                };
-                let id = block["id"].as_str().unwrap_or_default().to_owned();
-                let name = block["name"].as_str().unwrap_or_default().to_owned();
-                let input = match parse_arguments(&raw) {
-                    Ok(input) => input,
-                    // Running a tool with made-up empty arguments is worse
-                    // than stopping: the caller learns the call was unusable.
-                    Err(reason) => return vec![Delta::Error(malformed_call(&name, &id, &reason))],
-                };
-                block["input"] = input.clone();
-                vec![Delta::ToolUse(ToolUse { id, name, input })]
-            }
+            "content_block_stop" => self.close_block(index_of(&v)),
             "message_delta" => {
                 if let Some(s) = v["delta"]["stop_reason"].as_str() {
                     self.stop_reason = Some(s.to_owned());
@@ -202,12 +188,42 @@ impl StreamState {
         }
     }
 
+    /// A block ended: a tool call's arguments are parsed and handed over.
+    fn close_block(&mut self, index: usize) -> Vec<Delta> {
+        let Some(raw) = self.partial_inputs.remove(&index) else {
+            return Vec::new();
+        };
+        let Some(block) = self.blocks.get_mut(&index) else {
+            return Vec::new();
+        };
+        let id = block["id"].as_str().unwrap_or_default().to_owned();
+        let name = block["name"].as_str().unwrap_or_default().to_owned();
+        let input = match parse_arguments(&raw) {
+            Ok(input) => input,
+            // Running a tool with made-up empty arguments is worse than
+            // stopping: the caller learns the call was unusable once the
+            // stop reason says why.
+            Err(reason) => {
+                if self.pending_error.is_none() {
+                    let message = malformed_call(&name, &id, &reason);
+                    self.pending_error = Some((name, message));
+                }
+                return Vec::new();
+            }
+        };
+        block["input"] = input.clone();
+        vec![Delta::ToolUse(ToolUse { id, name, input })]
+    }
+
     /// The trailing deltas when the bytes ended without `message_stop`: a
     /// reply whose stop reason already arrived is complete and is delivered;
     /// one cut off before that stays unfinished so the caller reports it.
     pub(crate) fn finish_on_close(&mut self) -> Vec<Delta> {
         if self.stop_reason.is_some() {
             self.finish()
+        } else if let Some((_, message)) = self.pending_error.take() {
+            self.finished = true;
+            vec![Delta::Error(message)]
         } else {
             Vec::new()
         }
@@ -219,6 +235,15 @@ impl StreamState {
             return Vec::new();
         }
         self.finished = true;
+        if let Some((name, message)) = self.pending_error.take() {
+            return vec![Delta::Error(
+                if self.stop_reason.as_deref() == Some("max_tokens") {
+                    output_limit_call(&name)
+                } else {
+                    message
+                },
+            )];
+        }
         let blocks: Vec<Value> = std::mem::take(&mut self.blocks).into_values().collect();
         vec![
             Delta::Usage(self.usage),
@@ -247,6 +272,13 @@ pub(crate) fn parse_arguments(raw: &str) -> Result<Value, String> {
 /// The error reported when a model's tool call cannot be parsed.
 pub(crate) fn malformed_call(name: &str, id: &str, reason: &str) -> String {
     format!("The model called {name} ({id}) with arguments that are not valid JSON: {reason}")
+}
+
+/// The error reported when the output limit cut a tool call off mid-way.
+pub(crate) fn output_limit_call(name: &str) -> String {
+    format!(
+        "The reply hit the output limit while writing a call to {name}, so the call was not run. Ask for a shorter step, or raise the output limit."
+    )
 }
 
 fn index_of(v: &Value) -> usize {
@@ -425,6 +457,59 @@ mod tests {
         assert!(st.parse_event("message_stop", "{}").is_empty());
     }
 
+    /// A `page_click` block whose arguments stop mid-string.
+    fn cut_off_call(st: &mut StreamState) {
+        st.parse_event(
+            "message_start",
+            r#"{"message":{"usage":{"input_tokens":1}}}"#,
+        );
+        st.parse_event(
+            "content_block_start",
+            r#"{"index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"page_click","input":{}}}"#,
+        );
+        st.parse_event(
+            "content_block_delta",
+            r#"{"index":0,"delta":{"type":"input_json_delta","partial_json":"{\"target\": \"role=but"}}"#,
+        );
+        assert!(
+            st.parse_event("content_block_stop", r#"{"index":0}"#)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_tool_call_cut_off_by_the_output_limit_says_so() {
+        let mut st = StreamState::default();
+        cut_off_call(&mut st);
+        let mut out = st.parse_event(
+            "message_delta",
+            r#"{"delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}"#,
+        );
+        out.extend(st.parse_event("message_stop", "{}"));
+        let [Delta::Error(message)] = out.as_slice() else {
+            panic!("expected one error, got {out:?}");
+        };
+        assert!(message.contains("output limit"), "{message}");
+        assert!(message.contains("page_click"), "{message}");
+        assert!(!out.iter().any(|d| matches!(d, Delta::ToolUse(_))));
+    }
+
+    #[test]
+    fn a_malformed_call_without_the_output_limit_keeps_its_own_error() {
+        let mut st = StreamState::default();
+        cut_off_call(&mut st);
+        let mut out = st.parse_event(
+            "message_delta",
+            r#"{"delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}"#,
+        );
+        out.extend(st.parse_event("message_stop", "{}"));
+        let [Delta::Error(message)] = out.as_slice() else {
+            panic!("expected one error, got {out:?}");
+        };
+        assert!(message.contains("not valid JSON"), "{message}");
+        assert!(!message.contains("output limit"), "{message}");
+    }
+
     #[test]
     fn a_tool_call_with_malformed_arguments_is_an_error_not_an_empty_call() {
         let mut st = StreamState::default();
@@ -436,7 +521,12 @@ mod tests {
             "content_block_delta",
             r#"{"index":0,"delta":{"type":"input_json_delta","partial_json":"{\"locator\": "}}"#,
         );
-        let out = st.parse_event("content_block_stop", r#"{"index":0}"#);
+        assert!(
+            st.parse_event("content_block_stop", r#"{"index":0}"#)
+                .is_empty(),
+            "the error waits for the end of the reply"
+        );
+        let out = st.finish_on_close();
         let [Delta::Error(message)] = out.as_slice() else {
             panic!("expected one error, got {out:?}");
         };

@@ -429,7 +429,9 @@ impl FailureKind {
     fn of(error: &dive_agent::AgentError) -> Self {
         match error {
             dive_agent::AgentError::MissingKey => Self::Auth,
-            dive_agent::AgentError::MissingBaseUrl => Self::Model,
+            dive_agent::AgentError::MissingBaseUrl | dive_agent::AgentError::Config(_) => {
+                Self::Model
+            }
             e if e.is_unauthorized() => Self::Auth,
             dive_agent::AgentError::Api { status: 404, .. } => Self::Model,
             dive_agent::AgentError::Api {
@@ -597,6 +599,11 @@ pub(crate) async fn agent_key_verify(
             ok: false,
             rejected: true,
             message: "Set the base URL of the custom endpoint first.".into(),
+        },
+        Err(e @ dive_agent::AgentError::Config(_)) => KeyCheck {
+            ok: false,
+            rejected: true,
+            message: e.to_string(),
         },
         Err(e) => KeyCheck {
             ok: false,
@@ -2186,5 +2193,13 @@ mod tests {
             FailureKind::Other
         );
         assert_eq!(FailureKind::of(&api(529, "overloaded")), FailureKind::Other);
+        assert_eq!(
+            FailureKind::of(&dive_agent::AgentError::Config("invalid base URL".into())),
+            FailureKind::Model
+        );
+        assert_eq!(
+            FailureKind::of(&dive_agent::AgentError::Unanswered("timed out".into())),
+            FailureKind::Other
+        );
     }
 }

@@ -491,9 +491,13 @@ impl StreamState {
                 // Running a tool with made-up empty arguments is worse than
                 // stopping: the caller learns the call was unusable.
                 Err(reason) => {
-                    return vec![Delta::Error(crate::anthropic::malformed_call(
-                        &name, &id, &reason,
-                    ))];
+                    return vec![Delta::Error(
+                        if self.finish_reason.as_deref() == Some("length") {
+                            crate::anthropic::output_limit_call(&name)
+                        } else {
+                            crate::anthropic::malformed_call(&name, &id, &reason)
+                        },
+                    )];
                 }
             };
             blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
@@ -768,6 +772,19 @@ mod tests {
         assert!(message.contains("call_9"), "{message}");
         assert!(message.contains("not valid JSON"), "{message}");
         assert!(st.parse_data("[DONE]").is_empty(), "finished once");
+    }
+
+    #[test]
+    fn a_tool_call_cut_off_by_length_says_so() {
+        let mut st = StreamState::new(Provider::Ollama);
+        st.parse_data(r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"page_click","arguments":"{\"target\": \"role=bu"}}]}}]}"#);
+        st.parse_data(r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#);
+        let tail = st.parse_data("[DONE]");
+        let [Delta::Error(message)] = tail.as_slice() else {
+            panic!("expected one error, got {tail:?}");
+        };
+        assert!(message.contains("output limit"), "{message}");
+        assert!(message.contains("page_click"), "{message}");
     }
 
     #[test]
