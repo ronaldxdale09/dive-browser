@@ -843,16 +843,40 @@ pub(crate) async fn agent_send(
     if let Some(tab) = tab_id {
         run.scope.touch(tab);
     }
-    let claimed = tab_id.filter(|tab| {
-        dive_mcp::lease::shared()
-            .claim(
-                *tab,
-                dive_mcp::lease::DIVE_AGENT,
-                dive_mcp::lease::MAX_TTL,
-                std::time::Instant::now(),
-            )
-            .is_ok()
-    });
+    let mut claimed = None;
+    if let Some(tab) = tab_id {
+        let result = dive_mcp::lease::shared().claim(
+            tab,
+            dive_mcp::lease::DIVE_AGENT,
+            dive_mcp::lease::MAX_TTL,
+            std::time::Instant::now(),
+        );
+        match result {
+            Ok(_) => claimed = Some(tab),
+            Err(conflict) => {
+                // Another agent has this tab. Starting anyway would have both
+                // of them driving it, so stop here and say who has it.
+                fail(
+                    &on_delta,
+                    format!(
+                        "Another agent ({}) is working in this tab for the next {}s. Wait for it, or start this in another tab.",
+                        conflict.holder, conflict.seconds_left
+                    ),
+                    FailureKind::Other,
+                );
+                if let Some(context) = run.scope.context() {
+                    use dive_mcp::Browser as _;
+                    let _ = browser
+                        .context_close(dive_mcp::ContextCloseParams {
+                            context_id: Some(context),
+                        })
+                        .await;
+                }
+                lock(&state.agent_runs).remove(&run_id);
+                return Ok(());
+            }
+        }
+    }
     let outcome = drive(&browser, &state, &run, fitted, tab_id, options, &on_delta).await;
     if let Some(tab) = claimed {
         dive_mcp::lease::shared().release(tab, dive_mcp::lease::DIVE_AGENT);

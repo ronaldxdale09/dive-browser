@@ -400,6 +400,18 @@ fn target_of(input: &Value) -> Target {
     }
 }
 
+/// Whether Dive's own agent may run `tool` on `tab` now. Reads are never
+/// gated; an action on a tab another agent holds is refused with who holds it,
+/// the same rule the MCP server applies to everyone else.
+fn lease_allows(tool: &str, tab: TabId, now: std::time::Instant) -> Result<(), String> {
+    match dive_mcp::kinds::kind_of(tool) {
+        Some(kind) if kind.needs_lease() => dive_mcp::lease::shared()
+            .check_action(tab, Some(dive_mcp::lease::DIVE_AGENT), now)
+            .map_err(|conflict| conflict.message(tab)),
+        _ => Ok(()),
+    }
+}
+
 // Keeping the tool-name dispatch in one exhaustive match makes additions and
 // schema/implementation drift straightforward to review.
 #[allow(clippy::too_many_lines)]
@@ -418,6 +430,7 @@ async fn execute<B: Browser>(
         let tab = resolve_tab(tab_argument(input), default_tab)?;
         scope.admits(tab)?;
         browser.check_tab(tab).await.map_err(err)?;
+        lease_allows(&call.name, tab, std::time::Instant::now())?;
         Ok(tab)
     };
     let text = |v: Value| {
@@ -896,6 +909,22 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_agent_waits_its_turn_on_a_claimed_tab() {
+        use std::time::{Duration, Instant};
+        let tab = dive_core::TabId::new();
+        let now = Instant::now();
+        let leases = dive_mcp::lease::shared();
+        leases
+            .claim(tab, "claude-code", Duration::from_secs(60), now)
+            .unwrap();
+        let refused = super::lease_allows("page_click", tab, now).unwrap_err();
+        assert!(refused.contains("claude-code"), "{refused}");
+        assert!(super::lease_allows("page_text", tab, now).is_ok());
+        assert!(leases.release(tab, "claude-code"));
+        assert!(super::lease_allows("page_click", tab, now).is_ok());
+    }
+
     #[test]
     fn tabs_list_spec_names_the_active_workspace() {
         let spec = super::specs()

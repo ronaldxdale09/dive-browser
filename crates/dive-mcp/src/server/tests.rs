@@ -996,6 +996,26 @@ async fn a_tab_the_browser_disowns_cannot_be_driven_by_id() {
 }
 
 #[tokio::test]
+async fn a_client_cannot_claim_or_act_as_dives_agent() {
+    let fake = Arc::new(Fake::default());
+    let server = DiveServer::new(Arc::clone(&fake), Config::default());
+    server
+        .tab_open(Parameters(OpenParams {
+            context_id: None,
+            url: "https://a.dev".into(),
+        }))
+        .await
+        .unwrap();
+    let params = || crate::params::ClaimParams {
+        tab_id: None,
+        holder: crate::lease::DIVE_AGENT.into(),
+        seconds: None,
+    };
+    assert!(server.tab_claim(Parameters(params())).await.is_err());
+    assert!(server.tab_release(Parameters(params())).await.is_err());
+}
+
+#[tokio::test]
 async fn uploads_and_cookie_reads_ask_the_person_first() {
     let fake = Arc::new(Fake::default());
     let server = DiveServer::new(Arc::clone(&fake), Config::default());

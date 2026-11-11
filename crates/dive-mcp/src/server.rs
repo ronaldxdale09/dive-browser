@@ -1038,6 +1038,7 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<ClaimParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id).await?;
+        reject_reserved_holder(Some(&p.holder))?;
         let holder = p.holder.trim();
         if holder.is_empty() {
             return Err(ErrorData::invalid_params(
@@ -1071,6 +1072,7 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<ClaimParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id).await?;
+        reject_reserved_holder(Some(&p.holder))?;
         let released = crate::lease::shared().release(tab, p.holder.trim());
         json_result(&serde_json::json!({ "tab_id": tab.to_string(), "released": released }))
     }
@@ -1489,6 +1491,7 @@ impl<B: Browser> DiveServer<B> {
         // one place to enforce them is one place to get them right, and fifty
         // schemas stay free of arguments about them.
         let holder = string_argument(request.arguments.as_ref(), "holder");
+        reject_reserved_holder(holder.as_deref())?;
         if let Some(kind) = crate::kinds::kind_of(&request.name)
             && kind.needs_lease()
             // A tool that makes a tab has none to lease yet, and a browser
@@ -1509,6 +1512,18 @@ impl<B: Browser> DiveServer<B> {
         let response = self.tool_router.call(tcc).await?;
         Ok(bounded(response, cursor, max_chars))
     }
+}
+
+/// Dive's own agent's holder name is not for remote clients: using it would
+/// let one act as, or release the tab of, the person's own agent.
+fn reject_reserved_holder(holder: Option<&str>) -> Result<(), ErrorData> {
+    if holder.is_some_and(crate::lease::reserved) {
+        return Err(ErrorData::invalid_params(
+            "that holder name belongs to Dive's own agent; pick your own",
+            None,
+        ));
+    }
+    Ok(())
 }
 
 #[tool_handler(router = self.tool_router)]

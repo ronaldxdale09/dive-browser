@@ -11,6 +11,10 @@
 //! else is refused with a message saying who has it and for how long.
 //! Reading is never gated -- two agents looking at the same page is fine --
 //! and a browser where nobody claims anything behaves exactly as before.
+//!
+//! Leases coordinate clients that all hold the MCP token. They are
+//! cooperative, not a security boundary: any token holder can act in Dive.
+//! Their job is to stop agents tripping over each other, nothing more.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -45,6 +49,13 @@ impl Conflict {
     /// What the client is told. It names the holder, because the fix is
     /// usually a person deciding which agent should have the tab.
     pub fn message(&self, tab: TabId) -> String {
+        if self.holder == DIVE_AGENT {
+            return format!(
+                "tab {tab} is being driven by Dive's own agent for another {}s; wait for it \
+                 to finish, use another tab, or ask the person to stop it",
+                self.seconds_left
+            );
+        }
         format!(
             "tab {tab} is being driven by {:?} for another {}s; wait, use another tab, \
              or pass holder={:?} if that is you",
@@ -74,6 +85,12 @@ pub fn shared() -> &'static Leases {
 /// the same name is indistinguishable from it, which is why the browser's
 /// own agent gets a name nobody would choose by accident.
 pub const DIVE_AGENT: &str = "dive-agent (in-browser)";
+
+/// Whether `holder` is a name only Dive itself may use. A remote client
+/// claiming it could act as, or release the tab of, the person's own agent.
+pub fn reserved(holder: &str) -> bool {
+    holder.trim().eq_ignore_ascii_case(DIVE_AGENT)
+}
 
 impl Leases {
     /// Claim a tab for `holder`. Renewing your own claim always succeeds;
@@ -214,6 +231,24 @@ mod tests {
                 .check_action(tab, Some("dive-agent"), at(now, DEFAULT_TTL.as_secs() + 1))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn dives_own_name_is_reserved_and_never_suggested() {
+        assert!(reserved(DIVE_AGENT));
+        assert!(reserved(" Dive-Agent (In-Browser) "));
+        assert!(!reserved("claude-code"));
+        let tab = TabId::new();
+        let own = Conflict {
+            holder: DIVE_AGENT.to_owned(),
+            seconds_left: 5,
+        };
+        assert!(!own.message(tab).contains("holder="));
+        let other = Conflict {
+            holder: "claude-code".to_owned(),
+            seconds_left: 5,
+        };
+        assert!(other.message(tab).contains("holder="));
     }
 
     #[test]
