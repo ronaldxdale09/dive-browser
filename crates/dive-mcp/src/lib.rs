@@ -14,7 +14,7 @@ mod params;
 pub mod prompts;
 mod server;
 
-pub use browser::{Browser, Sensitive, TabInfo};
+pub use browser::{Approved, Browser, Sensitive, TabInfo};
 pub use catalog::{CatalogEntry, tool_catalog};
 pub use error::BrowserError;
 pub use http::{Handle, serve};

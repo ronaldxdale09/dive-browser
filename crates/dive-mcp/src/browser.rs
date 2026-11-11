@@ -59,6 +59,27 @@ pub enum Sensitive {
         /// One line per added mock or header rule, e.g. `mock https://api.example/*`.
         added: Vec<String>,
     },
+    /// Add or replace cookies, including the ones scripts cannot see, which
+    /// can sign the person in or out of a site.
+    WriteCookies {
+        /// The tab whose site the cookies are for.
+        tab: TabId,
+        /// The domains named, or "this page" for cookies with no domain.
+        domains: Vec<String>,
+    },
+}
+
+/// What the person agreed to, for the step that asked.
+///
+/// `origin` is the page the question named. An action that reaches the page
+/// later checks the page is still there: a tab that moved while the dialog
+/// was open would otherwise hand the next site what the person gave this one.
+/// `None` when nobody was asked (an implementation with nobody to ask, or a
+/// rig that said yes in advance), and nothing is checked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Approved {
+    /// `scheme://host[:port]` of the page the person was shown.
+    pub origin: Option<String>,
 }
 
 /// The engine surface the MCP tools need.
@@ -95,9 +116,9 @@ pub trait Browser: Send + Sync + 'static {
     ///
     /// Defaulted to allowing it, for implementations with nobody to ask; the
     /// real browser puts the question on screen.
-    async fn confirm(&self, step: Sensitive) -> Result<(), BrowserError> {
+    async fn confirm(&self, step: Sensitive) -> Result<Approved, BrowserError> {
         let _ = step;
-        Ok(())
+        Ok(Approved::default())
     }
     /// Navigate an existing tab.
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError>;

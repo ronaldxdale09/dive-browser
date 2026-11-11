@@ -583,6 +583,8 @@ async fn execute<B: Browser>(
                                     .collect()
                             })
                             .unwrap_or_default(),
+                        // The in-app agent has its own approval path.
+                        expect_origin: None,
                     },
                 )
                 .await

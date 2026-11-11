@@ -286,6 +286,10 @@ pub struct UploadParams {
     pub locator: Option<String>,
     /// Absolute paths of the files to attach. An empty list clears the input.
     pub paths: Vec<String>,
+    /// Set by the server after the person answered; never read from a client.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub expect_origin: Option<String>,
 }
 
 /// Drag one element onto another.
@@ -541,6 +545,10 @@ pub struct StorageGetParams {
     pub tab_id: Option<String>,
     /// Which kinds to read. All three when omitted.
     pub include: Option<Vec<StorageKind>>,
+    /// Set by the server after the person answered; never read from a client.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub expect_origin: Option<String>,
 }
 
 /// Write state a site will read back.
@@ -554,6 +562,10 @@ pub struct StorageSetParams {
     pub local: Option<std::collections::BTreeMap<String, String>>,
     /// `sessionStorage` keys to add or replace.
     pub session: Option<std::collections::BTreeMap<String, String>>,
+    /// Set by the server after the person answered; never read from a client.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub expect_origin: Option<String>,
 }
 
 /// Throw stored state away.

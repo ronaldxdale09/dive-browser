@@ -476,15 +476,18 @@ impl<B: Browser> DiveServer<B> {
     )]
     async fn page_upload(
         &self,
-        Parameters(p): Parameters<UploadParams>,
+        Parameters(mut p): Parameters<UploadParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
-        self.browser
+        let approved = self
+            .browser
             .confirm(Sensitive::Upload {
                 tab,
                 paths: p.paths.clone(),
             })
             .await?;
+        // The page the person was shown is the page the files may go to.
+        p.expect_origin = approved.origin;
         json_result(&self.browser.page_upload(tab, p).await?)
     }
 
@@ -514,7 +517,7 @@ impl<B: Browser> DiveServer<B> {
     )]
     async fn page_storage(
         &self,
-        Parameters(p): Parameters<StorageGetParams>,
+        Parameters(mut p): Parameters<StorageGetParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         // Leaving include out means everything, cookies with it.
@@ -522,8 +525,15 @@ impl<B: Browser> DiveServer<B> {
             .include
             .as_ref()
             .is_none_or(|kinds| kinds.contains(&crate::params::StorageKind::Cookies));
+        // Never taken from the client: only a question the person answered
+        // sets it.
+        p.expect_origin = None;
         if cookies {
-            self.browser.confirm(Sensitive::ReadCookies { tab }).await?;
+            p.expect_origin = self
+                .browser
+                .confirm(Sensitive::ReadCookies { tab })
+                .await?
+                .origin;
         } else if p.include.as_ref().is_some_and(|kinds| {
             kinds.iter().any(|k| {
                 matches!(
@@ -534,7 +544,11 @@ impl<B: Browser> DiveServer<B> {
         }) {
             // The client is not the page: it has no other way to run script
             // here, and stored data often holds the sign-in token.
-            self.browser.confirm(Sensitive::ReadStorage { tab }).await?;
+            p.expect_origin = self
+                .browser
+                .confirm(Sensitive::ReadStorage { tab })
+                .await?
+                .origin;
         }
         json_result(&self.browser.page_storage_get(tab, p).await?)
     }
@@ -542,18 +556,38 @@ impl<B: Browser> DiveServer<B> {
     /// Write stored state.
     #[tool(
         name = "page_storage_set",
-        description = "Add or replace cookies, localStorage and sessionStorage for this page, in one call. Takes what page_storage returns, so restoring a session is a round trip. Cookies default to the page's own host and to path /. The page is not reloaded: navigate or reload afterwards for it to read the new state.",
+        description = "Add or replace cookies, localStorage and sessionStorage for this page, in one call. Takes what page_storage returns, so restoring a session is a round trip. Cookies default to the page's own host and to path /. The page is not reloaded: navigate or reload afterwards for it to read the new state. Setting cookies asks the person in Dive first, and only for this page's own site.",
         annotations(
             title = "Page storage set",
             read_only_hint = false,
-            destructive_hint = false
+            destructive_hint = true
         )
     )]
     async fn page_storage_set(
         &self,
-        Parameters(p): Parameters<StorageSetParams>,
+        Parameters(mut p): Parameters<StorageSetParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
+        // Never taken from the client: only a question the person answered
+        // sets it.
+        p.expect_origin = None;
+        if let Some(cookies) = p.cookies.as_ref().filter(|c| !c.is_empty()) {
+            let mut domains: Vec<String> = Vec::new();
+            for cookie in cookies {
+                let domain = cookie
+                    .domain
+                    .clone()
+                    .unwrap_or_else(|| "this page".to_owned());
+                if !domains.contains(&domain) {
+                    domains.push(domain);
+                }
+            }
+            p.expect_origin = self
+                .browser
+                .confirm(Sensitive::WriteCookies { tab, domains })
+                .await?
+                .origin;
+        }
         json_result(&self.browser.page_storage_set(tab, p).await?)
     }
 

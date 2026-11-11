@@ -1520,6 +1520,68 @@ fn cookie_answers()
     ANSWERS.get_or_init(Default::default)
 }
 
+/// Whether `live_url` is still on `approved`, the origin the person was asked
+/// about. `approved: None` means nobody was asked, and anything passes.
+fn still_on(approved: Option<&str>, live_url: &str) -> bool {
+    let Some(approved) = approved else {
+        return true;
+    };
+    url::Url::parse(live_url).is_ok_and(|u| u.origin().ascii_serialization() == approved)
+}
+
+/// The refusal for an action whose page moved after the person answered.
+fn page_moved(operation: &str, approved: Option<&str>, live_url: &str) -> BrowserError {
+    let live = url::Url::parse(live_url).map_or_else(
+        |_| live_url.to_owned(),
+        |u| u.origin().ascii_serialization(),
+    );
+    BrowserError::NotAllowed {
+        operation: operation.into(),
+        reason: format!(
+            "the page moved to {live} after the person was asked about {}; ask again",
+            approved.unwrap_or("this page")
+        ),
+    }
+}
+
+/// Whether a cookie for `domain` may be set from a page at `page_url`:
+/// the page's own host or one of its parent domains, never a bare public
+/// suffix and never another site. A leading dot is ignored.
+fn cookie_domain_allowed(domain: &str, page_url: &str) -> bool {
+    let domain = domain.trim().trim_start_matches('.').to_ascii_lowercase();
+    if domain.is_empty() {
+        return false;
+    }
+    let Ok(parsed) = url::Url::parse(page_url) else {
+        return false;
+    };
+    let host = match parsed.host() {
+        Some(url::Host::Domain(host)) => host.trim_end_matches('.').to_ascii_lowercase(),
+        Some(url::Host::Ipv4(ip)) => return domain == ip.to_string(),
+        Some(url::Host::Ipv6(ip)) => {
+            return domain.trim_matches(['[', ']']) == ip.to_string();
+        }
+        None => return false,
+    };
+    (host == domain || host.ends_with(&format!(".{domain}")))
+        && crate::site::of(&format!("https://{domain}/")) == crate::site::of(page_url)
+}
+
+/// Contexts this run of Dive opened for an agent. Only these may be closed by
+/// one: a workspace the person made is theirs, whatever colour it is.
+fn agent_contexts() -> &'static std::sync::Mutex<std::collections::HashSet<dive_core::WorkspaceId>>
+{
+    static OPENED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<dive_core::WorkspaceId>>,
+    > = std::sync::OnceLock::new();
+    OPENED.get_or_init(Default::default)
+}
+
+/// Whether an agent opened the context `id`, so it may close it.
+fn may_close(id: dive_core::WorkspaceId) -> bool {
+    lock(agent_contexts()).contains(&id)
+}
+
 /// One question on screen at a time: two clients asking at once would
 /// otherwise stack dialogs the person cannot tell apart.
 fn confirm_queue() -> &'static tokio::sync::Mutex<()> {
@@ -1563,6 +1625,13 @@ fn confirm_text(step: &dive_mcp::Sensitive, url: &str) -> (String, String) {
                 "An agent connected over MCP wants to read what {site} keeps in this browser's storage. Many sites keep the token that signs you in there; whoever has it can act as you on {site}.\n\nAllow it for the next 10 minutes?"
             ),
         ),
+        dive_mcp::Sensitive::WriteCookies { domains, .. } => (
+            "Let an agent set a site's cookies?".to_owned(),
+            format!(
+                "An agent connected over MCP wants to set cookies for {site}: {}. Cookies decide which account you are signed in to there.\n\nAllow it?",
+                domains.join(", ")
+            ),
+        ),
         dive_mcp::Sensitive::ChangeRules { added } => {
             let listed: Vec<&str> = added.iter().take(5).map(String::as_str).collect();
             let more = added.len().saturating_sub(listed.len());
@@ -1591,27 +1660,33 @@ impl Browser for AppBrowser {
         tab_in_active_profile(&store, active, tab)
     }
 
-    async fn confirm(&self, step: dive_mcp::Sensitive) -> Result<(), BrowserError> {
+    async fn confirm(&self, step: dive_mcp::Sensitive) -> Result<dive_mcp::Approved, BrowserError> {
         // For a machine that runs a trusted client unattended -- CI, a test
         // rig -- the person can say yes ahead of time when starting Dive.
         if std::env::var_os("DIVE_MCP_SKIP_CONFIRM").is_some() {
-            return Ok(());
+            return Ok(dive_mcp::Approved::default());
         }
         let tab = match &step {
             dive_mcp::Sensitive::Upload { tab, .. }
             | dive_mcp::Sensitive::ReadCookies { tab }
-            | dive_mcp::Sensitive::ReadStorage { tab } => Some(*tab),
+            | dive_mcp::Sensitive::ReadStorage { tab }
+            | dive_mcp::Sensitive::WriteCookies { tab, .. } => Some(*tab),
             dive_mcp::Sensitive::ChangeRules { .. } => None,
         };
-        let url = tab
-            .and_then(|tab| {
-                let state = self.state();
-                let store = lock(&state.store);
-                store.tab(tab).ok().map(|t| t.url)
-            })
-            .unwrap_or_default();
+        // The live page, not the stored row: the action runs on whatever is
+        // loaded when the person answers, so that is the site to name.
+        let url = match tab {
+            Some(tab) => {
+                let session = self.session_for(tab).await?;
+                page_url(&session).await?
+            }
+            None => String::new(),
+        };
         let origin = url::Url::parse(&url)
             .map_or_else(|_| url.clone(), |u| u.origin().ascii_serialization());
+        let approved = || dive_mcp::Approved {
+            origin: tab.map(|_| origin.clone()),
+        };
         // Cookies and stored data are remembered per site; a cookie yes also
         // covers stored data, since a full read returns both. Rule changes
         // are asked every time.
@@ -1627,12 +1702,12 @@ impl Browser for AppBrowser {
             (cookies && fresh(&origin)) || (storage && (fresh(&origin) || fresh(&storage_key)))
         };
         if answered_yes(&lock(cookie_answers())) {
-            return Ok(());
+            return Ok(approved());
         }
         let _turn = confirm_queue().lock().await;
         // Someone else's question may have been this one.
         if answered_yes(&lock(cookie_answers())) {
-            return Ok(());
+            return Ok(approved());
         }
         let (title, description) = confirm_text(&step, &url);
         let asked = rfd::AsyncMessageDialog::new()
@@ -1655,6 +1730,7 @@ impl Browser for AppBrowser {
                     dive_mcp::Sensitive::ReadCookies { .. } => "reading cookies",
                     dive_mcp::Sensitive::ReadStorage { .. } => "reading stored data",
                     dive_mcp::Sensitive::ChangeRules { .. } => "changing rules",
+                    dive_mcp::Sensitive::WriteCookies { .. } => "setting cookies",
                     dive_mcp::Sensitive::Upload { .. } => "page_upload",
                 }
                 .into(),
@@ -1662,12 +1738,13 @@ impl Browser for AppBrowser {
                     .into(),
             });
         }
+        let result = approved();
         if cookies {
             lock(cookie_answers()).insert(origin, std::time::Instant::now());
         } else if storage {
             lock(cookie_answers()).insert(storage_key, std::time::Instant::now());
         }
-        Ok(())
+        Ok(result)
     }
 
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
@@ -1793,6 +1870,7 @@ impl Browser for AppBrowser {
                 .map_err(|e| other(e.message))
             })
             .await??;
+        lock(agent_contexts()).insert(workspace.id);
         Ok(json!({
             "context_id": workspace.id.to_string(),
             "name": workspace.name,
@@ -1809,6 +1887,12 @@ impl Browser for AppBrowser {
             .as_deref()
             .ok_or_else(|| BrowserError::BadRequest("give context_id, from contexts".into()))?;
         let id = parse_workspace_id(id)?;
+        if !may_close(id) {
+            return Err(BrowserError::NotAllowed {
+                operation: "context_close".into(),
+                reason: "that context is the person's own; only a context opened with context_open can be closed by an agent".into(),
+            });
+        }
         self.on_main(move |app| {
             let state = app.state::<AppState>();
             // The last one cannot go: closing it would leave the window with
@@ -1833,6 +1917,7 @@ impl Browser for AppBrowser {
             crate::commands::workspace_delete(app.clone(), state, id).map_err(|e| other(e.message))
         })
         .await??;
+        lock(agent_contexts()).remove(&id);
         Ok(json!({"closed": id.to_string()}))
     }
 
@@ -2913,6 +2998,16 @@ impl Browser for AppBrowser {
                 .as_str()
                 .ok_or_else(|| other("the file input went away before the files could be attached"))?
                 .to_owned();
+            // Checked last, with nothing the page controls awaited between
+            // here and the attach: the person agreed to this site.
+            let live = page_url(&session).await?;
+            if !still_on(params.expect_origin.as_deref(), &live) {
+                return Err(page_moved(
+                    "page_upload",
+                    params.expect_origin.as_deref(),
+                    &live,
+                ));
+            }
             session
                 .call(
                     "DOM.setFileInputFiles",
@@ -2995,6 +3090,13 @@ impl Browser for AppBrowser {
             // agent asking about this page should not be handed every cookie
             // the profile holds for every site it has ever visited.
             let url = page_url(&session).await?;
+            if !still_on(params.expect_origin.as_deref(), &url) {
+                return Err(page_moved(
+                    "reading cookies",
+                    params.expect_origin.as_deref(),
+                    &url,
+                ));
+            }
             let answer = session
                 .call("Network.getCookies", json!({"urls": [url]}))
                 .await
@@ -3007,6 +3109,16 @@ impl Browser for AppBrowser {
         ] {
             if !wanted.contains(&kind) {
                 continue;
+            }
+            if params.expect_origin.is_some() {
+                let url = page_url(&session).await?;
+                if !still_on(params.expect_origin.as_deref(), &url) {
+                    return Err(page_moved(
+                        "reading stored data",
+                        params.expect_origin.as_deref(),
+                        &url,
+                    ));
+                }
             }
             out.insert(name.into(), read_web_storage(&session, name).await?);
         }
@@ -3022,6 +3134,26 @@ impl Browser for AppBrowser {
         let mut set = serde_json::Map::new();
         if let Some(cookies) = params.cookies {
             let url = page_url(&session).await?;
+            if !still_on(params.expect_origin.as_deref(), &url) {
+                return Err(page_moved(
+                    "setting cookies",
+                    params.expect_origin.as_deref(),
+                    &url,
+                ));
+            }
+            let host = url::Url::parse(&url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| url.clone());
+            for cookie in &cookies {
+                if let Some(domain) = &cookie.domain
+                    && !cookie_domain_allowed(domain, &url)
+                {
+                    return Err(BrowserError::BadRequest(format!(
+                        "a cookie for {domain} cannot be set from {host}; use the page's own site"
+                    )));
+                }
+            }
             let prepared: Vec<Value> = cookies.iter().map(|c| cdp_cookie(c, &url)).collect();
             session
                 .call("Network.setCookies", json!({"cookies": prepared}))
@@ -4025,6 +4157,56 @@ mod tool_session_tests {
                 .file_type()
                 .is_file()
         );
+    }
+
+    #[test]
+    fn an_approval_holds_only_for_the_origin_it_named() {
+        assert!(still_on(Some("https://a.dev"), "https://a.dev/x?y"));
+        assert!(!still_on(Some("https://a.dev"), "https://b.dev/"));
+        assert!(!still_on(Some("https://a.dev"), "https://a.dev:8443/"));
+        assert!(still_on(None, "anything"));
+        assert!(!still_on(Some("https://a.dev"), "not a url"));
+    }
+
+    #[test]
+    fn a_cookie_stays_on_the_pages_site() {
+        let page = "https://app.example.co.uk/x";
+        for ok in ["app.example.co.uk", ".example.co.uk", "example.co.uk"] {
+            assert!(cookie_domain_allowed(ok, page), "{ok}");
+        }
+        for no in ["co.uk", "uk", "other.co.uk"] {
+            assert!(!cookie_domain_allowed(no, page), "{no}");
+        }
+        for no in ["github.io", "b.github.io"] {
+            assert!(!cookie_domain_allowed(no, "https://a.github.io/"), "{no}");
+        }
+        assert!(cookie_domain_allowed("127.0.0.1", "http://127.0.0.1:3000/"));
+        assert!(!cookie_domain_allowed("0.0.0.1", "http://127.0.0.1:3000/"));
+        assert!(cookie_domain_allowed("EXAMPLE.com", "https://example.com/"));
+    }
+
+    #[test]
+    fn the_cookie_write_question_names_the_domains() {
+        let (title, body) = confirm_text(
+            &dive_mcp::Sensitive::WriteCookies {
+                tab: TabId::new(),
+                domains: vec!["example.com".into(), "this page".into()],
+            },
+            "https://example.com/",
+        );
+        assert!(title.contains("cookies"), "{title}");
+        assert!(body.contains("example.com, this page"), "{body}");
+    }
+
+    #[test]
+    fn only_contexts_an_agent_opened_can_be_closed() {
+        let mine = dive_core::WorkspaceId::new();
+        let theirs = dive_core::WorkspaceId::new();
+        lock(agent_contexts()).insert(mine);
+        assert!(may_close(mine));
+        assert!(!may_close(theirs));
+        lock(agent_contexts()).remove(&mine);
+        assert!(!may_close(mine));
     }
 
     #[test]

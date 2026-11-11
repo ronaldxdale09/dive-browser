@@ -78,7 +78,7 @@ use async_trait::async_trait;
 
 use super::*;
 use crate::{
-    Addressed, BrowserError, DEFAULT_WAIT_MS, MAX_LOCATOR_CHARS, TabInfo, Target, serve,
+    Addressed, Approved, BrowserError, DEFAULT_WAIT_MS, MAX_LOCATOR_CHARS, TabInfo, Target, serve,
     tool_catalog,
 };
 
@@ -94,6 +94,12 @@ struct Fake {
     refuse: std::sync::atomic::AtomicBool,
     /// The rules last set; null until then, which reads as an empty list.
     rules: Mutex<serde_json::Value>,
+    /// The origin `confirm` reports back as approved.
+    origin: Mutex<Option<String>>,
+    /// The `expect_origin` each upload and storage read arrived with.
+    expected: Mutex<Vec<Option<String>>>,
+    /// How many times `page_storage_set` reached the browser.
+    stored: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait]
@@ -104,7 +110,7 @@ impl Browser for Fake {
         }
         Ok(())
     }
-    async fn confirm(&self, step: Sensitive) -> Result<(), BrowserError> {
+    async fn confirm(&self, step: Sensitive) -> Result<Approved, BrowserError> {
         self.asked.lock().unwrap().push(step);
         if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(BrowserError::NotAllowed {
@@ -112,7 +118,9 @@ impl Browser for Fake {
                 reason: "the person said no".into(),
             });
         }
-        Ok(())
+        Ok(Approved {
+            origin: self.origin.lock().unwrap().clone(),
+        })
     }
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
         Ok(self.tabs.lock().unwrap().clone())
@@ -357,6 +365,10 @@ impl Browser for Fake {
         _tab: TabId,
         params: crate::params::UploadParams,
     ) -> Result<serde_json::Value, BrowserError> {
+        self.expected
+            .lock()
+            .unwrap()
+            .push(params.expect_origin.clone());
         Ok(serde_json::json!({"files": params.paths.len()}))
     }
 
@@ -371,16 +383,20 @@ impl Browser for Fake {
     async fn page_storage_get(
         &self,
         _tab: TabId,
-        _params: crate::params::StorageGetParams,
+        params: crate::params::StorageGetParams,
     ) -> Result<serde_json::Value, BrowserError> {
+        self.expected.lock().unwrap().push(params.expect_origin);
         Ok(serde_json::json!({"cookies": [], "local": {}, "session": {}}))
     }
 
     async fn page_storage_set(
         &self,
         _tab: TabId,
-        _params: crate::params::StorageSetParams,
+        params: crate::params::StorageSetParams,
     ) -> Result<serde_json::Value, BrowserError> {
+        self.expected.lock().unwrap().push(params.expect_origin);
+        self.stored
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(serde_json::json!({"set": true}))
     }
 
@@ -995,6 +1011,7 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
             tab_id: None,
             locator: Some("css=input[type=file]".into()),
             paths: vec!["/Users/me/Documents/cv.pdf".into()],
+            expect_origin: None,
         }))
         .await
         .unwrap();
@@ -1002,6 +1019,7 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
         .page_storage(Parameters(crate::params::StorageGetParams {
             tab_id: None,
             include: None,
+            expect_origin: None,
         }))
         .await
         .unwrap();
@@ -1011,6 +1029,7 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
         .page_storage(Parameters(crate::params::StorageGetParams {
             tab_id: None,
             include: Some(vec![crate::params::StorageKind::Local]),
+            expect_origin: None,
         }))
         .await
         .unwrap();
@@ -1027,6 +1046,7 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
         .page_storage(Parameters(crate::params::StorageGetParams {
             tab_id: None,
             include: Some(vec![crate::params::StorageKind::Cookies]),
+            expect_origin: None,
         }))
         .await
         .unwrap_err();
@@ -1086,6 +1106,7 @@ async fn reading_no_storage_kinds_asks_nothing() {
         .page_storage(Parameters(crate::params::StorageGetParams {
             tab_id: None,
             include: Some(vec![]),
+            expect_origin: None,
         }))
         .await
         .unwrap();
@@ -1177,4 +1198,152 @@ fn added_rewrites_lists_only_new_enabled_mocks_and_headers() {
     );
     let header = added_rewrites(&json!([]), &[header_rule()]);
     assert_eq!(header, vec!["header https://a.dev/* (x-test)".to_owned()]);
+}
+
+#[tokio::test]
+async fn the_server_passes_the_approved_origin_on() {
+    let fake = Arc::new(Fake::default());
+    *fake.origin.lock().unwrap() = Some("https://a.dev".into());
+    let server = server_with_tab(&fake).await;
+    server
+        .page_upload(Parameters(crate::params::UploadParams {
+            tab_id: None,
+            locator: Some("css=input[type=file]".into()),
+            paths: vec!["/Users/me/Documents/cv.pdf".into()],
+            expect_origin: Some("https://client.chose".into()),
+        }))
+        .await
+        .unwrap();
+    server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: None,
+            expect_origin: None,
+        }))
+        .await
+        .unwrap();
+    // Nothing is asked for no kinds, so there is nothing to hold the page to.
+    server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: Some(vec![]),
+            expect_origin: Some("https://client.chose".into()),
+        }))
+        .await
+        .unwrap();
+    let expected = fake.expected.lock().unwrap().clone();
+    assert_eq!(
+        expected,
+        vec![
+            Some("https://a.dev".to_owned()),
+            Some("https://a.dev".to_owned()),
+            None
+        ]
+    );
+}
+
+#[tokio::test]
+async fn cookie_writes_ask_first_and_a_no_stops_them() {
+    use std::sync::atomic::Ordering;
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    let cookie = |domain: Option<&str>| crate::params::Cookie {
+        name: "sid".into(),
+        value: "1".into(),
+        domain: domain.map(str::to_owned),
+        ..Default::default()
+    };
+    let set = |cookies, local| crate::params::StorageSetParams {
+        tab_id: None,
+        cookies,
+        local,
+        session: None,
+        expect_origin: None,
+    };
+    server
+        .page_storage_set(Parameters(set(Some(vec![cookie(None)]), None)))
+        .await
+        .unwrap();
+    {
+        let asked = fake.asked.lock().unwrap();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(
+            matches!(&asked[0], Sensitive::WriteCookies { domains, .. } if domains == &["this page"]),
+            "{asked:?}"
+        );
+    }
+    assert_eq!(fake.stored.load(Ordering::SeqCst), 1);
+
+    let mut local = std::collections::BTreeMap::new();
+    local.insert("k".to_owned(), "v".to_owned());
+    server
+        .page_storage_set(Parameters(set(None, Some(local))))
+        .await
+        .unwrap();
+    assert_eq!(fake.asked.lock().unwrap().len(), 1);
+    assert_eq!(fake.stored.load(Ordering::SeqCst), 2);
+
+    fake.refuse.store(true, Ordering::SeqCst);
+    server
+        .page_storage_set(Parameters(set(
+            Some(vec![cookie(Some("a.dev")), cookie(Some("a.dev"))]),
+            None,
+        )))
+        .await
+        .expect_err("the person said no");
+    assert_eq!(fake.stored.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn the_approved_origin_is_not_part_of_any_published_schema() {
+    for entry in tool_catalog() {
+        assert!(
+            !entry.input_schema.to_string().contains("expect_origin"),
+            "{}",
+            entry.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn cookie_writes_are_held_to_the_approved_origin() {
+    let fake = Arc::new(Fake::default());
+    *fake.origin.lock().unwrap() = Some("https://a.dev".into());
+    let server = server_with_tab(&fake).await;
+    let write = |origin: Option<&str>, cookies: Vec<crate::params::Cookie>| {
+        crate::params::StorageSetParams {
+            cookies: Some(cookies),
+            expect_origin: origin.map(str::to_owned),
+            ..Default::default()
+        }
+    };
+    let cookie = crate::params::Cookie {
+        name: "sid".into(),
+        value: "1".into(),
+        ..Default::default()
+    };
+    server
+        .page_storage_set(Parameters(write(
+            Some("https://client.chose"),
+            vec![cookie.clone()],
+        )))
+        .await
+        .unwrap();
+    // Local storage alone asks nothing, so nothing is checked.
+    server
+        .page_storage_set(Parameters(crate::params::StorageSetParams {
+            local: Some(std::collections::BTreeMap::default()),
+            expect_origin: Some("https://client.chose".into()),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.expected.lock().unwrap().clone(),
+        vec![Some("https://a.dev".to_owned()), None]
+    );
+    // A client cannot name the origin itself.
+    let parsed: crate::params::StorageSetParams =
+        serde_json::from_value(json!({"expect_origin": "https://evil.dev"})).unwrap();
+    assert_eq!(parsed.expect_origin, None);
 }
