@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import vectors from "./locatorVectors.json";
 import { playwrightLocator, recordedToSteps, replayableSteps, toPlaywrightLocator, toPlaywrightSpec } from "./playwright";
 
 describe("toPlaywrightSpec", () => {
@@ -21,6 +22,13 @@ describe("toPlaywrightSpec", () => {
   });
 });
 
+describe("playwrightLocator", () => {
+  // The same file agent.rs reads: the two builders must give the same text.
+  it.each(vectors)("role %j with name %j is $expected", ({ role, name, expected }) => {
+    expect(playwrightLocator(role, name)).toBe(expected);
+  });
+});
+
 describe("recorded steps", () => {
   it("map to agent-shaped steps with locators", () => {
     const steps = recordedToSteps([
@@ -33,9 +41,6 @@ describe("recorded steps", () => {
     expect(steps[2]?.locator).toBe("getByRole('textbox', { name: 'Search' })");
     expect(playwrightLocator("link", "It's")).toBe("getByRole('link', { name: 'It\\'s' })");
     expect(playwrightLocator("link", "a\nb\u2028c")).toBe("getByRole('link', { name: 'abc' })");
-    // A role is escaped like a name, so none can close the literal it sits in.
-    expect(playwrightLocator("button'); process.exit(1); ('", "")).toBe("getByRole('button\\'); process.exit(1); (\\'')");
-    expect(playwrightLocator("x\\'\n", "Go")).toBe("getByRole('x\\\\\\'', { name: 'Go' })");
     const spec = toPlaywrightSpec(steps, undefined, "recorded");
     expect(spec).toContain("fill(\"dive\")");
   });

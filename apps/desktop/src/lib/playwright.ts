@@ -1,11 +1,6 @@
 import type { Step } from "../store/agent";
 import type { RecordedStep } from "./ipc";
 
-/** A string as a single-quoted JS literal, the way Playwright writes them. */
-function q(s: string): string {
-  return `'${s.replace(/[\p{Cc}\u2028\u2029]/gu, "").replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
-}
-
 /** `{ name: 'Save', exact: true }` from already-formatted entries. */
 function options(entries: string[]): string {
   return entries.length > 0 ? `, { ${entries.join(", ")} }` : "";
@@ -22,21 +17,21 @@ function roleCall(value: string): string {
   const attrs = open < 0 ? "" : value.slice(open);
   const entries: string[] = [];
   const name = /\[name="([^"]*)"\]/.exec(attrs) ?? /\[name='([^']*)'\]/.exec(attrs);
-  if (name) entries.push(`name: ${q(name[1] ?? "")}`);
+  if (name) entries.push(`name: '${singleQuoted(name[1] ?? "")}'`);
   if (attrs.includes("[exact]")) entries.push("exact: true");
   for (const flag of ["checked", "selected", "disabled", "pressed", "expanded"]) {
     if (attrs.includes(`[${flag}]`)) entries.push(`${flag}: true`);
   }
   const level = /\[level=(\d+)\]/.exec(attrs);
   if (level) entries.push(`level: ${level[1]}`);
-  return `getByRole(${q(role)}${options(entries)})`;
+  return `getByRole('${singleQuoted(role)}'${options(entries)})`;
 }
 
 /** A quoted value in the grammar means "match this exactly". */
 function textCall(method: string, value: string): string {
   const exact = value.length > 1 && value.startsWith('"') && value.endsWith('"');
   const inner = exact ? value.slice(1, -1) : value;
-  return `${method}(${q(inner)}${exact ? ", { exact: true }" : ""})`;
+  return `${method}('${singleQuoted(inner)}'${exact ? ", { exact: true }" : ""})`;
 }
 
 /** One `>>` step: a call to chain, or a modifier on the step before it. */
@@ -60,7 +55,7 @@ function part(raw: string): { call?: string; modifier?: string } | null {
     case "title":
       return { call: textCall("getByTitle", value) };
     case "testid":
-      return { call: `getByTestId(${q(value)})` };
+      return { call: `getByTestId('${singleQuoted(value)}')` };
     case "nth": {
       const n = Number.parseInt(value, 10);
       if (Number.isNaN(n)) return null;
@@ -69,10 +64,10 @@ function part(raw: string): { call?: string; modifier?: string } | null {
     case "visible":
       return value === "false" ? { modifier: "filter({ visible: false })" } : { modifier: "filter({ visible: true })" };
     case "css":
-      return { call: `locator(${q(value)})` };
+      return { call: `locator('${singleQuoted(value)}')` };
     default:
       // No prefix is CSS, which is what the grammar says the default is.
-      return { call: `locator(${q(token)})` };
+      return { call: `locator('${singleQuoted(token)}')` };
   }
 }
 
@@ -211,7 +206,7 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
         const text = str(input["text"]);
         const url = str(input["url_includes"]);
         if (on) body.push(`await expect(${on}).toBeVisible();`);
-        else if (text) body.push(`await expect(page.getByText(${q(text)})).toBeVisible();`);
+        else if (text) body.push(`await expect(page.getByText('${singleQuoted(text)}')).toBeVisible();`);
         if (url) body.push(`await page.waitForURL(${JSON.stringify(`**${url}**`)});`);
         break;
       }
@@ -257,15 +252,20 @@ function singleQuoted(text: string): string {
 }
 
 /**
- * Mirror of the Rust locator builder so recorded steps export the same way.
- * The role is escaped like the name. The host already accepts only the
- * roles the recorder records, but whatever reaches this line becomes code in
- * someone's test suite, so it is not trusted to have come that way.
+ * Mirror of the Rust locator builder (`playwright_locator` in agent.rs), so
+ * recorded steps export the same way the agent's do. Both are tested against
+ * `locatorVectors.json`; change a rule there first.
+ *
+ * The role comes from the page's own `role` attribute and becomes code in
+ * someone's test suite. Every ARIA role is plain lowercase letters, so
+ * anything else (empty, upper case, a crafted string) is not a role at all and
+ * the element is found by its text instead.
  */
 export function playwrightLocator(role: string, name: string): string {
-  const r = singleQuoted(role === "searchbox" ? "textbox" : role || "generic");
-  if (!name) return `getByRole('${r}')`;
-  return `getByRole('${r}', { name: '${singleQuoted(name)}' })`;
+  const escaped = singleQuoted(name);
+  const r = role === "searchbox" ? "textbox" : role;
+  if (!/^[a-z]{1,32}$/.test(r)) return escaped ? `getByText('${escaped}')` : "locator('body')";
+  return escaped ? `getByRole('${r}', { name: '${escaped}' })` : `getByRole('${r}')`;
 }
 
 /**

@@ -1,0 +1,17 @@
+[
+  {"role": "link", "name": "Learn more", "expected": "getByRole('link', { name: 'Learn more' })"},
+  {"role": "searchbox", "name": "It's here", "expected": "getByRole('textbox', { name: 'It\\'s here' })"},
+  {"role": "textbox", "name": "Search", "expected": "getByRole('textbox', { name: 'Search' })"},
+  {"role": "button", "name": "", "expected": "getByRole('button')"},
+  {"role": "button", "name": "a\nb\u2028c", "expected": "getByRole('button', { name: 'abc' })"},
+  {"role": "button", "name": "\n\u2028", "expected": "getByRole('button')"},
+  {"role": "button", "name": "back\\slash", "expected": "getByRole('button', { name: 'back\\\\slash' })"},
+  {"role": "x'); require('child_process'); ('", "name": "Go", "expected": "getByText('Go')"},
+  {"role": "BUTTON", "name": "", "expected": "locator('body')"},
+  {"role": "BUTTON", "name": "Go", "expected": "getByText('Go')"},
+  {"role": "", "name": "Go", "expected": "getByText('Go')"},
+  {"role": "", "name": "", "expected": "locator('body')"},
+  {"role": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "Go", "expected": "getByRole('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', { name: 'Go' })"},
+  {"role": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "Go", "expected": "getByText('Go')"},
+  {"role": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "", "expected": "locator('body')"}
+]

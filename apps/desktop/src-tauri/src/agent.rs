@@ -2049,6 +2049,28 @@ mod tests {
         assert_eq!(playwright_locator("BUTTON", ""), "locator('body')");
     }
 
+    /// The vectors the TypeScript builder (`lib/playwright.ts`) is tested
+    /// against: the two must write the same locator for the same element.
+    #[test]
+    fn locators_match_the_shared_vectors() {
+        let vectors: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../src/lib/locatorVectors.json"))
+                .expect("locatorVectors.json is a JSON array");
+        assert!(vectors.len() >= 10, "the vector file looks truncated");
+        for v in &vectors {
+            let (role, name, expected) = (
+                v["role"].as_str().expect("role"),
+                v["name"].as_str().expect("name"),
+                v["expected"].as_str().expect("expected"),
+            );
+            assert_eq!(
+                playwright_locator(role, name),
+                expected,
+                "role {role:?}, name {name:?}"
+            );
+        }
+    }
+
     #[test]
     fn truncation_is_char_safe() {
         assert_eq!(truncate("héllo", 3), "hél…");
