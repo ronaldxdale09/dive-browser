@@ -11,6 +11,7 @@ interface Sent {
   name: string;
   value: string;
   masked?: boolean;
+  nonce?: string;
 }
 
 const sent: Sent[] = [];
@@ -83,5 +84,41 @@ describe("recorder", () => {
     change(input);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: "type", masked: true, value: "" });
+  });
+
+  it("records a button click with its role and accessible name", () => {
+    document.body.innerHTML = `<button>Save</button>`;
+    document.querySelector("button")!.click();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: "click", role: "button", name: "Save" });
+  });
+
+  it("records nothing for a click on a list item or a landmark", () => {
+    document.body.innerHTML = `<nav aria-label="Main"><ul><li id="item">Plain text</li></ul></nav>`;
+    document.querySelector("li")!.click();
+    document.querySelector("nav")!.click();
+    expect(sent).toHaveLength(0);
+  });
+
+  it("restarts under a new nonce without doubling its listeners", () => {
+    document.body.innerHTML = `<button>Go</button>`;
+    document.querySelector("button")!.click();
+    expect(sent.map((step) => step.nonce)).toEqual(["n1"]);
+    sent.length = 0;
+    eval(buildInjected("recorder.js", { __NONCE__: '"n2"', __BINDING__: "__diveTest", __MAX_FIELD__: "4096" }));
+    document.querySelector("button")!.click();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: "click", name: "Go", nonce: "n2" });
+  });
+
+  it("records nothing once the host disarms it, and resumes when re-armed", () => {
+    document.body.innerHTML = `<button>Go</button>`;
+    Reflect.set(window, "__diveRecorderNonce", null);
+    document.querySelector("button")!.click();
+    expect(sent).toHaveLength(0);
+    Reflect.set(window, "__diveRecorderNonce", "n3");
+    document.querySelector("button")!.click();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ nonce: "n3" });
   });
 });

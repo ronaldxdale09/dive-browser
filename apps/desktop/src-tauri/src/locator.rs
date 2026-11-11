@@ -425,33 +425,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn script_composes_the_shared_helpers_and_self_guards() {
-        let s = script();
+    fn script_substitutes_the_candidate_cap() {
         assert!(
-            s.contains("window.__diveLocator && window.__diveLocator.version === 1"),
-            "re-evaluating the script on an already-installed page must be a no-op"
-        );
-        // The role/name and actionability rules come from the shared
-        // fragments so the recorder and the locator engine cannot drift.
-        assert!(s.contains("const roleOf ="), "role helper missing");
-        assert!(s.contains("const nameOf ="), "name helper missing");
-        assert!(
-            s.contains("const isEditable ="),
-            "editability helper missing"
-        );
-        assert!(
-            s.contains(&MAX_CANDIDATES.to_string()),
+            script().contains(&MAX_CANDIDATES.to_string()),
             "cap not substituted"
         );
-    }
-
-    #[test]
-    fn locator_install_and_invocation_share_one_expression() {
-        let source = script();
-        let expression =
-            format!("(() => {{\n{source}\nreturn window.__diveLocator.page(0);\n}})()");
-        assert!(expression.contains("window.__diveLocator ="));
-        assert!(expression.contains("return window.__diveLocator.page(0)"));
     }
 
     #[test]

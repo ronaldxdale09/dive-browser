@@ -17,7 +17,7 @@ use dive_core::model::{Tab, TabId, TabState, TabTier, Timestamp};
 use time::Duration;
 
 use crate::fixtures::create_test_store;
-use crate::tier1_feature_coverage::test_r2_discard::{SPEC_MAX_IDLE, should_discard_tab};
+use crate::tier1_feature_coverage::test_r2_discard::SPEC_MAX_IDLE;
 
 #[test]
 fn test_scenario_20_tab_developer_workflow() {
@@ -94,50 +94,21 @@ fn test_scenario_20_tab_developer_workflow() {
         "Total 20 unique tabs across both workspaces"
     );
 
-    // Evaluate safe discard decisions for each tab
-    let mut discarded_count = 0;
-    let mut protected_count = 0;
-
-    for tab in &mut all_unique_tabs {
-        let is_showing = tab.id == t0.id;
-        let is_audible = tab.id == t3.id;
-        let discard = should_discard_tab(tab, is_showing, is_audible, false, now, SPEC_MAX_IDLE);
-
-        if discard {
-            discarded_count += 1;
-            tab.state = TabState::Discarded;
-            store.upsert_tab(tab).unwrap();
-        } else {
-            protected_count += 1;
-        }
+    // The store sweeps Today-tier tabs idle past the cutoff. Pinned and
+    // essential tabs and the tab just used are kept; the live-signal rules
+    // (audible, local dev server, showing) are `housekeeping.rs`'s job and
+    // are tested there, so this scenario does not claim them.
+    let swept = store.discard_idle_tabs(now, SPEC_MAX_IDLE).unwrap();
+    assert_eq!(
+        swept.len(),
+        17,
+        "20 tabs minus the pinned, the essential and the one used just now"
+    );
+    for kept in [t0.id, t2.id, t10.id] {
+        assert_eq!(store.tab(kept).unwrap().state, TabState::Active);
     }
-
-    // Assertions:
-    // Protected:
-    // 1. Tab 0 (showing active)
-    // 2. Tab 1 (localhost dev session)
-    // 3. Tab 2 (pinned)
-    // 4. Tab 3 (audible)
-    // 5. Tab 10 (essential)
-    assert_eq!(
-        protected_count, 5,
-        "Exactly 5 tabs must be protected by safe discard rules"
-    );
-
-    // Discarded:
-    // Tabs 4..9 (6 tabs) + Tabs 11..19 (9 tabs) = 15 tabs
-    assert_eq!(
-        discarded_count, 15,
-        "Exactly 15 background tabs must be discarded"
-    );
-
     // Verify Zero-Loss Reactivation for 3 discarded tabs:
-    let reactivate_ids: Vec<TabId> = all_unique_tabs
-        .iter()
-        .filter(|t| t.state == TabState::Discarded)
-        .take(3)
-        .map(|t| t.id)
-        .collect();
+    let reactivate_ids: Vec<TabId> = swept.iter().take(3).map(|t| t.id).collect();
     let reactivate_time = Timestamp::now();
 
     for id in reactivate_ids {

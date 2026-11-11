@@ -4,23 +4,18 @@
 //! 1. Discarding while CDP session is active
 //! 2. Crash recovery while navigation is in flight
 //! 3. MCP tool command on a discarded tab
-//! 4. Tab discard drops console and network ring buffers
-//! 5. Crash recovery while Playwright recorder is actively recording
+//! 4. Concurrent store work: MCP reads while the idle sweep runs
 //! 6. Concurrent MCP requests during housekeeping idle sweep
 //! 7. Tab reactivation requested while crash recovery reload is pending
 //! 8. Workspace switching while background operations execute
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use dive_cdp::CdpSession;
 use dive_core::model::{Tab, TabId, TabState, Timestamp};
 use dive_mcp::{Browser, TabInfo};
 
-use crate::fixtures::{
-    CrashAttempts, MockCdpTransport, TestConsoleEntry, TestFakeBrowser, TestNetworkEvent,
-    TestRingBufferRegistry, create_test_store, plan_crash_recovery,
-};
+use crate::fixtures::{MockCdpTransport, TestFakeBrowser, create_test_store};
 use crate::tier1_feature_coverage::test_r2_discard::SPEC_MAX_IDLE;
 
 #[test]
@@ -58,13 +53,7 @@ fn test_crash_recovery_during_navigation() {
     tab.title = "Loading...".to_string();
     store.upsert_tab(&tab).unwrap();
 
-    // Crash occurs before navigation finishes
-    let now = Instant::now();
-    let crash_plan = plan_crash_recovery(CrashAttempts::default(), now)
-        .expect("Crash during navigation should plan recovery");
-    assert_eq!(crash_plan.attempt, 1);
-
-    // After recovery, navigation target URL is preserved
+    // The navigation target URL is what the store keeps for recovery.
     let recovered_tab = store.tab(tab.id).unwrap();
     assert_eq!(recovered_tab.url, "https://slow-load.dev/heavy-bundle");
 }
@@ -86,61 +75,6 @@ async fn test_mcp_tool_on_discarded_tab() {
         result.is_ok(),
         "MCP should gracefully handle discarded tab reference"
     );
-}
-
-#[test]
-fn test_tab_discard_drops_buffers() {
-    // Interaction: Tab discard drops retained console & network buffers in BufferRegistry.
-    let buffers = TestRingBufferRegistry::default();
-    let tab_id = TabId::new();
-
-    buffers.push_console(TestConsoleEntry {
-        tab_id,
-        level: "info".to_string(),
-        text: "Tab log before discard".to_string(),
-        url: None,
-        line: None,
-        column: None,
-        timestamp: 100.0,
-    });
-
-    buffers.push_network(TestNetworkEvent {
-        tab_id,
-        request_id: "req_discard_1".to_string(),
-        url: "https://example.com/asset.js".to_string(),
-        method: "GET".to_string(),
-        status: Some(200),
-        encoded_length: Some(100.0),
-        timestamp: 100.0,
-    });
-
-    assert_eq!(buffers.console(tab_id, None).len(), 1);
-    assert_eq!(buffers.network(tab_id, None).len(), 1);
-
-    // Housekeeping sweep drops buffers for discarded tab
-    buffers.drop_tab(tab_id);
-
-    assert_eq!(buffers.console(tab_id, None).len(), 0);
-    assert_eq!(buffers.network(tab_id, None).len(), 0);
-}
-
-#[test]
-fn test_crash_recovery_while_recording() {
-    // Interaction: Renderer crashes while Playwright interaction recorder is running.
-    let tab_id = TabId::new();
-    let buffers = TestRingBufferRegistry::default();
-
-    // Mark tab as recording
-    buffers.set_recording(tab_id, true);
-    assert!(buffers.is_recording(tab_id));
-
-    // Tab crashes -> drop tab or reset recording state
-    buffers.set_recording(tab_id, false);
-    assert!(!buffers.is_recording(tab_id));
-
-    // Crash plan can be executed cleanly without deadlock with recorder
-    let p = plan_crash_recovery(CrashAttempts::default(), Instant::now()).unwrap();
-    assert_eq!(p.attempt, 1);
 }
 
 #[tokio::test]
@@ -184,14 +118,9 @@ async fn test_concurrent_mcp_during_idle_sweep() {
 #[test]
 fn test_tab_reactivation_during_crash_recovery() {
     // Interaction: User clicks on a tab while an automated crash backoff is waiting to reload.
-    let now = Instant::now();
     let (store, _, ws_id) = create_test_store();
     let mut tab = Tab::new(ws_id, "https://crashing-app.dev", 0);
     store.upsert_tab(&tab).unwrap();
-
-    // Crash occurred, backoff planned
-    let p = plan_crash_recovery(CrashAttempts::default(), now).unwrap();
-    assert_eq!(p.attempt, 1);
 
     // User explicitly reactivates tab before backoff fires
     tab.state = TabState::Active;
@@ -213,10 +142,6 @@ fn test_workspace_switching_during_recovery() {
 
     let mut tab_ws1 = Tab::new(ws_1, "https://ws1.dev", 0);
     store.upsert_tab(&tab_ws1).unwrap();
-
-    // WS1 tab crashes
-    let p = plan_crash_recovery(CrashAttempts::default(), Instant::now()).unwrap();
-    assert_eq!(p.attempt, 1);
 
     // User switches to WS2
     let active_ws = ws_2.id;

@@ -4,37 +4,24 @@ use dive_core::model::{Tab, TabState, TabTier, Timestamp};
 use time::Duration;
 
 use crate::fixtures::{create_sample_tabs, create_test_store};
-use crate::tier1_feature_coverage::test_r2_discard::{SPEC_MAX_IDLE, should_discard_tab};
+use crate::tier1_feature_coverage::test_r2_discard::SPEC_MAX_IDLE;
 
 #[test]
-fn test_exact_30_minute_cutoff_boundary() {
-    let (_, _, ws_id) = create_test_store();
+fn test_store_sweep_respects_the_30_minute_cutoff() {
+    let (store, _, ws_id) = create_test_store();
     let now = Timestamp::now();
 
-    // 1 second before cutoff: 29m 59s idle -> Keep active
-    let mut tab_29m59s = Tab::new(ws_id, "https://example.com/29m59s", 0);
-    tab_29m59s.last_active_at = now - (SPEC_MAX_IDLE - Duration::seconds(1));
+    let mut just_inside = Tab::new(ws_id, "https://example.com/29m59s", 0);
+    just_inside.last_active_at = now - (SPEC_MAX_IDLE - Duration::seconds(1));
+    store.upsert_tab(&just_inside).unwrap();
 
-    // Exactly at cutoff: 30m 00s idle -> Discard
-    let mut tab_30m00s = Tab::new(ws_id, "https://example.com/30m00s", 1);
-    tab_30m00s.last_active_at = now - SPEC_MAX_IDLE;
+    let mut just_past = Tab::new(ws_id, "https://example.com/30m01s", 1);
+    just_past.last_active_at = now - (SPEC_MAX_IDLE + Duration::seconds(1));
+    store.upsert_tab(&just_past).unwrap();
 
-    // 1 second after cutoff: 30m 01s idle -> Discard
-    let mut tab_30m01s = Tab::new(ws_id, "https://example.com/30m01s", 2);
-    tab_30m01s.last_active_at = now - (SPEC_MAX_IDLE + Duration::seconds(1));
-
-    assert!(
-        !should_discard_tab(&tab_29m59s, false, false, false, now, SPEC_MAX_IDLE),
-        "Tab idle for 29m59s must not be discarded"
-    );
-    assert!(
-        should_discard_tab(&tab_30m00s, false, false, false, now, SPEC_MAX_IDLE),
-        "Tab idle for exactly 30m00s must be discarded"
-    );
-    assert!(
-        should_discard_tab(&tab_30m01s, false, false, false, now, SPEC_MAX_IDLE),
-        "Tab idle for 30m01s must be discarded"
-    );
+    assert_eq!(store.archive_idle_tabs(now, SPEC_MAX_IDLE).unwrap(), 1);
+    assert_eq!(store.tab(just_inside.id).unwrap().state, TabState::Active);
+    assert_eq!(store.tab(just_past.id).unwrap().state, TabState::Discarded);
 }
 
 #[test]

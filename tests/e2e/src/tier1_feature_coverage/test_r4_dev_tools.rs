@@ -2,22 +2,16 @@
 //!
 //! Features covered:
 //! - Feature 24: In-process CDP latency benchmarking (<5ms target)
-//! - Feature 25: Network & Console interception stress
-//! - Feature 26: Playwright recorder verification
 //! - Feature 27: MCP concurrent load test (50 parallel requests)
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dive_cdp::CdpSession;
-use dive_core::TabId;
 use dive_mcp::{Config, serve};
 use serde_json::json;
 
-use crate::fixtures::{
-    MockCdpTransport, RecordedInteractionStep, TestConsoleEntry, TestFakeBrowser, TestNetworkEvent,
-    TestRingBufferRegistry,
-};
+use crate::fixtures::{MockCdpTransport, TestFakeBrowser};
 
 #[tokio::test]
 async fn test_in_process_cdp_round_trip_latency() {
@@ -58,106 +52,6 @@ async fn test_in_process_cdp_round_trip_latency() {
         "In-process CDP dispatch average latency {:?} must be under 5ms target",
         avg_latency
     );
-}
-
-#[test]
-fn test_console_interception_captures_all_log_levels() {
-    let buffers = TestRingBufferRegistry::default();
-    let tab_id = TabId::new();
-
-    let levels = ["info", "warn", "error", "debug"];
-    for (i, level) in levels.iter().enumerate() {
-        let entry = TestConsoleEntry {
-            tab_id,
-            level: (*level).to_string(),
-            text: format!("Log message {i} for {level}"),
-            url: Some("https://example.com/app.js".to_string()),
-            line: Some(i as u32 + 10),
-            column: Some(5),
-            timestamp: 1700000000.0 + i as f64,
-        };
-        buffers.push_console(entry);
-    }
-
-    let entries = buffers.console(tab_id, Some(10));
-    assert_eq!(entries.len(), 4);
-    assert_eq!(entries[0].level, "info");
-    assert_eq!(entries[1].level, "warn");
-    assert_eq!(entries[2].level, "error");
-    assert_eq!(entries[3].level, "debug");
-}
-
-#[test]
-fn test_network_interception_tracks_request_lifecycle() {
-    let buffers = TestRingBufferRegistry::default();
-    let tab_id = TabId::new();
-    let req_id = "req_test_101".to_string();
-
-    buffers.push_network(TestNetworkEvent {
-        tab_id,
-        request_id: req_id.clone(),
-        url: "https://api.example.com/v1/users".to_string(),
-        method: "GET".to_string(),
-        status: Some(200),
-        encoded_length: Some(512.0),
-        timestamp: 1700000000.0,
-    });
-
-    let requests = buffers.network(tab_id, Some(10));
-    assert_eq!(requests.len(), 1);
-    let req = &requests[0];
-    assert_eq!(req.request_id, "req_test_101");
-    assert_eq!(req.url, "https://api.example.com/v1/users");
-    assert_eq!(req.method, "GET");
-    assert_eq!(req.status, Some(200));
-    assert_eq!(req.encoded_length, Some(512.0));
-}
-
-#[test]
-fn test_playwright_recorder_spec_generation() {
-    let steps = vec![
-        RecordedInteractionStep {
-            kind: "click".to_string(),
-            role: "button".to_string(),
-            name: "Sign In".to_string(),
-            value: String::new(),
-            at: 1700000001.0,
-            masked: false,
-        },
-        RecordedInteractionStep {
-            kind: "type".to_string(),
-            role: "textbox".to_string(),
-            name: "Email".to_string(),
-            value: "alice@example.com".to_string(),
-            at: 1700000002.0,
-            masked: false,
-        },
-        RecordedInteractionStep {
-            kind: "navigate".to_string(),
-            role: String::new(),
-            name: String::new(),
-            value: "https://dashboard.example.com".to_string(),
-            at: 1700000003.0,
-            masked: false,
-        },
-    ];
-
-    // Verify step serialization and fields
-    let json_steps = serde_json::to_string(&steps).unwrap();
-    assert!(json_steps.contains("Sign In"));
-    assert!(json_steps.contains("alice@example.com"));
-    assert!(json_steps.contains("https://dashboard.example.com"));
-
-    // Verify locator role formatting matches Playwright ARIA locator contract
-    for step in &steps {
-        if step.kind == "click" {
-            assert_eq!(step.role, "button");
-            assert_eq!(step.name, "Sign In");
-        } else if step.kind == "type" {
-            assert_eq!(step.role, "textbox");
-            assert_eq!(step.value, "alice@example.com");
-        }
-    }
 }
 
 #[tokio::test]
@@ -205,17 +99,8 @@ async fn test_mcp_server_bearer_auth() {
             assert_ne!(resp.status(), reqwest::StatusCode::FORBIDDEN);
         }
         Err(e) => {
-            let msg = format!("{e:?}");
-            if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                // Loopback TCP is blocked here: there is no substitute for
-                // the real server, so say so and stop rather than pass.
-                eprintln!(
-                    "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
-                );
-                return;
-            } else {
-                panic!("Unexpected error: {e:?}");
-            }
+            crate::fixtures::loopback_blocked_or_fail(&e);
+            return;
         }
     }
 }
@@ -271,15 +156,8 @@ async fn test_mcp_concurrency_50_parallel_requests() {
             }
         }
         Err(e) => {
-            let msg = format!("{e:?}");
-            if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                eprintln!(
-                    "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
-                );
-                return;
-            } else {
-                panic!("Unexpected error: {e:?}");
-            }
+            crate::fixtures::loopback_blocked_or_fail(&e);
+            return;
         }
     }
 }

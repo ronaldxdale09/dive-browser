@@ -359,38 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn recorder_script_can_be_restarted_and_disabled() {
-        let script = script("n1");
-        let nonce_assignment = script
-            .find("window.__diveRecorderNonce = NONCE")
-            .expect("script assigns the new nonce");
-        let installed_guard = script
-            .find("if (window.__diveRecorderInstalled) return")
-            .expect("script installs listeners once");
-        assert!(nonce_assignment < installed_guard);
-        assert!(script.contains("if (!nonce) return"));
-    }
-
-    #[test]
-    fn recorder_script_shares_the_locator_role_rules() {
-        // Recorded steps are replayed as role/name locators, so both sides
-        // have to compute the role the same way.
-        let script = script("n1");
-        assert!(
-            script.contains("const roleOf ="),
-            "role helper not composed in"
-        );
-        assert!(
-            script.contains("const nameOf ="),
-            "name helper not composed in"
-        );
-        assert!(
-            script.contains("INTERACTIVE.has(roleOf(el))"),
-            "landmarks and list items must not be recorded as clicks"
-        );
-    }
-
-    #[test]
     fn recorder_script_embeds_the_nonce_as_a_json_string() {
         // The nonce reaches the page through a JS literal; anything that
         // escapes the quotes would let a page forge steps.

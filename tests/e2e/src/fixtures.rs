@@ -1,34 +1,22 @@
 //! Shared fixtures, fakes, and test helpers for Dive Browser E2E tests.
 //!
-//! Read this before trusting a green test. Some items here are the real
-//! crates under test (`dive_core::Store`, `dive_mcp::serve`, the CDP session
-//! over `MockCdpTransport`). Others are local models of app logic, written
-//! in this crate to pin down a contract, and they are NOT the app: a test
-//! that asserts against one of them checks the model against itself, not
-//! the desktop app's behaviour. The local models are:
-//! - `is_localhost_or_devserver`
-//! - `StartupTimelineModel`
-//! - `plan_crash_recovery` and the `SPEC_*` crash constants
-//! - `TestRingBufferRegistry` and the `SPEC_*_CAP` constants
-//! - `RecordedInteractionStep`
-//! - `TestFakeBrowser` (a scripted `dive_mcp::Browser`, not the CEF one)
+//! Read this before trusting a green test. `dive_core::Store`,
+//! `dive_mcp::serve` and the CDP session over `MockCdpTransport` are the real
+//! crates under test. `TestFakeBrowser` is a scripted `dive_mcp::Browser`, not
+//! the CEF one: a test that asserts on what it returns checks the fake, so it
+//! is only useful to drive the real MCP server. Desktop-crate logic (crash
+//! backoff, ring buffers, startup timeline, Chromium switches, the discard
+//! safety rules) is not reachable from this crate and is tested in
+//! `apps/desktop/src-tauri/src`. Evidence about the running app comes from
+//! `scripts/live-check.sh`, not from these.
 //!
-//! Sibling test files carry their own local models too (`should_discard_tab`
-//! in `test_r2_discard`, `format_cef_switches` in `test_r1_startup`,
-//! `parse_renderer_process_limit` in `test_r1_limits`). Evidence about the
-//! running app comes from `scripts/live-check.sh`, not from these.
-//!
-//! Opaque-box fixtures exercising the public contracts the desktop app relies on:
 //! - SQLite Store (`dive_core::Store`)
 //! - In-process CDP (`dive_cdp::CdpSession`)
 //! - MCP Server (`dive_mcp::serve`)
-//! - Crash Recovery & Backoff specification
-//! - Ring Buffers & Playwright Recorder contracts
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use dive_cdp::{CdpError, Transport};
@@ -40,7 +28,6 @@ use dive_mcp::{
     AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, SelectParams, TabInfo,
     Target, WaitForParams,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 // ==============================================================================
@@ -93,6 +80,24 @@ impl Transport for MockCdpTransport {
 // ==============================================================================
 
 /// Create an in-memory SQLite store with a default container and workspace.
+/// Called when an HTTP request to a loopback server failed. Returns only when
+/// the failure is the sandbox blocking loopback TCP and we are not on CI (the
+/// caller then skips). Any other error, or any failure on CI, panics: a test
+/// that cannot reach the server it tests must not pass there.
+pub fn loopback_blocked_or_fail(error: &dyn std::fmt::Debug) {
+    let msg = format!("{error:?}");
+    let blocked = msg.contains("PermissionDenied") || msg.contains("Operation not permitted");
+    if !blocked {
+        panic!("unexpected error: {msg}");
+    }
+    if std::env::var_os("CI").is_some() {
+        panic!("loopback TCP failed on CI ({msg}); this test must run there");
+    }
+    eprintln!(
+        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
+    );
+}
+
 pub fn create_test_store() -> (Store, ContainerId, WorkspaceId) {
     let store = Store::in_memory().expect("failed to open in-memory test store");
     let container = Container::new("default-test-container");
@@ -141,241 +146,6 @@ pub fn create_sample_tabs(
     }
 
     tabs
-}
-
-/// Check if a URL belongs to a localhost/loopback dev server session (R2 safe discard rule).
-pub fn is_localhost_or_devserver(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    lower.starts_with("http://localhost")
-        || lower.starts_with("https://localhost")
-        || lower.starts_with("http://127.0.0.1")
-        || lower.starts_with("https://127.0.0.1")
-        || lower.starts_with("http://[::1]")
-        || lower.starts_with("https://[::1]")
-        || lower.starts_with("http://0.0.0.0")
-        || lower.starts_with("http://127.")
-}
-
-// ==============================================================================
-// Startup timeline contract: milestones are host-observed since launch and must
-// be ordered state init <= window <= setup <= paint <= controls; incomplete
-// observations never synthesise a total.
-// ==============================================================================
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StartupTimelineModel {
-    pub process_start_ms: f64,
-    pub state_init_ms: f64,
-    pub window_created_ms: f64,
-    pub setup_complete_ms: f64,
-    pub chrome_paint_ms: Option<f64>,
-}
-
-impl StartupTimelineModel {
-    pub fn is_monotonically_ordered(&self) -> bool {
-        let mut prev = self.process_start_ms;
-        if self.state_init_ms < prev {
-            return false;
-        }
-        prev = self.state_init_ms;
-        if self.window_created_ms < prev {
-            return false;
-        }
-        prev = self.window_created_ms;
-        if self.setup_complete_ms < prev {
-            return false;
-        }
-        if let Some(paint) = self.chrome_paint_ms
-            && paint < self.setup_complete_ms
-        {
-            return false;
-        }
-        true
-    }
-}
-
-// ==============================================================================
-// Crash recovery contract: a crashed tab is reloaded automatically with backoff
-// for at most SPEC_MAX_CRASH_ATTEMPTS inside SPEC_CRASH_WINDOW, then left to a
-// manual reload.
-// ==============================================================================
-
-pub const SPEC_MAX_CRASH_ATTEMPTS: u32 = 3;
-pub const SPEC_CRASH_WINDOW: Duration = Duration::from_secs(30);
-pub const SPEC_CRASH_BASE_DELAY: Duration = Duration::from_millis(250);
-
-/// Specta event emitted on tab crash.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TabCrashedEvent {
-    pub tab_id: TabId,
-    pub attempt: u32,
-    pub recovering: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CrashAttempts {
-    pub count: u32,
-    pub started: Option<Instant>,
-}
-
-pub struct CrashRecoveryPlan {
-    pub delay: Duration,
-    pub attempt: u32,
-    pub next: CrashAttempts,
-}
-
-/// Backoff decision: retry with growing delay while attempts in the window stay
-/// under the cap, otherwise hand recovery to the user.
-pub fn plan_crash_recovery(state: CrashAttempts, now: Instant) -> Option<CrashRecoveryPlan> {
-    let fresh = state
-        .started
-        .is_none_or(|started| now.duration_since(started) >= SPEC_CRASH_WINDOW);
-    let count = if fresh { 0 } else { state.count };
-    if count >= SPEC_MAX_CRASH_ATTEMPTS {
-        return None;
-    }
-    Some(CrashRecoveryPlan {
-        delay: SPEC_CRASH_BASE_DELAY * 2_u32.pow(count),
-        attempt: count + 1,
-        next: CrashAttempts {
-            count: count + 1,
-            started: Some(if fresh {
-                now
-            } else {
-                state.started.unwrap_or(now)
-            }),
-        },
-    })
-}
-
-// ==============================================================================
-// Ring buffer contract: console and network capture keep a bounded window
-// (SPEC_CONSOLE_CAP / SPEC_NETWORK_CAP) and drop the oldest entries first.
-// ==============================================================================
-
-pub const SPEC_CONSOLE_CAP: usize = 500;
-pub const SPEC_NETWORK_CAP: usize = 1000;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TestConsoleEntry {
-    pub tab_id: TabId,
-    pub level: String,
-    pub text: String,
-    pub url: Option<String>,
-    pub line: Option<u32>,
-    pub column: Option<u32>,
-    pub timestamp: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TestNetworkEvent {
-    pub tab_id: TabId,
-    pub request_id: String,
-    pub url: String,
-    pub method: String,
-    pub status: Option<u16>,
-    pub encoded_length: Option<f64>,
-    pub timestamp: f64,
-}
-
-#[derive(Default)]
-pub struct TestRingBufferRegistry {
-    pub console_buffers: Mutex<HashMap<TabId, VecDeque<TestConsoleEntry>>>,
-    pub network_buffers: Mutex<HashMap<TabId, VecDeque<TestNetworkEvent>>>,
-    pub recording_tabs: Mutex<HashMap<TabId, bool>>,
-}
-
-impl TestRingBufferRegistry {
-    pub fn push_console(&self, entry: TestConsoleEntry) {
-        let mut map = self.console_buffers.lock().unwrap();
-        let buf = map
-            .entry(entry.tab_id)
-            .or_insert_with(|| VecDeque::with_capacity(SPEC_CONSOLE_CAP));
-        if buf.len() >= SPEC_CONSOLE_CAP {
-            buf.pop_front();
-        }
-        buf.push_back(entry);
-    }
-
-    pub fn console(&self, tab_id: TabId, limit: Option<usize>) -> Vec<TestConsoleEntry> {
-        let map = self.console_buffers.lock().unwrap();
-        let Some(buf) = map.get(&tab_id) else {
-            return Vec::new();
-        };
-        let count = limit.unwrap_or(SPEC_CONSOLE_CAP).min(buf.len());
-        buf.iter()
-            .rev()
-            .take(count)
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-
-    pub fn push_network(&self, event: TestNetworkEvent) {
-        let mut map = self.network_buffers.lock().unwrap();
-        let buf = map
-            .entry(event.tab_id)
-            .or_insert_with(|| VecDeque::with_capacity(SPEC_NETWORK_CAP));
-        if buf.len() >= SPEC_NETWORK_CAP {
-            buf.pop_front();
-        }
-        buf.push_back(event);
-    }
-
-    pub fn network(&self, tab_id: TabId, limit: Option<usize>) -> Vec<TestNetworkEvent> {
-        let map = self.network_buffers.lock().unwrap();
-        let Some(buf) = map.get(&tab_id) else {
-            return Vec::new();
-        };
-        let count = limit.unwrap_or(SPEC_NETWORK_CAP).min(buf.len());
-        buf.iter()
-            .rev()
-            .take(count)
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-
-    pub fn drop_tab(&self, tab_id: TabId) {
-        self.console_buffers.lock().unwrap().remove(&tab_id);
-        self.network_buffers.lock().unwrap().remove(&tab_id);
-        self.recording_tabs.lock().unwrap().remove(&tab_id);
-    }
-
-    pub fn set_recording(&self, tab_id: TabId, recording: bool) {
-        self.recording_tabs
-            .lock()
-            .unwrap()
-            .insert(tab_id, recording);
-    }
-
-    pub fn is_recording(&self, tab_id: TabId) -> bool {
-        self.recording_tabs
-            .lock()
-            .unwrap()
-            .get(&tab_id)
-            .copied()
-            .unwrap_or(false)
-    }
-}
-
-// ==============================================================================
-// Playwright recording contract: every recorded interaction carries an action,
-// a locator and a value, and exports as deterministic Playwright steps.
-// ==============================================================================
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RecordedInteractionStep {
-    pub kind: String,
-    pub role: String,
-    pub name: String,
-    pub value: String,
-    pub at: f64,
-    pub masked: bool,
 }
 
 // ==============================================================================

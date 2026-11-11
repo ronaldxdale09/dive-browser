@@ -28,6 +28,15 @@ import picker from "../../src-tauri/src/inject/picker.js?raw";
 import reactBridge from "../../src-tauri/src/inject/react-bridge.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
+import credentials from "../../src-tauri/src/inject/credentials.js?raw";
+import forms from "../../src-tauri/src/inject/forms.js?raw";
+import fillTab from "../../src-tauri/src/inject/fill-tab.js?raw";
+import subtitles from "../../src-tauri/src/inject/subtitles.js?raw";
+import audio from "../../src-tauri/src/inject/audio.js?raw";
+import audioHooks from "../../src-tauri/src/inject/audio-hooks.js?raw";
+import autofill from "../../src-tauri/src/inject/autofill.js?raw";
+import reader from "../../src-tauri/src/inject/reader.js?raw";
+import translate from "../../src-tauri/src/inject/translate.js?raw";
 import roleName from "../../src-tauri/src/inject/role-name.js?raw";
 
 /** Every injectable fragment, by file name. Mirrors `FRAGMENTS` in Rust. */
@@ -40,14 +49,23 @@ const FRAGMENTS: Record<string, string> = {
   "css-path.js": cssPath,
   "locator.js": locator,
   "recorder.js": recorder,
+  "credentials.js": credentials,
+  "forms.js": forms,
   "picker.js": picker,
   "component.js": component,
+  "fill-tab.js": fillTab,
+  "subtitles.js": subtitles,
   "markdown.js": markdown,
   "webapp.js": webapp,
   "webapp-icon.js": webappIcon,
   "stack.js": stack,
   "color.js": color,
   "agent_glow.js": agentGlow,
+  "audio.js": audio,
+  "audio-hooks.js": audioHooks,
+  "autofill.js": autofill,
+  "reader.js": reader,
+  "translate.js": translate,
 };
 
 const DIRECTIVE = "// @dive-include ";

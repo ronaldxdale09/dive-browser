@@ -5,11 +5,9 @@
 //! checks that drive the real app are `scripts/live-check.sh` and
 //! `scripts/benchmark-memory.sh`, run by the `live` CI job.
 //!
-//! Requirement-driven, opaque-box integration tests covering:
-//! - R1: Engine Flags & Startup Performance
-//! - R2: Tab Discarding & Memory Saver Architecture
-//! - R3: Crash Isolation & Session Recovery Hardening
-//! - R4: Core Developer Feature Reliability & Verification
+//! Opaque-box tests of the crates this workspace can reach: the SQLite store
+//! (idle sweep, tab state), the CDP session and the MCP server over a fake
+//! browser. Logic that lives only in the desktop crate is tested there.
 
 #[cfg(test)]
 mod fixtures;

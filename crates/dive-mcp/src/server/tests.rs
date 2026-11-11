@@ -890,7 +890,13 @@ async fn token_and_origin_are_enforced() {
         Err(e) => {
             let msg = format!("{e:?}");
             if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                eprintln!("skipping test: sandbox blocked loopback TCP connection");
+                assert!(
+                    std::env::var_os("CI").is_none(),
+                    "loopback TCP failed on CI ({e:?}); this test must run there"
+                );
+                eprintln!(
+                    "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
+                );
                 handle.shutdown();
                 return;
             }
@@ -1469,7 +1475,13 @@ impl Session {
             Err(e) => {
                 let msg = format!("{e:?}");
                 if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                    eprintln!("skipping test: sandbox blocked loopback TCP connection");
+                    assert!(
+                        std::env::var_os("CI").is_none(),
+                        "loopback TCP failed on CI ({e:?}); this test must run there"
+                    );
+                    eprintln!(
+                        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
+                    );
                     handle.shutdown();
                     return None;
                 }

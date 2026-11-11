@@ -52,4 +52,12 @@ describe("fill-tab idle work", () => {
       expect(vi.getTimerCount()).toBe(0);
     }
   });
+
+  it("installing the script twice keeps the first instance", () => {
+    const { page, api } = install();
+    new Function("window", "document", source)(page, page.document);
+    expect(page.__diveFillTab).toBe(api);
+    expect(api.toggle()).toBe("filled");
+    api.exit();
+  });
 });

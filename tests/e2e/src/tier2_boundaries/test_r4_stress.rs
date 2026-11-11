@@ -3,13 +3,9 @@
 use std::sync::Arc;
 
 use dive_cdp::CdpSession;
-use dive_core::TabId;
 use dive_mcp::{Config, serve};
 
-use crate::fixtures::{
-    MockCdpTransport, RecordedInteractionStep, TestConsoleEntry, TestFakeBrowser, TestNetworkEvent,
-    TestRingBufferRegistry,
-};
+use crate::fixtures::{MockCdpTransport, TestFakeBrowser};
 
 #[tokio::test]
 async fn test_mcp_invalid_bearer_token_variations() {
@@ -53,15 +49,8 @@ async fn test_mcp_invalid_bearer_token_variations() {
                 );
             }
             Err(e) => {
-                let msg = format!("{e:?}");
-                if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                    eprintln!(
-                        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
-                    );
-                    return;
-                } else {
-                    panic!("unexpected error: {e:?}");
-                }
+                crate::fixtures::loopback_blocked_or_fail(&e);
+                return;
             }
         }
     }
@@ -112,70 +101,11 @@ async fn test_mcp_untrusted_origin_rejection() {
                 );
             }
             Err(e) => {
-                let msg = format!("{e:?}");
-                if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                    eprintln!(
-                        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
-                    );
-                    return;
-                } else {
-                    panic!("unexpected error: {e:?}");
-                }
+                crate::fixtures::loopback_blocked_or_fail(&e);
+                return;
             }
         }
     }
-}
-
-#[test]
-fn test_console_ring_buffer_overflow() {
-    let buffers = TestRingBufferRegistry::default();
-    let tab_id = TabId::new();
-
-    // Flood 2,000 console entries into a 500-capacity ring buffer
-    for i in 0..2000 {
-        buffers.push_console(TestConsoleEntry {
-            tab_id,
-            level: "info".to_string(),
-            text: format!("flood message {i}"),
-            url: None,
-            line: None,
-            column: None,
-            timestamp: i as f64,
-        });
-    }
-
-    // Buffer should cap at 500 entries (SPEC_CONSOLE_CAP)
-    let entries = buffers.console(tab_id, None);
-    assert_eq!(entries.len(), 500);
-
-    // Oldest messages should have been evicted; newest message 1999 must be present
-    assert_eq!(entries.last().unwrap().text, "flood message 1999");
-    assert_eq!(entries.first().unwrap().text, "flood message 1500");
-}
-
-#[test]
-fn test_network_ring_buffer_overflow() {
-    let buffers = TestRingBufferRegistry::default();
-    let tab_id = TabId::new();
-
-    // Flood 2,000 network requests into a 1,000-capacity ring buffer
-    for i in 0..2000 {
-        buffers.push_network(TestNetworkEvent {
-            tab_id,
-            request_id: format!("req_{i}"),
-            url: format!("https://api.test/resource/{i}"),
-            method: "GET".to_string(),
-            status: Some(200),
-            encoded_length: Some(128.0),
-            timestamp: i as f64,
-        });
-    }
-
-    // Buffer should cap at 1000 requests (SPEC_NETWORK_CAP)
-    let requests = buffers.network(tab_id, None);
-    assert_eq!(requests.len(), 1000);
-    assert_eq!(requests.last().unwrap().request_id, "req_1999");
-    assert_eq!(requests.first().unwrap().request_id, "req_1000");
 }
 
 #[test]
@@ -199,33 +129,4 @@ fn test_malformed_and_oversized_cdp_payload() {
         handled_large.is_ok(),
         "Large CDP message should be handled cleanly"
     );
-}
-
-#[test]
-fn test_recorder_special_characters_and_empty() {
-    let edge_steps = vec![
-        RecordedInteractionStep {
-            kind: "type".to_string(),
-            role: "textbox".to_string(),
-            name: "Comment".to_string(),
-            value: "Special: <script>alert('xss')</script> 🚀 💖 \n\t \"quoted\"".to_string(),
-            at: 1700000000.0,
-            masked: false,
-        },
-        RecordedInteractionStep {
-            kind: "click".to_string(),
-            role: String::new(),
-            name: String::new(),
-            value: String::new(),
-            at: 1700000001.0,
-            masked: false,
-        },
-    ];
-
-    let json = serde_json::to_string(&edge_steps).expect("Edge steps should serialize safely");
-    assert!(json.contains("alert"));
-    assert!(json.contains("🚀"));
-
-    let deserialized: Vec<RecordedInteractionStep> = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized[0].value, edge_steps[0].value);
 }

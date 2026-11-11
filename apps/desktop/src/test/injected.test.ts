@@ -6,6 +6,7 @@
  * script's text.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import pagescript from "../../src-tauri/src/pagescript.rs?raw";
 import { buildInjected, hasUnfilledPlaceholder, INJECTABLE } from "./injected";
 
 /** What the engine returns for a resolved element. */
@@ -141,6 +142,7 @@ describe("script composition", () => {
         __MIN_ICON__: "192",
         __ICON_URL__: '"https://x/i.png"',
         __SIZE__: "512",
+        __AUDIO_BINDING__: "__diveAudioTest",
       });
       expect(script.startsWith("(function () {"), name).toBe(true);
       expect(script.trimEnd().endsWith("})()"), name).toBe(true);
@@ -148,6 +150,12 @@ describe("script composition", () => {
       // worth syntax-checking: fragments are not valid on their own.
       expect(() => new Function(script), name).not.toThrow();
     }
+  });
+
+  it("registers exactly the fragments the Rust loader registers", () => {
+    const rust = [...pagescript.matchAll(/\(\s*"([\w-]+\.js)",\s*include_str!/g)].map((m) => m[1]);
+    expect(rust.length).toBeGreaterThan(0);
+    expect([...INJECTABLE].sort()).toEqual([...rust].sort());
   });
 
   it("is idempotent: installing twice keeps one engine", () => {

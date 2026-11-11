@@ -57,16 +57,3 @@ pub async fn toggle(session: &CdpSession) -> String {
         .and_then(|v| v["result"]["value"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "unavailable".to_owned())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_script_is_self_guarding_and_exposes_the_toggle() {
-        let script = crate::pagescript::build("fill-tab.js", &[]);
-        assert!(script.contains("if (window.__diveFillTab) return;"));
-        assert!(script.contains("window.__diveFillTab = Object.freeze("));
-        assert!(script.contains("dive-fill-target"));
-        // Escape leaves the filled state before the page sees the key.
-        assert!(script.contains("e.key === \"Escape\" && target"));
-    }
-}

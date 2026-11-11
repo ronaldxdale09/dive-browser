@@ -81,8 +81,8 @@ async fn thirty_two_clients_call_tools_at_once_without_errors_or_tail_latency() 
     let url = handle.url();
     let client = reqwest::Client::new();
 
-    if client.post(&url).body("{}").send().await.is_err() {
-        eprintln!("loopback TCP is blocked in this sandbox; skipping the HTTP load test");
+    if let Err(e) = client.post(&url).body("{}").send().await {
+        crate::fixtures::loopback_blocked_or_fail(&e);
         handle.shutdown();
         return;
     }
