@@ -1,0 +1,33 @@
+name: audit
+
+# ci.yml audits on every push, but an advisory published on a quiet week
+# otherwise surfaces only when someone next pushes -- or not at all before a
+# release. This reads the lockfiles only, so it needs no CEF and no build.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - name: Install audit tools
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo install cargo-deny --locked --version 0.20.2
+      - run: cargo audit
+      - name: Vendored runtime lockfile
+        run: cargo audit --file vendor/tauri-runtime-cef/Cargo.lock
+      - run: cargo deny check advisories
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm audit --prod --audit-level=moderate
