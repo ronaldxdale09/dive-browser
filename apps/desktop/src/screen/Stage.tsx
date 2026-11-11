@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, Pause, Play } from "lucide-react";
 import { Icon } from "../components/Icon";
 import { recordingClock } from "../lib/recordingFormat";
-import { RATIO_VALUE, contentBox, outputTime, sourceTime } from "./math";
+import { frameRatio, outputTime, pictureBox, sourceTime } from "./math";
 import { dragOnWindow } from "./drag";
 import { PlaybackClock, previewNeedsFrame } from "./previewLoop";
 import { leasePreviewMedia } from "./previewMedia";
@@ -40,7 +40,7 @@ export function Stage() {
   const renderer = useRef(new Renderer());
   const [size, setSize] = useState({ w: 960, h: 540 });
   const [fill, setFill] = useState(false);
-  const ratio = project ? (RATIO_VALUE[project.editor.aspectRatio] ?? project.media.width / Math.max(1, project.media.height)) : 16 / 9;
+  const ratio = project ? frameRatio(project) : 16 / 9;
 
   // Fit the canvas to the stage at the project's ratio.
   useEffect(() => {
@@ -262,15 +262,13 @@ export function Stage() {
 
 /** Stage-normalised point to frame-normalised, through padding and crop. */
 function stageToFrame(project: Project, nx: number, ny: number, w: number, h: number): { cx: number; cy: number } {
-  const e = project.editor;
-  const box = contentBox(w, h, e.padding, project.media.width * e.crop.width, project.media.height * e.crop.height);
+  const box = pictureBox(project, w, h);
   const px = Math.min(1, Math.max(0, (nx * w - box.x) / box.w));
   const py = Math.min(1, Math.max(0, (ny * h - box.y) / box.h));
   return { cx: px, cy: py };
 }
 
 function frameToStage(project: Project, cx: number, cy: number, w: number, h: number): { x: number; y: number } {
-  const e = project.editor;
-  const box = contentBox(w, h, e.padding, project.media.width * e.crop.width, project.media.height * e.crop.height);
+  const box = pictureBox(project, w, h);
   return { x: box.x + cx * box.w, y: box.y + cy * box.h };
 }

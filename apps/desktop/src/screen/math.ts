@@ -4,7 +4,7 @@
  * trims and speed changes, where the camera is for a zoom, how the pointer
  * is smoothed, and where automatic zooms should go.
  */
-import type { CursorSample, SpeedRegion, TrimRegion, ZoomRegion } from "./model";
+import type { AspectRatio, CursorSample, Project, SpeedRegion, TrimRegion, ZoomRegion } from "./model";
 
 /* ------------------------------------------------------------------ time */
 
@@ -337,10 +337,10 @@ export function suggestZooms(samples: CursorSample[], durationMs: number, existi
 
 /* ------------------------------------------------------------------ canvas */
 
-export const RATIO_VALUE: Record<string, number | null> = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1, "4:3": 4 / 3, "4:5": 4 / 5, "16:10": 16 / 10, native: null };
+export const RATIO_VALUE: Record<AspectRatio, number | null> = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1, "4:3": 4 / 3, "4:5": 4 / 5, "16:10": 16 / 10, native: null };
 
 /** Even output dimensions for a ratio and a resolution choice. */
-export function outputSize(ratio: string, resolution: "720p" | "1080p" | "source", src: { width: number; height: number }): { width: number; height: number } {
+export function outputSize(ratio: AspectRatio, resolution: "720p" | "1080p" | "source", src: { width: number; height: number }): { width: number; height: number } {
   const r = RATIO_VALUE[ratio] ?? src.width / Math.max(1, src.height);
   let w: number;
   let h: number;
@@ -379,4 +379,18 @@ export function contentBox(canvasW: number, canvasH: number, padding: number, vi
     w = h * ratio;
   }
   return { x: (canvasW - w) / 2, y: (canvasH - h) / 2, w, h };
+}
+
+/** The cropped picture's box inside a canvas: the one rule the stage and the renderer share. */
+export function pictureBox(project: Pick<Project, "editor" | "media">, canvasW: number, canvasH: number): { x: number; y: number; w: number; h: number } {
+  const e = project.editor;
+  const srcW = project.media.width * e.crop.width;
+  const srcH = project.media.height * e.crop.height;
+  // Media of unknown size still gets a 16:9 box, so a click maps to what is drawn.
+  return contentBox(canvasW, canvasH, e.padding, srcW || 16, srcH || 9);
+}
+
+/** The stage and output aspect ratio for a project. */
+export function frameRatio(project: Pick<Project, "editor" | "media">): number {
+  return RATIO_VALUE[project.editor.aspectRatio] ?? project.media.width / Math.max(1, project.media.height);
 }

@@ -4,7 +4,7 @@
  * annotations. Pure with respect to time, so the stage and the export call
  * the same function and get the same picture.
  */
-import { Spring, cameraAt, cameraTransform, clickBounce, contentBox, cursorAt, easeOutBack, easeOutCubic, lerp, toCropped } from "./math";
+import { Spring, cameraAt, cameraTransform, clickBounce, cursorAt, easeOutBack, easeOutCubic, lerp, pictureBox, toCropped } from "./math";
 import type { Camera } from "./math";
 import { WALLPAPERS } from "./model";
 import type { AnnotationRegion, CursorSample, Project, ZoomRegion } from "./model";
@@ -116,7 +116,7 @@ export class Renderer {
     const crop = e.crop;
     const srcW = project.media.width * crop.width;
     const srcH = project.media.height * crop.height;
-    const box = contentBox(W, H, e.padding, srcW || 16, srcH || 9);
+    const box = pictureBox(project, W, H);
 
     // Camera: the timeline's request, chased by springs in content time.
     const target = cameraAt(e.zooms, tMs, (z, t) => this.focusOf(z, t, project, smoothed));

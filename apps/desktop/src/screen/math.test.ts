@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Spring, buildSegments, cameraAt, cameraTransform, clampFocus, clickBounce, contentBox, cursorAt, outputDuration, outputSize, outputTime, smoothCursorPath, sourceTime, suggestZooms, toCropped, zoomScale, zoomStrength } from "./math";
+import { Spring, buildSegments, cameraAt, cameraTransform, clampFocus, clickBounce, contentBox, cursorAt, frameRatio, outputDuration, outputSize, outputTime, pictureBox, smoothCursorPath, sourceTime, suggestZooms, toCropped, zoomScale, zoomStrength } from "./math";
+import { newProject } from "./model";
 import type { CursorSample, ZoomRegion } from "./model";
 
 const zoom = (startMs: number, endMs: number, extra: Partial<ZoomRegion> = {}): ZoomRegion => ({ id: `z${startMs}`, startMs, endMs, depth: 3, focus: { cx: 0.5, cy: 0.5 }, focusMode: "manual", source: "manual", ...extra });
@@ -132,6 +133,20 @@ describe("canvas", () => {
     expect(box.w).toBeLessThanOrEqual(1920 * 0.8);
     expect(box.h).toBeCloseTo(box.w / 1.6, 5);
     expect(box.x).toBeCloseTo((1920 - box.w) / 2, 5);
+  });
+
+  it("gives media of unknown size the same 16:9 box on the stage and in the renderer", () => {
+    const project = newProject({ source: "a.mp4", playable: null, events: null, durationMs: 1000, width: 0, height: 0 });
+    const box = pictureBox(project, 1600, 900);
+    expect(box.w).toBeGreaterThan(0);
+    expect(box.h).toBeGreaterThan(0);
+    expect(box.w / box.h).toBeCloseTo(16 / 9, 5);
+  });
+
+  it("takes the output ratio from the media for native, and from the table otherwise", () => {
+    const project = newProject({ source: "a.mp4", playable: null, events: null, durationMs: 1000, width: 1280, height: 800 });
+    expect(frameRatio({ ...project, editor: { ...project.editor, aspectRatio: "native" } })).toBeCloseTo(1.6, 5);
+    expect(frameRatio({ ...project, editor: { ...project.editor, aspectRatio: "9:16" } })).toBeCloseTo(9 / 16, 5);
   });
 });
 
