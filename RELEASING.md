@@ -90,8 +90,12 @@ preflight   Resolve the version from the tag or the bump. Refuse a version
             that was already published. Run typecheck, lint and tests.
                     │
 build       Stamp the version into this checkout only, build, sign and
-            notarize, then write a per-platform update manifest fragment.
-            Fails if the updater archive or its signature is missing.
+            notarize, and upload the unsigned updater archive. The updater
+            key is not present.
+                    │
+sign        sign-macos and sign-windows: install only the Tauri signer,
+            sign the archive, write a per-platform update manifest
+            fragment. Fails if the archive or its signature is missing.
                     │
 release     Merge the fragments into one latest.json, publish the release
             (creating the tag), then verify the release GitHub actually
@@ -142,13 +146,29 @@ build without it. A local `tauri build` therefore produces an app that cannot
 verify updates, which is why local builds go through
 `tauri.no-updater.conf.json` (below).
 
+### Signing
+
+The updater key (`TAURI_SIGNING_PRIVATE_KEY` and its password) is used only in
+the `sign-macos` and `sign-windows` jobs, in a step that installs nothing but
+the signer. The build jobs build with `tauri.no-updater.conf.json`, so the
+toolchain and every `build.rs` run without the key; the macOS job makes
+`Dive.app.tar.gz` itself and checks it with `codesign` and `spctl`.
+
+The Developer ID certificate and the notarization credentials are still
+present during `tauri build`, because Tauri signs and notarizes while it
+bundles. That is accepted residual risk: code that can read the Apple password
+can also use the certificate in the unlocked keychain, so moving notarization
+out would buy little. The build keychain is deleted when the job ends.
+`local-release.sh` still builds with the updater key on the maintainer's
+machine.
+
 ### Local builds
 
 `pnpm --filter @dive/desktop build` runs `tauri build --config
 src-tauri/tauri.no-updater.conf.json`, an overlay that sets
 `bundle.createUpdaterArtifacts: false`. It exists so a developer can produce a
 `.app` without the updater keypair; nothing built that way is publishable, and
-the release workflow never uses it.
+the release workflow uses it too, but only to keep the key out of the build (see Signing).
 
 ---
 

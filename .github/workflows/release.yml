@@ -189,29 +189,57 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
+      # The updater key is not here. The bundle is built with updater
+      # artifacts off, the archive is made below, and the sign-macos job signs
+      # it. Nothing this step runs (the Vite toolchain, every build.rs) can
+      # read the key that every installed copy of Dive trusts.
       - name: Build app and updater artifacts
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           DIVE_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          # An app built without the updater keypair cannot verify an update and
-          # produces no signature to publish. Shipping that is the failure this
-          # pipeline exists to prevent, so it is fatal rather than a warning.
-          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ] || [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "::error::Updater signing keys are not configured." \
-                 "Set TAURI_SIGNING_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY" \
+          # An app built without the updater public key cannot verify an
+          # update. Shipping that is the failure this pipeline exists to
+          # prevent, so it is fatal rather than a warning. The private key is
+          # checked in the sign job.
+          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ]; then
+            echo "::error::Updater public key is not configured." \
+                 "Set TAURI_SIGNING_PUBLIC_KEY" \
                  "(see scripts/release/setup-signing-secrets.sh)."
             exit 1
           fi
           pnpm --filter @dive/desktop exec tauri build \
+            --config src-tauri/tauri.no-updater.conf.json \
             --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+          # The overlay turns Tauri's own archive off; a leftover one would
+          # mean the overlay was ignored.
+          [ -d target/release/bundle/macos/Dive.app ] || { echo "::error::No Dive.app in target/release/bundle/macos."; exit 1; }
+          [ ! -e target/release/bundle/macos/Dive.app.tar.gz ] || { echo "::error::Dive.app.tar.gz already exists; the no-updater overlay was ignored."; exit 1; }
+          # Made the way Tauri makes it, from exactly what the build left,
+          # before prepare-bundle.sh touches the app.
+          ( cd target/release/bundle/macos && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf Dive.app.tar.gz Dive.app )
           scripts/release/prepare-bundle.sh target/release/bundle/macos/Dive.app
+
+      # The archive is hand-made, so prove it carries a valid app before it
+      # is handed to the signing job and then to every installed copy.
+      - name: Verify updater archive
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/check"
+          mkdir -p "${RUNNER_TEMP}/check"
+          tar -xzf target/release/bundle/macos/Dive.app.tar.gz -C "${RUNNER_TEMP}/check"
+          codesign --verify --deep --strict --verbose=2 "${RUNNER_TEMP}/check/Dive.app"
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            spctl -a -vv "${RUNNER_TEMP}/check/Dive.app"
+          else
+            echo "No Apple signing certificate configured; skipping the Gatekeeper check."
+          fi
 
       # Tauri writes the disk image with zlib; the same image packed with LZMA
       # is about a quarter smaller and nothing is removed. The script re-signs
@@ -231,46 +259,31 @@ jobs:
           [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::Expected one DMG, found ${#dmgs[@]}."; exit 1; }
           scripts/release/compress-dmg.sh "${dmgs[0]}"
 
-      # Fails when the signature or the archive is missing, instead of writing
-      # a manifest with an empty field that only breaks on a user's machine.
-      - name: Build update manifest
-        env:
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
+      - name: Stage unsigned outputs
         run: |
           set -euo pipefail
           shopt -s nullglob
           mkdir -p out
           cp target/release/bundle/dmg/*.dmg out/
-          cp target/release/bundle/macos/*.tar.gz out/
-          cp target/release/bundle/macos/*.tar.gz.sig out/
+          cp target/release/bundle/macos/Dive.app.tar.gz out/
 
-          # Exactly one of each: more than one archive means the bundle step
-          # produced something unexpected, and picking the first would decide
-          # at random which build users receive.
+          # Exactly one archive: picking the first of several would decide at
+          # random which build users receive.
           archives=(out/*.tar.gz)
-          signatures=(out/*.tar.gz.sig)
-          if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
-            echo "::error::Expected one updater archive and one signature," \
-                 "found ${#archives[@]} and ${#signatures[@]}."
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive, found ${#archives[@]}."
             exit 1
           fi
 
-          node scripts/release/update-manifest.mjs build \
-            --version "${RELEASE_VERSION}" \
-            --target aarch64-apple-darwin \
-            --archive "${archives[0]}" \
-            --signature-file "${signatures[0]}" \
-            --notes "${RELEASE_NAME}" \
-            --base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
-            --out out/manifest-aarch64-apple-darwin.json
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: macos-aarch64
+          name: unsigned-macos-aarch64
           path: out/*
           if-no-files-found: error
+
+      - name: Delete the build keychain
+        if: always()
+        run: security delete-keychain build.keychain || true
 
   build-windows:
     name: Build Windows (x86_64)
@@ -344,22 +357,107 @@ jobs:
       - name: Build app and updater artifacts
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           DIVE_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ] || [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+          # The private key is not in this job. The sign-windows job signs the
+          # installer this step produces.
+          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ]; then
+            echo "::error::Updater public key is not configured." \
+                 "Set TAURI_SIGNING_PUBLIC_KEY" \
+                 "(see scripts/release/setup-signing-secrets.sh)."
+            exit 1
+          fi
+          pnpm --filter @dive/desktop exec tauri build --bundles nsis \
+            --config src-tauri/tauri.no-updater.conf.json \
+            --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+
+      - name: Stage unsigned outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p out
+          # The installer is both what a person downloads and what the updater
+          # downloads; the sign-windows job signs it in place of a separate
+          # archive.
+          cp target/release/bundle/nsis/*-setup.exe out/
+
+          archives=(out/*-setup.exe)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected one installer, found ${#archives[@]}."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-windows-x86_64
+          path: out/*
+          if-no-files-found: error
+
+
+  sign-macos:
+    name: Sign updater archive (macOS)
+    needs: [preflight, build]
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            /scripts/release/
+            /apps/desktop/package.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-macos-aarch64
+          path: out
+
+      # Only the signer, at the version the repo builds with, in a temp prefix:
+      # no project dependency is installed next to the key.
+      - name: Install the signer
+        run: |
+          set -euo pipefail
+          v=$(node -p "require('./apps/desktop/package.json').devDependencies['@tauri-apps/cli-cef']")
+          npm install --no-save --no-audit --no-fund --prefix "${RUNNER_TEMP}/signer" "@tauri-apps/cli-cef@$v"
+          "${RUNNER_TEMP}/signer/node_modules/.bin/tauri" signer sign --help > /dev/null
+
+      # The only step in this workflow with the updater key in its environment.
+      - name: Sign updater archive
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             echo "::error::Updater signing keys are not configured." \
                  "Set TAURI_SIGNING_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY" \
                  "(see scripts/release/setup-signing-secrets.sh)."
             exit 1
           fi
-          pnpm --filter @dive/desktop exec tauri build --bundles nsis \
-            --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+          archives=(out/*.tar.gz)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive, found ${#archives[@]}."
+            exit 1
+          fi
+          "${RUNNER_TEMP}/signer/node_modules/.bin/tauri" signer sign "${archives[0]}"
+          signatures=(out/*.tar.gz.sig)
+          if [ "${#signatures[@]}" -ne 1 ] || [ ! -s "${signatures[0]}" ]; then
+            echo "::error::Expected one non-empty signature, found ${#signatures[@]}."
+            exit 1
+          fi
 
+      # Fails when the signature or the archive is missing, instead of writing
+      # a manifest with an empty field that only breaks on a user's machine.
       - name: Build update manifest
-        shell: bash
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
@@ -367,13 +465,98 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          mkdir -p out
-          # The installer is both what a person downloads and what the updater
-          # downloads: the bundler signs -setup.exe rather than producing a
-          # separate archive beside it.
-          cp target/release/bundle/nsis/*-setup.exe out/
-          cp target/release/bundle/nsis/*-setup.exe.sig out/
+          archives=(out/*.tar.gz)
+          signatures=(out/*.tar.gz.sig)
+          if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive and one signature," \
+                 "found ${#archives[@]} and ${#signatures[@]}."
+            exit 1
+          fi
 
+          node scripts/release/update-manifest.mjs build \
+            --version "${RELEASE_VERSION}" \
+            --target aarch64-apple-darwin \
+            --archive "${archives[0]}" \
+            --signature-file "${signatures[0]}" \
+            --notes "${RELEASE_NAME}" \
+            --base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
+            --out out/manifest-aarch64-apple-darwin.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-aarch64
+          path: out/*
+          if-no-files-found: error
+
+  sign-windows:
+    name: Sign updater installer (Windows)
+    needs: [preflight, build-windows]
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: |
+            /scripts/release/
+            /apps/desktop/package.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-windows-x86_64
+          path: out
+
+      # Only the signer, at the version the repo builds with, in a temp prefix:
+      # no project dependency is installed next to the key.
+      - name: Install the signer
+        run: |
+          set -euo pipefail
+          v=$(node -p "require('./apps/desktop/package.json').devDependencies['@tauri-apps/cli-cef']")
+          npm install --no-save --no-audit --no-fund --prefix "${RUNNER_TEMP}/signer" "@tauri-apps/cli-cef@$v"
+          "${RUNNER_TEMP}/signer/node_modules/.bin/tauri" signer sign --help > /dev/null
+
+      # The only step in this workflow with the updater key in its environment.
+      - name: Sign updater archive
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::Updater signing keys are not configured." \
+                 "Set TAURI_SIGNING_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY" \
+                 "(see scripts/release/setup-signing-secrets.sh)."
+            exit 1
+          fi
+          archives=(out/*-setup.exe)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive, found ${#archives[@]}."
+            exit 1
+          fi
+          "${RUNNER_TEMP}/signer/node_modules/.bin/tauri" signer sign "${archives[0]}"
+          signatures=(out/*-setup.exe.sig)
+          if [ "${#signatures[@]}" -ne 1 ] || [ ! -s "${signatures[0]}" ]; then
+            echo "::error::Expected one non-empty signature, found ${#signatures[@]}."
+            exit 1
+          fi
+
+      # Fails when the signature or the archive is missing, instead of writing
+      # a manifest with an empty field that only breaks on a user's machine.
+      - name: Build update manifest
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
           archives=(out/*-setup.exe)
           signatures=(out/*-setup.exe.sig)
           if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
@@ -397,10 +580,9 @@ jobs:
           path: out/*
           if-no-files-found: error
 
-
   release:
     name: Publish release
-    needs: [preflight, build, build-windows]
+    needs: [preflight, sign-macos, sign-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
