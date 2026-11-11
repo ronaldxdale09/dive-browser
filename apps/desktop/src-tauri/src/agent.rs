@@ -139,8 +139,13 @@ pub struct Run {
     tag: String,
     /// Sites this run has read private data from -- cookies, a response
     /// body, the console -- oldest first. Once there is one, carrying text to
-    /// any other site is put to the person (see [`crate::agent_risk`]).
+    /// any other site is put to the person in every mode (see
+    /// [`crate::agent_risk`]).
     tainted: Mutex<Vec<String>>,
+    /// Sites whose pages this run has read in the person's own tabs. The
+    /// softer mark: carrying text to another site afterwards asks in the
+    /// default mode only.
+    seen: Mutex<Vec<String>>,
 }
 
 impl Run {
@@ -172,6 +177,19 @@ impl Run {
     /// Sites this run holds private data of.
     fn tainted(&self) -> Vec<String> {
         lock(&self.tainted).clone()
+    }
+
+    /// Remember that this run has read a page of `site` in the person's tabs.
+    fn saw(&self, site: String) {
+        let mut seen = lock(&self.seen);
+        if !seen.contains(&site) {
+            seen.push(site);
+        }
+    }
+
+    /// Sites whose pages this run has read in the person's tabs.
+    fn seen(&self) -> Vec<String> {
+        lock(&self.seen).clone()
     }
 
     fn cancel(&self) {
@@ -1318,6 +1336,22 @@ async fn run_calls(
         {
             run.taint(site);
         }
+        // Reading a page of the person's own leaves a softer mark. Pages the
+        // run opened itself, and everything in a clean session, are ones it
+        // chose or that hold nothing of the person's.
+        if ran
+            && !result.is_error
+            && crate::agent_risk::reads_page(&call.name)
+            && run.scope.context().is_none()
+            && let Some(tab) = crate::agent_tools::call_tab(tab_id, &call.input)
+            && !run.scope.opened().contains(&tab)
+            && let Some(site) = lock(&state.store)
+                .tab(tab)
+                .ok()
+                .and_then(|row| crate::site::of(&row.url))
+        {
+            run.saw(site);
+        }
         // The row's summary is the tool's own first line, taken before the
         // fence goes round it.
         let summary = match &result.content {
@@ -1498,12 +1532,14 @@ fn step_for(
         (locator, target) => locator.or(target).map(str::to_owned),
     };
     let tainted = run.tainted();
+    let seen = run.seen();
     let caution = crate::agent_risk::judge(&crate::agent_risk::Step {
         tool: &call.name,
         input: &call.input,
         target: aimed_at.as_deref(),
         url: &url,
         tainted: &tainted,
+        seen: &seen,
     });
     ToolStep {
         id: run.step_id(&call.id),
@@ -1884,6 +1920,18 @@ mod tests {
         run.taint("bank.example".into());
         run.taint("mail.example".into());
         assert_eq!(run.tainted(), ["mail.example", "bank.example"]);
+    }
+
+    #[test]
+    fn a_run_remembers_each_page_it_read_once() {
+        let run = Run::new("r");
+        assert!(run.seen().is_empty());
+        run.saw("mail.example".into());
+        run.saw("docs.example.org".into());
+        run.saw("mail.example".into());
+        assert_eq!(run.seen(), ["mail.example", "docs.example.org"]);
+        // The firm mark is a separate list.
+        assert!(run.tainted().is_empty());
     }
 
     #[test]

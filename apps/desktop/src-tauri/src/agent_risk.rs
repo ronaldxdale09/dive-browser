@@ -24,6 +24,13 @@
 //! than change a page. Reading a site's cookies or a server's response is
 //! one of them, because what was read can leave with the next step -- and so
 //! once a run has read something private, taking it anywhere else is another.
+//!
+//! That mark comes in two strengths. A firm one, left by cookies, response
+//! bodies and the console, asks in every mode. A soft one, left by reading
+//! the pages of the person's own tabs, asks only in the default mode: those
+//! reads happen in nearly every run, and asking about them in every mode
+//! would turn "allow all" off in practice. Leaving the public web for the
+//! local network asks in the default mode as well.
 
 use serde_json::Value;
 
@@ -78,6 +85,25 @@ const SENSITIVE_READS: &[(&str, &str)] = &[
 /// not follow it elsewhere. The two above, and the console, where pages log
 /// tokens and responses more often than they should.
 const TAINTING: &[&str] = &["page_storage", "network_body", "console_tail"];
+
+/// Reads of a page's content. A run that has read the person's own tabs with
+/// one of these is holding something that may be private, but far less often
+/// than after a [`TAINTING`] read, so carrying text to another site afterwards
+/// is asked about in the default mode only (the soft mark, [`Step::seen`]),
+/// not in every mode (the firm mark, [`Step::tainted`]).
+const READS_PAGE: &[&str] = &[
+    "page_inspect",
+    "page_text",
+    "page_markdown",
+    "page_snapshot",
+    "page_diff",
+    "page_screenshot",
+    "page_state",
+    "page_locate",
+    "page_component",
+    "page_report",
+    "network_list",
+];
 
 /// Steps that carry text somewhere: the address of a page, or what is typed
 /// into one. After a tainting read, these are the ways out.
@@ -218,6 +244,8 @@ pub struct Step<'a> {
     pub url: &'a str,
     /// Sites this run has read private data from (see [`taints`]).
     pub tainted: &'a [String],
+    /// Sites whose pages this run has read in the person's own tabs.
+    pub seen: &'a [String],
 }
 
 /// Why the user is being asked, or `None` when the step may just run.
@@ -233,6 +261,7 @@ pub fn caution(tool: &str, input: &Value, locator: Option<&str>, url: &str) -> O
         target: locator,
         url,
         tainted: &[],
+        seen: &[],
     })
     .map(|c| c.why)
 }
@@ -248,13 +277,16 @@ pub fn judge(step: &Step<'_>) -> Option<Caution> {
     if let Some((_, why)) = SENSITIVE_READS.iter().find(|(name, _)| *name == tool) {
         return Some(Caution::always(*why));
     }
-    if let Some(why) = carries_taint(step) {
+    if let Some(why) = carries_taint(step, step.tainted, true) {
         return Some(Caution::always(why));
+    }
+    if let Some(why) = carries_taint(step, step.seen, false) {
+        return Some(Caution::costly(why));
     }
     if !crate::agent_tools::is_action(tool) {
         return None;
     }
-    if let Some(why) = navigation_caution(tool, input) {
+    if let Some(why) = navigation_caution(step) {
         return Some(Caution::costly(why));
     }
     if let Some((_, why)) = LEAVES_A_FILE.iter().find(|(name, _)| *name == tool) {
@@ -282,6 +314,12 @@ pub fn taints(tool: &str) -> bool {
     TAINTING.contains(&tool)
 }
 
+/// Whether `tool` reads the page's content, which leaves a soft mark on a
+/// run working in the person's own tabs (see [`Step::seen`]).
+pub fn reads_page(tool: &str) -> bool {
+    READS_PAGE.contains(&tool)
+}
+
 /// Where a step would carry text, as a site: the page an address leads to,
 /// or the page being typed into. `None` when that cannot be told -- a search
 /// term, an address that does not parse -- which counts as somewhere else.
@@ -301,43 +339,76 @@ fn destination(step: &Step<'_>) -> Option<String> {
     }
 }
 
-/// The question to ask when a run that read one site's private data is about
-/// to carry text to another.
-fn carries_taint(step: &Step<'_>) -> Option<String> {
-    if step.tainted.is_empty() || !CARRIES_TEXT.contains(&step.tool) {
+/// The question to ask when a run that read `sites` is about to carry text to
+/// another. `strong` marks private data (cookies, responses, the console);
+/// otherwise the run has only read the person's pages.
+fn carries_taint(step: &Step<'_>, sites: &[String], strong: bool) -> Option<String> {
+    if sites.is_empty() || !CARRIES_TEXT.contains(&step.tool) {
         return None;
     }
     let to = destination(step);
-    if to.as_ref().is_some_and(|to| step.tainted.contains(to)) {
+    if to.as_ref().is_some_and(|to| sites.contains(to)) {
         return None;
     }
-    let from = step.tainted.join(", ");
+    let from = sites.join(", ");
+    let read = if strong {
+        format!("private data from {from}")
+    } else {
+        from
+    };
     Some(match to {
-        Some(to) => format!(
-            "this run has read private data from {from}, and this step would carry text to {to}"
-        ),
-        None => format!(
-            "this run has read private data from {from}, and this step would carry text somewhere else"
-        ),
+        Some(to) => format!("this run has read {read}, and this step would carry text to {to}"),
+        None => format!("this run has read {read}, and this step would carry text somewhere else"),
     })
 }
 
 /// Navigating is ordinary; navigating out of the web is not. `javascript:`
 /// runs code in the page and `file:` reaches the disk, neither of which the
-/// typed tools would otherwise let the model do.
-fn navigation_caution(tool: &str, input: &Value) -> Option<String> {
-    if tool != "tab_navigate" {
+/// typed tools would otherwise let the model do. Nor is going from a public
+/// page to the local network: that is how a page reaches a router, a
+/// metadata service or a dev server it has no business with.
+fn navigation_caution(step: &Step<'_>) -> Option<String> {
+    if !matches!(step.tool, "tab_navigate" | "tab_open") {
         return None;
     }
-    let url = input["url"].as_str()?.trim().to_ascii_lowercase();
-    let scheme = url.split(':').next().unwrap_or_default();
-    match scheme {
-        "http" | "https" | "about" | "" => None,
-        "javascript" => {
-            Some("this runs code in the page rather than opening an address".to_owned())
+    let given = step.input["url"].as_str()?.trim();
+    if step.tool == "tab_navigate" {
+        let lower = given.to_ascii_lowercase();
+        let scheme = lower.split(':').next().unwrap_or_default();
+        match scheme {
+            "http" | "https" | "about" | "" => {}
+            "javascript" => {
+                return Some(
+                    "this runs code in the page rather than opening an address".to_owned(),
+                );
+            }
+            other => return Some(format!("this leaves the web for a {other}: address")),
         }
-        other => Some(format!("this leaves the web for a {other}: address")),
     }
+    let to = parse_destination(given)?;
+    if !crate::netfetch::names_local_host(&to) {
+        return None;
+    }
+    let from = url::Url::parse(step.url).ok()?;
+    if !matches!(from.scheme(), "http" | "https") || crate::netfetch::names_local_host(&from) {
+        return None;
+    }
+    let site = crate::site::of(step.url).unwrap_or_else(|| "the web".to_owned());
+    Some(format!(
+        "this leaves {site} for an address on your computer or local network"
+    ))
+}
+
+/// The address a navigation input leads to; a bare host is opened over https.
+fn parse_destination(given: &str) -> Option<url::Url> {
+    url::Url::parse(given)
+        .ok()
+        .filter(|u| u.host().is_some())
+        .or_else(|| {
+            (!given.contains(char::is_whitespace))
+                .then(|| url::Url::parse(&format!("https://{given}")).ok())
+                .flatten()
+        })
 }
 
 /// Tools that put a value into a field.
@@ -582,6 +653,19 @@ mod tests {
             target: None,
             url,
             tainted: &tainted,
+            seen: &[],
+        })
+    }
+
+    fn judged_seen(tool: &str, input: &Value, url: &str, seen: &[&str]) -> Option<Caution> {
+        let seen: Vec<String> = seen.iter().map(|s| (*s).to_owned()).collect();
+        judge(&Step {
+            tool,
+            input,
+            target: None,
+            url,
+            tainted: &[],
+            seen: &seen,
         })
     }
 
@@ -723,6 +807,7 @@ mod tests {
             target: Some("button \"Delete account\""),
             url: ORDINARY,
             tainted: &[],
+            seen: &[],
         });
         assert!(clicked.is_some());
         let pressed = judge(&Step {
@@ -731,6 +816,7 @@ mod tests {
             target: Some("button \"Send payment\""),
             url: ORDINARY,
             tainted: &[],
+            seen: &[],
         });
         assert!(pressed.is_some());
         let typed = judge(&Step {
@@ -739,6 +825,7 @@ mod tests {
             target: Some("textbox \"Password\""),
             url: ORDINARY,
             tainted: &[],
+            seen: &[],
         });
         assert!(typed.is_some());
     }
@@ -749,5 +836,150 @@ mod tests {
         assert!(caution("page_fill_form", &input, None, ORDINARY).is_some());
         let plain = json!({"fields": [{"locator": "css=#email", "value": "a@b.c"}]});
         assert_eq!(caution("page_fill_form", &plain, None, ORDINARY), None);
+    }
+
+    #[test]
+    fn every_page_read_named_here_is_a_real_tool() {
+        let specs = crate::agent_tools::specs();
+        for name in READS_PAGE {
+            assert!(
+                specs.iter().any(|s| s.name == *name),
+                "{name} is not a tool"
+            );
+            assert!(!TAINTING.contains(name), "{name} is already firm");
+            assert!(!crate::agent_tools::is_action(name), "{name} is an action");
+            assert!(reads_page(name));
+        }
+    }
+
+    #[test]
+    fn after_reading_the_persons_page_carrying_text_elsewhere_asks_in_the_default_mode() {
+        let seen = ["mail.example"];
+        let away = judged_seen(
+            "tab_navigate",
+            &json!({"url": "https://docs.example.org/"}),
+            "https://mail.example/inbox",
+            &seen,
+        )
+        .expect("carrying text away must ask");
+        assert!(!away.always);
+        assert!(away.why.contains("mail.example"), "{}", away.why);
+        assert!(away.why.contains("example.org"), "{}", away.why);
+        assert!(!away.why.contains("private data"), "{}", away.why);
+        let typed = judged_seen(
+            "page_type",
+            &json!({"locator": "role=searchbox", "text": "x"}),
+            "https://forum.example.org/new",
+            &seen,
+        )
+        .expect("typing elsewhere must ask");
+        assert!(!typed.always);
+    }
+
+    #[test]
+    fn staying_on_a_read_site_is_the_work_itself() {
+        assert_eq!(
+            judged_seen(
+                "tab_navigate",
+                &json!({"url": "https://app.mail.example/settings"}),
+                "https://mail.example/inbox",
+                &["mail.example"],
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_firm_taint_still_asks_in_every_mode_when_both_are_present() {
+        let tainted = vec!["bank.example".to_owned()];
+        let seen = vec!["mail.example".to_owned()];
+        let caution = judge(&Step {
+            tool: "tab_navigate",
+            input: &json!({"url": "https://docs.example.org/"}),
+            target: None,
+            url: "https://mail.example/inbox",
+            tainted: &tainted,
+            seen: &seen,
+        })
+        .unwrap();
+        assert!(caution.always);
+        assert!(caution.why.contains("private data"), "{}", caution.why);
+    }
+
+    #[test]
+    fn leaving_the_web_for_the_local_network_asks() {
+        let page = "https://docs.example.org/";
+        for tool in ["tab_navigate", "tab_open"] {
+            for url in [
+                "http://localhost:3000/",
+                "http://127.0.0.1/",
+                "http://10.0.0.5/",
+                "http://169.254.169.254/",
+                "http://[::1]/",
+                "localhost:8080",
+            ] {
+                let caution = judged(tool, &json!({"url": url}), page, &[])
+                    .unwrap_or_else(|| panic!("{tool} {url} ran unasked"));
+                assert!(!caution.always, "{tool} {url}");
+                // `tab_navigate` already treats a bare `host:port` as a
+                // scheme of its own and asks for that reason.
+                if !(tool == "tab_navigate" && url == "localhost:8080") {
+                    assert!(caution.why.contains("example.org"), "{}", caution.why);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn local_work_stays_quiet() {
+        let local = json!({"url": "http://127.0.0.1:5173/other"});
+        assert_eq!(
+            judged("tab_navigate", &local, "http://localhost:5173/", &[]),
+            None
+        );
+        for blank in ["about:blank", ""] {
+            assert_eq!(
+                judged(
+                    "tab_open",
+                    &json!({"url": "http://localhost:3000"}),
+                    blank,
+                    &[]
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            judged(
+                "tab_navigate",
+                &json!({"url": "https://forum.example.org/"}),
+                "https://docs.example.org/",
+                &[]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ordinary_research_stays_quiet_without_a_read() {
+        let page = "https://docs.example.org/";
+        let scenarios = [
+            (
+                "tab_open",
+                json!({"url": "https://search.example/?q=tauri"}),
+            ),
+            (
+                "tab_navigate",
+                json!({"url": "https://forum.example.org/t/1"}),
+            ),
+            (
+                "page_type",
+                json!({"locator": "role=searchbox", "text": "tauri"}),
+            ),
+            ("page_text", json!({})),
+            ("page_snapshot", json!({})),
+        ];
+        for (tool, input) in &scenarios {
+            assert_eq!(judged(tool, input, page, &[]), None, "{tool} {input}");
+        }
     }
 }
