@@ -13,6 +13,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import { Stage } from "./Stage";
 import { Timeline } from "./Timeline";
 import { useEditor } from "./store";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * DiveScreen: the editor for a finished recording, in a tab of its own.
@@ -105,7 +106,7 @@ function TopBar({ onExport }: { onExport: () => void }) {
     <div className="flex h-12 shrink-0 items-center gap-1 px-4">
       <span className="mr-3 text-13 font-semibold tracking-tight">DiveScreen</span>
       <Bar icon={Video} label="Return to recorder" onClick={() => openSetup()} />
-      <Bar icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => source && void ipc.downloadsReveal(source).catch(() => undefined)} />
+      <Bar icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => source && void ipc.downloadsReveal(source).catch(ignored("reveal download"))} />
       <OpenVideoButton />
       <Bar icon={Save} label={dirty ? "Save Project" : "Saved"} onClick={() => void save()} />
       <span className="flex-1" />

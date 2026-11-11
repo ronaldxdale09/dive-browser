@@ -10,6 +10,7 @@ import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
 import { AgentIcon } from "./agent/AgentIcon";
 import { displayChord } from "../lib/commands";
+import { ignored } from "../lib/chromeErrors";
 
 // Load the tour only after an explicit request, never on recurring empty tabs.
 const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ default: module.FeatureReel })));
@@ -150,24 +151,24 @@ function ActiveDevServers() {
     let live = true;
     // Detection is a nicety; a host that cannot watch must not leave an
     // unhandled rejection behind every visit to the start page.
-    void ipc.devServersWatch(true).catch(() => undefined);
+    void ipc.devServersWatch(true).catch(ignored("dev servers watch"));
     void ipc
       .devServers()
       .then((list) => {
         if (live) setServers(list);
       })
-      .catch(() => undefined);
+      .catch(ignored("dev servers listen"));
     void events.devServersChanged
       .listen((e) => setServers(e.payload.servers))
       .then((u) => {
         if (live) unlisten = u;
         else u();
       })
-      .catch(() => undefined);
+      .catch(ignored("dev servers listen"));
     return () => {
       live = false;
       unlisten?.();
-      void ipc.devServersWatch(false).catch(() => undefined);
+      void ipc.devServersWatch(false).catch(ignored("dev servers unwatch"));
     };
   }, []);
 

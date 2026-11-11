@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { TabAudio } from "../lib/ipc";
 import { onTabClosed } from "./browser";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Which tabs are making a sound, and which have been silenced.
@@ -49,7 +50,7 @@ export const useTabAudio = create<TabAudioStore>((set, get) => ({
   setMuted: async (tabId, muted) => {
     // Answer the click at once; the host's own report confirms it.
     set((s) => ({ byTab: { ...s.byTab, [tabId]: { tab_id: tabId, audible: s.byTab[tabId]?.audible ?? false, muted } } }));
-    await ipc.tabSetMuted(tabId, muted).catch(() => undefined);
+    await ipc.tabSetMuted(tabId, muted).catch(ignored("tab mute"));
   },
   toggle: async (tabId) => {
     await get().setMuted(tabId, !get().byTab[tabId]?.muted);

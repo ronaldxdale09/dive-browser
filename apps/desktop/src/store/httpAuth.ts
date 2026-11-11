@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { HttpAuthAsked } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
+import { errorKind, errorMessage } from "../lib/errors";
 import { useBrowser } from "./browser";
 
 /**
@@ -91,7 +91,7 @@ export const useHttpAuth = create<HttpAuthStore>((set, get) => {
       try {
         await ipc.httpAuthAnswer(asked.tab_id, asked.request_id, username, username === null ? null : password);
       } catch (e) {
-        if (!/no longer waiting/i.test(errorMessage(e))) {
+        if (errorKind(e)?.type !== "gone") {
           useBrowser.setState({ error: errorMessage(e) });
         }
       }

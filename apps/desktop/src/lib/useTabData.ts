@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
-import { errorMessage } from "./errors";
+import { errorKind, errorMessage } from "./errors";
 
 /**
  * A read that failed only because the page was mid-navigation when the
  * inspector asked. The page will be there a moment later, so it is worth
  * one more try before anything is shown.
  */
-export function isTransientReadError(message: string): boolean {
-  return /navigated or closed|Not attached to an active page|target closed|session closed/i.test(message);
+export function isTransientReadError(e: unknown): boolean {
+  if (errorKind(e)?.type === "navigation_race") return true;
+  // Failures the host gave no kind keep the old reading of their words.
+  return /navigated or closed|Not attached to an active page|target closed|session closed/i.test(errorMessage(e));
 }
 
 /** What the panels say instead of a raw protocol error. */
-export function readErrorText(message: string): string {
-  return isTransientReadError(message) ? "The page was still loading when it was read." : message;
+export function readErrorText(e: unknown): string {
+  return isTransientReadError(e) ? "The page was still loading when it was read." : errorMessage(e);
 }
 
 const RETRY_MS = 700;
@@ -39,12 +41,11 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
         .then((d) => alive && setAnswer({ tabId, url, data: d, error: null }))
         .catch((e: unknown) => {
           if (!alive) return;
-          const message = errorMessage(e);
-          if (again && isTransientReadError(message)) {
+          if (again && isTransientReadError(e)) {
             retry = setTimeout(() => void read(false), RETRY_MS);
             return;
           }
-          setAnswer((old) => ({ tabId, url, data: old.tabId === tabId && old.url === url ? old.data : null, error: readErrorText(message) }));
+          setAnswer((old) => ({ tabId, url, data: old.tabId === tabId && old.url === url ? old.data : null, error: readErrorText(e) }));
         });
     const t = setTimeout(() => void read(true), delayMs);
     return () => {

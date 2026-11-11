@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { events } from "../generated/bindings";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Which tabs an agent is driving right now.
@@ -47,5 +48,5 @@ export function listenForAgentPresence() {
   // is the right answer there.
   void events.agentPresence
     .listen((e) => useAgentPresence.getState().set(e.payload.tab_id, e.payload.driving))
-    .catch(() => undefined);
+    .catch(ignored("agent presence listen"));
 }

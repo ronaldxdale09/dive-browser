@@ -12,6 +12,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
 import { leadsTo, looksLikeUrl, opensInAnotherApp, titleOf } from "../lib/omnibox";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -137,7 +138,7 @@ export function Palette() {
     });
     return () => {
       alive = false;
-      void ipc.devServersWatch(false).catch(() => undefined);
+      void ipc.devServersWatch(false).catch(ignored("dev servers unwatch"));
       void listener.then((unlisten) => unlisten());
     };
   }, []);

@@ -1174,10 +1174,19 @@ export type AgentThread = {
 	updated_at: string,
 };
 
-/**  A failure reported to the chrome as a plain message. */
+/**
+ *  A failure reported to the chrome: a message, and a kind where the chrome
+ *  has to act on what happened rather than show it.
+ */
 export type AppError = {
 	/**  Human-readable description. */
 	message: string,
+	/**
+	 *  `None` for most errors; set where the chrome needs to act on the kind.
+	 *  (Not skipped when empty: `skip_serializing_if` makes specta emit a
+	 *  separate `AppError_Serialize` and rewrites every command signature.)
+	 */
+	kind: ErrorKind | null,
 };
 
 /**  Facts the Settings dialog shows. */
@@ -1911,6 +1920,20 @@ export type Environment = {
 	/**  ICU locale such as `ja_JP`; none clears the override. */
 	locale: string | null,
 };
+
+/**  What kind of failure, for the chrome to act on without reading the words. */
+export type ErrorKind =
+/**
+ *  The thing asked about no longer exists or no longer waits (a closed
+ *  dialog, an answered sign-in).
+ */
+{ type: "gone" } |
+/**  The page was mid-navigation; one retry is reasonable. */
+{ type: "navigation_race" } |
+/**  A typed value was refused; `field` names which one. */
+{ type: "invalid";
+/**  The input the refusal is about. */
+field: string };
 
 /**  What the editor asks for when it hands over its rendered frames. */
 export type ExportRequest = {

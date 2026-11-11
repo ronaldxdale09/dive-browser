@@ -44,7 +44,7 @@ describe("WorkspaceDialog", () => {
       () =>
         new Promise<boolean>((resolve) => {
           refuse = () => {
-            useBrowser.setState({ error: "workspace name is taken" });
+            useBrowser.setState({ error: "workspace name is taken", errorField: "name" });
             resolve(false);
           };
         }),
@@ -65,5 +65,29 @@ describe("WorkspaceDialog", () => {
     expect(name.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
     expect(document.activeElement).toBe(name);
     expect(useBrowser.getState().editing).toEqual({ id: null });
+  });
+
+  it("marks the name from the field the host named, not from the words of the reason", async () => {
+    const refuse = (error: string, errorField: string | null) =>
+      vi.fn(async () => {
+        useBrowser.setState({ error, errorField });
+        return false;
+      });
+    useBrowser.setState({ workspaces: [ws("home", "c1")], editing: { id: null }, createWorkspace: refuse("pick something shorter", "name") });
+    render(<WorkspaceDialog />);
+    fireEvent.change(screen.getByPlaceholderText(/Client, Side project/), { target: { value: "Client" } });
+    fireEvent.submit(screen.getByRole("dialog", { name: "New workspace" }));
+    await screen.findByRole("alert");
+    const name = screen.getByPlaceholderText(/Client, Side project/);
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(name);
+    cleanup();
+    // The word "name" in a reason with no field is no longer enough.
+    useBrowser.setState({ editing: { id: null }, createWorkspace: refuse("the name of the engine failed", null) });
+    render(<WorkspaceDialog />);
+    fireEvent.change(screen.getByPlaceholderText(/Client, Side project/), { target: { value: "Client" } });
+    fireEvent.submit(screen.getByRole("dialog", { name: "New workspace" }));
+    await screen.findByRole("alert");
+    expect(screen.getByPlaceholderText(/Client, Side project/).getAttribute("aria-invalid")).toBeNull();
   });
 });

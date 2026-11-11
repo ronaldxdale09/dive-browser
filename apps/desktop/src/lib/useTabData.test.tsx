@@ -21,6 +21,14 @@ describe("useTabData", () => {
     expect(readErrorText("boom")).toBe("boom");
   });
 
+  it("reads the host's kind first, whatever words the failure has", () => {
+    const raced = Object.assign(new Error("something unrelated"), { kind: { type: "navigation_race" } });
+    expect(isTransientReadError(raced)).toBe(true);
+    expect(readErrorText(raced)).toBe("The page was still loading when it was read.");
+    // A kind that is not a race does not become one because of its words.
+    expect(isTransientReadError(Object.assign(new Error("boom"), { kind: { type: "gone" } }))).toBe(false);
+  });
+
   it("tries once more after a transient failure and then shows the answer", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn<(id: string) => Promise<string>>().mockRejectedValueOnce(new Error("cdp error -32000: Inspected target navigated or closed")).mockResolvedValueOnce("Example Domain");
@@ -29,6 +37,22 @@ describe("useTabData", () => {
       await vi.advanceTimersByTimeAsync(10);
     });
     // Still reading: the raw protocol error never reaches the panel.
+    expect(screen.getByText("reading")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Example Domain")).toBeTruthy();
+  });
+
+  it("retries on the host's kind alone, whatever words the failure has", async () => {
+    vi.useFakeTimers();
+    const raced = Object.assign(new Error("the page changed under us"), { kind: { type: "navigation_race" } });
+    const fetcher = vi.fn<(id: string) => Promise<string>>().mockRejectedValueOnce(raced).mockResolvedValueOnce("Example Domain");
+    render(<Probe tab="t1" fetcher={fetcher} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
     expect(screen.getByText("reading")).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(800);

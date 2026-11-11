@@ -12,6 +12,7 @@ import { usePrefs } from "../store/prefs";
 import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { Switch } from "./SettingsFields";
+import { ignored } from "../lib/chromeErrors";
 
 /** DivePrivacy status and recovery controls for the active page. */
 export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) {
@@ -60,7 +61,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
             : `${total} privacy actions so far`;
 
   useEffect(() => {
-    if (open && !info) void loadInfo().catch(() => undefined);
+    if (open && !info) void loadInfo().catch(ignored("protection info"));
   }, [info, loadInfo, open]);
 
   useEffect(() => {

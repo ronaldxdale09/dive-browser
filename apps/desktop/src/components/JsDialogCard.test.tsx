@@ -86,7 +86,7 @@ describe("JsDialogCard", () => {
   });
 
   it("stays quiet when the dialog was already answered elsewhere", async () => {
-    vi.spyOn(ipc, "jsDialogAnswer").mockRejectedValue(new Error("that dialog is no longer open"));
+    vi.spyOn(ipc, "jsDialogAnswer").mockRejectedValue(Object.assign(new Error("that dialog is no longer open"), { kind: { type: "gone" } }));
     useJsDialog.setState({ byTab: { t1: [confirm] } });
     render(<JsDialogCard tabId="t1" />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

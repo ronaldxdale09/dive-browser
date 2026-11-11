@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installChromeErrorReporting, reportChromeError, resetChromeErrorReporting } from "./chromeErrors";
+import { ignored, installChromeErrorReporting, reportChromeError, resetChromeErrorReporting } from "./chromeErrors";
 import { ipc } from "./ipc";
 
 afterEach(() => {
@@ -13,6 +13,12 @@ describe("chrome error reporting", () => {
     const error = new Error("boom");
     reportChromeError("render", error, "in <Settings>");
     expect(logged).toHaveBeenCalledWith("render", "boom", expect.stringContaining("in <Settings>"));
+  });
+
+  it("keeps a trace of a swallowed failure under an ignored kind", async () => {
+    const logged = vi.spyOn(ipc, "logChromeError").mockResolvedValue(undefined);
+    await expect(Promise.reject(new Error("no bridge")).catch(ignored("chrome ready"))).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalledWith("ignored: chrome ready", "no bridge", expect.anything());
   });
 
   it("forwards uncaught errors and unhandled rejections, once however often it is installed", () => {

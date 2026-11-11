@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Where the last update check landed. `idle` before any check; `none` when the
@@ -141,7 +142,7 @@ export function listenForUpdateProgress() {
   listening = true;
   void events
     .updateProgress.listen((e) => reportUpdateProgress(e.payload))
-    .catch(() => undefined);
+    .catch(ignored("update progress listen"));
 }
 
 /** Delay before the first automatic check after launch, so it never competes with startup. */

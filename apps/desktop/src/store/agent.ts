@@ -5,6 +5,7 @@ import type { FailureKind } from "../generated/bindings";
 import { usePrefs } from "./prefs";
 import { useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
+import { ignored } from "../lib/chromeErrors";
 
 export interface Step {
   id: string;
@@ -485,11 +486,11 @@ export const useAgent = create<AgentState>((set, get) => ({
   stop: async () => {
     const { runId } = get();
     if (!runId) return;
-    await ipc.agentStop(runId).catch(() => undefined);
+    await ipc.agentStop(runId).catch(ignored("agent stop"));
   },
   approve: async (id, allow) => {
     set((s) => ({ messages: s.messages.map((m) => (m.steps ? { ...m, steps: m.steps.map((st) => (st.id === id ? { ...st, awaiting: false } : st)) } : m)) }));
-    await ipc.agentApprove(id, allow).catch(() => undefined);
+    await ipc.agentApprove(id, allow).catch(ignored("agent approve"));
   },
   setSessionAutoApprove: (sessionAutoApprove) => set({ sessionAutoApprove }),
   setCleanSession: (cleanSession) => set({ cleanSession }),
@@ -508,7 +509,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   clear: () => {
     const { tabId } = get();
     set({ messages: [] });
-    if (tabId) void ipc.agentThreadClear(tabId).catch(() => undefined);
+    if (tabId) void ipc.agentThreadClear(tabId).catch(ignored("agent thread clear"));
   },
   setDraft: (draft) => set({ draft }),
 }));

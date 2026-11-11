@@ -1,4 +1,5 @@
 import { recordMediaProbe } from "./mediaProbe";
+import { ignored } from "../lib/chromeErrors";
 
 /** Explicit ownership of one preview resource on a reusable media element. */
 const leases = new WeakMap<HTMLVideoElement, () => void>();
@@ -43,7 +44,7 @@ export function leasePreviewMedia(
     if (current() && video.readyState < 1) {
       void video.play().then(() => {
         if (current()) video.pause();
-      }).catch(() => undefined);
+      }).catch(ignored("preview media play"));
     }
   }, 400);
   return release;

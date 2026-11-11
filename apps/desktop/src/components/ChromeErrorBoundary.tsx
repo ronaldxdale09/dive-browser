@@ -1,6 +1,6 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import { reportChromeError } from "../lib/chromeErrors";
+import { reportChromeError, ignored } from "../lib/chromeErrors";
 import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 
@@ -36,7 +36,7 @@ export class ChromeErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Dive chrome render failed", error, info.componentStack);
     reportChromeError("render", error, info.componentStack);
-    void ipc.setContentCovered(true).catch(() => undefined);
+    void ipc.setContentCovered(true).catch(ignored("cover content on crash"));
   }
 
   render() {

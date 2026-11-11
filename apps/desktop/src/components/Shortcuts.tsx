@@ -8,6 +8,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { ignored } from "../lib/chromeErrors";
 
 /** One row of the cheatsheet. */
 export interface ShortcutRow {
@@ -67,7 +68,7 @@ export function Shortcuts() {
     ipc
       .commandsList()
       .then((c) => alive && setKnown(c))
-      .catch(() => undefined);
+      .catch(ignored("commands list"));
     return () => {
       alive = false;
     };

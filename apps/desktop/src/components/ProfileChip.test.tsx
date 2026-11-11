@@ -76,6 +76,29 @@ describe("ProfileChip", () => {
     expect(create).toHaveBeenCalledWith({ name: "Client", color: "#7FD8C8", avatar: "kai", note: "" });
   });
 
+  it("marks the name from the field the host named, not from the words of the reason", async () => {
+    const refuse = (error: string, errorField: string | null) =>
+      vi.fn(async () => {
+        useBrowser.setState({ error, errorField });
+        return false;
+      });
+    useBrowser.setState({ editingProfile: { id: null }, createProfile: refuse("pick something shorter", "name") });
+    render(<ProfileDialog />);
+    fireEvent.change(screen.getByPlaceholderText("Ronald"), { target: { value: "Client" } });
+    fireEvent.submit(screen.getByRole("dialog", { name: "New profile" }));
+    await screen.findByRole("alert");
+    const name = screen.getByPlaceholderText("Ronald");
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(name);
+    cleanup();
+    useBrowser.setState({ editingProfile: { id: null }, createProfile: refuse("the name of the engine failed", null) });
+    render(<ProfileDialog />);
+    fireEvent.change(screen.getByPlaceholderText("Ronald"), { target: { value: "Client" } });
+    fireEvent.submit(screen.getByRole("dialog", { name: "New profile" }));
+    await screen.findByRole("alert");
+    expect(screen.getByPlaceholderText("Ronald").getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("refuses to delete the last profile but offers it otherwise", () => {
     useBrowser.setState({ editingProfile: { id: "p2" } });
     render(<ProfileDialog />);

@@ -5,7 +5,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { EventCallback } from "@tauri-apps/api/event";
-import type { ChatDelta, SendOptions } from "../generated/bindings";
+import type { ChatDelta, ErrorKind, SendOptions } from "../generated/bindings";
 import type { ExtensionInfo, ExtensionList } from "../generated/bindings";
 import { commands, events as generatedEvents } from "../generated/bindings";
 import type { Address, CardDraft, ClearRequest, Decision, Duration, Scope, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
@@ -25,15 +25,26 @@ export const events = {
 export type { CertErrorAsked, CertErrorClosed, CrashReason, TabUnresponsive, TabResponsive, ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, LoginSave, PasswordExport, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
+export type { ErrorKind } from "../generated/bindings";
 export type { WebApp, WebAppProbe } from "../generated/bindings";
 export type { StackReport, Detection, Category, Palette, PaletteEntry, ColorFormats } from "../generated/bindings";
 export type { StorageItem, OpenapiExport, RulesChanged } from "../generated/bindings";
 export type { QuickLink, Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary, DeviceEmulated, DownloadProgress, SessionRecovery } from "../generated/bindings";
 
-/** Unwrap a specta `Result`, throwing the app error message on failure. */
-export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
+/** An IPC failure: the host's message, plus a kind when the host gave one. */
+export class IpcError extends Error {
+  readonly kind: ErrorKind | null;
+  constructor(error: { message: string; kind?: ErrorKind | null }) {
+    super(error.message);
+    this.name = "IpcError";
+    this.kind = error.kind ?? null;
+  }
+}
+
+/** Unwrap a specta `Result`, throwing an `IpcError` (the host's message and kind) on failure. */
+export function unwrap<T, E extends { message: string; kind?: ErrorKind | null }>(r: Result<T, E>): T {
   if (r.status === "ok") return r.data;
-  throw new Error(r.error.message);
+  throw new IpcError(r.error);
 }
 
 type WorkspaceDraftInput = { name: string; color: string; icon: string };
@@ -186,6 +197,9 @@ export const ipc = {
   /** This chrome document has booted: whatever cover its previous document left is taken down. */
   chromeReady: async () => unwrap(await commands.chromeReady()),
   /** Keep a chrome error in the host log. Never throws: it runs from error handlers. */
+  // The reporter itself: it cannot report its own failure to the log it writes to,
+  // and lib/chromeErrors (which has `ignored`) imports this module.
+  // eslint-disable-next-line no-restricted-syntax
   logChromeError: (kind: string, message: string, stack: string | null) => commands.logChromeError(kind, message, stack).catch(() => undefined),
   /** Keep waiting for a page that stopped responding, or end it. */
   tabUnresponsiveAnswer: async (id: string, end: boolean) => unwrap(await commands.tabUnresponsiveAnswer(id, end)),

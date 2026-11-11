@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { JsDialogAsked } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
+import { errorKind, errorMessage } from "../lib/errors";
 import { pageAnsweredClose, pagePromptedOnClose, useBrowser } from "./browser";
 
 /**
@@ -118,7 +118,7 @@ export const useJsDialog = create<JsDialogStore>((set, get) => {
       } catch (e) {
         // Already answered (an agent got there first) or the page moved on:
         // nothing to show for that. Anything else is worth a line.
-        if (!/no longer open/i.test(errorMessage(e))) useBrowser.setState({ error: errorMessage(e) });
+        if (errorKind(e)?.type !== "gone") useBrowser.setState({ error: errorMessage(e) });
       }
     },
   };

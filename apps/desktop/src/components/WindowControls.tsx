@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { isWindows } from "../lib/commands";
 import { errorMessage } from "../lib/errors";
 import { useBrowser } from "../store/browser";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Minimise, maximise and close, for platforms whose window controls the app
@@ -23,14 +24,14 @@ export function WindowControls() {
     if (!isWindows()) return;
     const window = getCurrentWindow();
     let alive = true;
-    const sync = () => void window.isMaximized().then((v) => alive && setMaximized(v)).catch(() => undefined);
+    const sync = () => void window.isMaximized().then((v) => alive && setMaximized(v)).catch(ignored("window maximized state"));
     sync();
     // Dragging to the top edge maximises without the button being pressed,
     // so the glyph follows the window rather than the last click.
     const stop = window.onResized(sync);
     return () => {
       alive = false;
-      void stop.then((off) => off()).catch(() => undefined);
+      void stop.then((off) => off()).catch(ignored("window resize unlisten"));
     };
   }, []);
 

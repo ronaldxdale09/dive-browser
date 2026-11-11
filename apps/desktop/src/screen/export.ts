@@ -12,6 +12,7 @@ import type { Segment } from "./math";
 import type { CursorSample, Project } from "./model";
 import { Renderer } from "./render";
 import { recordMediaProbe, setMediaProbePhase } from "./mediaProbe";
+import { ignored } from "../lib/chromeErrors";
 
 /** Longest output the exporter renders in one go; past this the render
  * alone would take longer than anyone waits at a progress bar. */
@@ -80,7 +81,7 @@ async function ready(video: HTMLVideoElement, owned: boolean, signal?: AbortSign
       if (owned) video.load();
       nudge = setTimeout(() => {
         if (active && !signal?.aborted && video.readyState < 2) {
-          void video.play().then(() => { if (active && !signal?.aborted) video.pause(); }).catch(() => undefined);
+          void video.play().then(() => { if (active && !signal?.aborted) video.pause(); }).catch(ignored("export video preview play"));
         }
       }, 400);
     }), "opening video", 20_000, signal);

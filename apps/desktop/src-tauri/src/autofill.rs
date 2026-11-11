@@ -114,6 +114,19 @@ pub fn normalize_expiry(month: u32, year: u32, now: (u32, u32)) -> Result<(u32, 
     Ok((month, year))
 }
 
+/// Which input a refused expiry is about: the year when it is out of range,
+/// the month otherwise (a month that is not one, or "has passed", which the
+/// form shows under the month). Mirrors the order of checks in
+/// [`normalize_expiry`], which words the reason.
+fn expiry_error_field(month: u32, year: u32) -> &'static str {
+    let year = if year < 100 { 2000 + year } else { year };
+    if (1..=12).contains(&month) && !(2000..=2100).contains(&year) {
+        "year"
+    } else {
+        "month"
+    }
+}
+
 /// Save an address. A new one gets an id; an existing id is updated.
 pub fn save_address(
     state: &AppState,
@@ -121,7 +134,10 @@ pub fn save_address(
     mut address: Address,
 ) -> AppResult<Address> {
     if address.label.trim().is_empty() && address.name.trim().is_empty() {
-        return Err(AppError::new("an address needs a name or a label"));
+        return Err(AppError::invalid(
+            "label",
+            "an address needs a name or a label",
+        ));
     }
     if address.id.is_empty() {
         address.id = dive_core::TabId::new().to_string();
@@ -141,7 +157,10 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
     }
     let number = digits(&draft.number);
     if !luhn_ok(&number) {
-        return Err(AppError::new("that does not look like a card number"));
+        return Err(AppError::invalid(
+            "number",
+            "that does not look like a card number",
+        ));
     }
     let now = Timestamp::now();
     let (expiry_month, expiry_year) = normalize_expiry(
@@ -149,7 +168,12 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
         draft.expiry_year,
         current_month_year(now),
     )
-    .map_err(AppError::new)?;
+    .map_err(|reason| {
+        AppError::invalid(
+            expiry_error_field(draft.expiry_month, draft.expiry_year),
+            reason,
+        )
+    })?;
     let card = Card {
         id: dive_core::TabId::new().to_string(),
         profile_id: profile.to_string(),
@@ -523,6 +547,22 @@ mod tests {
                 .unwrap_err()
                 .contains("not a valid year")
         );
+    }
+
+    #[test]
+    fn a_refused_expiry_names_the_input_it_is_about() {
+        let now = (9, 2026);
+        for (month, year, field) in [
+            (0, 2030, "month"),
+            (13, 2030, "month"),
+            (6, 1999, "year"),
+            (6, 2101, "year"),
+            (8, 2026, "month"),
+            (1, 25, "month"),
+        ] {
+            assert!(normalize_expiry(month, year, now).is_err());
+            assert_eq!(expiry_error_field(month, year), field, "{month}/{year}");
+        }
     }
 
     #[test]

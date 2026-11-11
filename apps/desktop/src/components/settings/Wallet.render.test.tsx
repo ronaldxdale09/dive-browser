@@ -61,7 +61,7 @@ describe("Settings › Wallet", () => {
   });
 
   it("says why a card was refused inside the form, and saves on Enter", async () => {
-    const saveCard = vi.fn().mockResolvedValue("13 is not a valid month; use a number from 1 to 12");
+    const saveCard = vi.fn().mockResolvedValue({ message: "13 is not a valid month; use a number from 1 to 12", field: "month" });
     useWallet.setState({ saveCard });
     render(<Wallet />);
     fireEvent.click(screen.getByRole("button", { name: "Add card…" }));
@@ -81,11 +81,31 @@ describe("Settings › Wallet", () => {
     expect(dialog.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
   });
 
-  it("ties each refusal to the card field it is about", () => {
-    expect(cardErrorField("that does not look like a card number")).toBe("number");
-    expect(cardErrorField("that expiry date (01/2020) has passed")).toBe("month");
-    expect(cardErrorField("99 is not a valid year; use two or four digits, like 30 or 2030")).toBe("year");
-    expect(cardErrorField("the keychain refused")).toBeNull();
+  it("ties each refusal to the card field the host named, whatever words it used", () => {
+    expect(cardErrorField("number")).toBe("number");
+    expect(cardErrorField("month")).toBe("month");
+    expect(cardErrorField("year")).toBe("year");
+    expect(cardErrorField("label")).toBeNull();
+    expect(cardErrorField(null)).toBeNull();
+  });
+
+  it("marks the field the host named even when the words say something else", async () => {
+    useWallet.setState({ saveCard: vi.fn().mockResolvedValue({ message: "try another one", field: "number" }) });
+    render(<Wallet />);
+    fireEvent.click(screen.getByRole("button", { name: "Add card…" }));
+    fireEvent.submit(screen.getByLabelText("Expiry year"));
+    await screen.findByRole("alert");
+    expect(screen.getByLabelText("Card number").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Expiry month").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("marks the label of an address the host refused, whatever words it used", async () => {
+    useWallet.setState({ saveAddress: vi.fn().mockResolvedValue({ message: "give it something to be called", field: "label" }) });
+    render(<Wallet />);
+    fireEvent.click(screen.getByRole("button", { name: /Add address/ }));
+    fireEvent.submit(screen.getByRole("dialog", { name: "Add address" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("give it something to be called");
+    expect(document.activeElement?.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("lets Escape dismiss Add card without closing Settings", () => {

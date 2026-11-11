@@ -30,6 +30,7 @@ import { IsolatedPanel } from "./IsolatedPanel";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
 import { errorMessage } from "../lib/errors";
+import { ignored } from "../lib/chromeErrors";
 
 const DevicePicker = lazy(() => import("./simulator/DevicePicker").then(({ DevicePicker }) => ({ default: DevicePicker })));
 const DeviceStage = lazy(() => import("./simulator/DeviceStage").then(({ DeviceStage }) => ({ default: DeviceStage })));
@@ -313,7 +314,7 @@ export function NavErrorPanel({ url, error, method, tabId: forTab, active = true
       .then((host) => {
         if (alive) setUpgraded(host);
       })
-      .catch(() => undefined);
+      .catch(ignored("upgraded host check"));
     return () => {
       // The answer belongs to the failure that asked for it; a later one
       // starts again rather than showing the last page's way out.
@@ -444,8 +445,8 @@ export function CertErrorPanel({ asked }: { asked: CertErrorAsked }) {
     // came from; before, it would skip one further. With nothing to go
     // back to, the error panel stays and says what happened.
     if (!(await failed)) return;
-    const history = await ipc.tabHistory(asked.tab_id).catch(() => null);
-    if (canGoBack(history)) void ipc.tabBack(asked.tab_id).catch(() => undefined);
+    const history = await ipc.tabHistory(asked.tab_id).catch((e: unknown) => { ignored("history read")(e); return null; });
+    if (canGoBack(history)) void ipc.tabBack(asked.tab_id).catch(ignored("go back after blocked close"));
   };
   return (
     <div data-native-overlay role="alert" aria-labelledby={`cert-error-title-${asked.tab_id}`} className="absolute inset-0 z-20 grid place-items-center overflow-auto bg-surface p-6">
@@ -534,7 +535,7 @@ function FullPage() {
           ? { ...b, width: Math.max(1, b.width - inset), height: Math.max(1, b.height - inset) }
           : b;
       },
-      (bounds) => void ipc.setContentBounds(bounds).catch(() => undefined),
+      (bounds) => void ipc.setContentBounds(bounds).catch(ignored("content bounds")),
     );
     reporter.schedule();
     const ro = new ResizeObserver(reporter.schedule);
@@ -577,6 +578,6 @@ function useStartupDevice(activeTab: string | null) {
       .then((info) => {
         if (info.simulate) void setDevice(activeTab, info.simulate);
       })
-      .catch(() => undefined);
+      .catch(ignored("tab info for device"));
   }, [activeTab, setDevice]);
 }

@@ -7,6 +7,7 @@ import type { Address } from "../../lib/ipc";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import { focusAfterRemoval, rowIndexOf } from "../../lib/focusAfterRemoval";
 import { BLANK_ADDRESS, describeCard, useWallet } from "../../store/wallet";
+import type { SaveFailure } from "../../store/wallet";
 import { credentialStoreName } from "../../lib/commands";
 
 /**
@@ -198,15 +199,12 @@ function WalletDialog({ title, icon, onClose, onSubmit, error, errorId, busy, in
 }
 
 /**
- * The field a refused card is about, from the host's reason. The host words
- * each refusal for one field, and a reason tied to its field is read when
- * that field is reached, not only once as the alert goes by.
+ * The card field a refusal is about, from the field the host named. A reason
+ * tied to its field is read when that field is reached, not only once as the
+ * alert goes by. The host's words are never read for this.
  */
-export function cardErrorField(error: string): "number" | "month" | "year" | null {
-  if (/card number/i.test(error)) return "number";
-  if (/valid month|has passed/i.test(error)) return "month";
-  if (/valid year/i.test(error)) return "year";
-  return null;
+export function cardErrorField(field: string | null): "number" | "month" | "year" | null {
+  return field === "number" || field === "month" || field === "year" ? field : null;
 }
 
 /** What a field shows when the refusal is about it: invalid, and described by the reason. */
@@ -217,21 +215,21 @@ function invalidProps(invalid: boolean, errorId: string) {
 function AddressForm({ address, onClose }: { address: Address; onClose: () => void }) {
   const save = useWallet((s) => s.saveAddress);
   const [draft, setDraft] = useState(address);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SaveFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const first = useRef<HTMLInputElement>(null);
   const errorId = useId();
   const set = (key: keyof Address, value: string) => setDraft((was) => ({ ...was, [key]: value }));
   // The one refusal an address has is a missing name or label; it is the
   // label field's, where the keyboard goes to fix it.
-  const labelInvalid = error !== null && /name or a label/i.test(error);
+  const labelInvalid = error?.field === "label";
   const submit = async () => {
     setBusy(true);
     const failed = await save(draft);
     setBusy(false);
     if (failed) {
       setError(failed);
-      if (/name or a label/i.test(failed)) first.current?.focus();
+      if (failed.field === "label") first.current?.focus();
     } else onClose();
   };
   const input = (key: keyof Address, label: string, placeholder = "") => (
@@ -241,7 +239,7 @@ function AddressForm({ address, onClose }: { address: Address; onClose: () => vo
     </label>
   );
   return (
-    <WalletDialog title={address.id ? "Edit address" : "Add address"} icon={MapPin} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
+    <WalletDialog title={address.id ? "Edit address" : "Add address"} icon={MapPin} onClose={onClose} onSubmit={() => void submit()} error={error?.message ?? null} errorId={errorId} busy={busy} initialFocus={first}>
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1 text-11 text-ink-3">
           Label
@@ -271,14 +269,14 @@ function CardForm({ onClose }: { onClose: () => void }) {
   const [number, setNumber] = useState("");
   const [month, setMonth] = useState("");
   const [year, setYear] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SaveFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const first = useRef<HTMLInputElement>(null);
   const numberField = useRef<HTMLInputElement>(null);
   const monthField = useRef<HTMLInputElement>(null);
   const yearField = useRef<HTMLInputElement>(null);
   const errorId = useId();
-  const invalid = error ? cardErrorField(error) : null;
+  const invalid = cardErrorField(error?.field ?? null);
   const submit = async () => {
     setBusy(true);
     // A two-digit year ("30") goes as typed; the host reads it as 2030.
@@ -287,12 +285,12 @@ function CardForm({ onClose }: { onClose: () => void }) {
     if (failed) {
       setError(failed);
       // Straight to the field to fix, which then reads out why.
-      const at = cardErrorField(failed);
+      const at = cardErrorField(failed.field);
       (at === "number" ? numberField : at === "month" ? monthField : at === "year" ? yearField : null)?.current?.focus();
     } else onClose();
   };
   return (
-    <WalletDialog title="Add card" icon={CreditCard} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
+    <WalletDialog title="Add card" icon={CreditCard} onClose={onClose} onSubmit={() => void submit()} error={error?.message ?? null} errorId={errorId} busy={busy} initialFocus={first}>
       <p className="-mt-2 mb-3 text-11 text-ink-3">The number goes straight to {credentialStoreName()}; Dive's database keeps only the last four digits. The security code is never saved.</p>
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1 text-11 text-ink-3">

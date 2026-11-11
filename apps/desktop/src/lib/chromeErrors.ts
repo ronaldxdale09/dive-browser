@@ -33,3 +33,8 @@ export function installChromeErrorReporting(target: Window = window): void {
 export function resetChromeErrorReporting(): void {
   installed = false;
 }
+
+/** For a promise whose failure changes nothing for the person: keep a trace in the log at debug level. */
+export function ignored(what: string): (error: unknown) => void {
+  return (error) => reportChromeError(`ignored: ${what}`, error);
+}

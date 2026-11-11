@@ -9,12 +9,13 @@ import { downloadFailureReason, useDownloads } from "./downloads";
 import { useLayout } from "./layout";
 import { canGoBack } from "../lib/useTabHistory";
 import type { CrashReason, DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
+import { errorMessage, invalidField } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
 import { isPrivateWindow } from "../lib/privateMode";
 import { orderTabs } from "../lib/tabOrder";
 import { uiStorage } from "../lib/uiStorage";
 import { languageName, preferredLanguage, translationMessage } from "../lib/translate";
+import { ignored } from "../lib/chromeErrors";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "tasks" | "import" | "apps";
 /** The sections of the library dialog. */
@@ -64,6 +65,8 @@ interface BrowserState {
   attachTab: (id: string) => Promise<void>;
   open: Record<Exclude<UiPanel, "extensions" | "import" | "apps">, boolean> & { extensions?: boolean; import?: boolean; apps?: boolean };
   error: string | null;
+  /** The input `error` is about, when the host named one (a refused workspace or profile name); only the create/update/delete actions set it. */
+  errorField: string | null;
   /** Tabs whose main frame is loading right now. */
   loading: Record<string, boolean>;
   /** Tabs whose last document request failed; cleared by the next load or navigation. */
@@ -781,13 +784,13 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       return;
     }
     // Pinned or essential again, as it was.
-    if (opened?.id && last.tier) await ipc.tabSetTier(opened.id, last.tier).catch(() => undefined);
+    if (opened?.id && last.tier) await ipc.tabSetTier(opened.id, last.tier).catch(ignored("restore tab tier"));
     // Scrolled to where it was, once the page is back.
-    if (opened?.id && last.scroll) await ipc.tabRestoreScroll(opened.id, last.scroll[0], last.scroll[1]).catch(() => undefined);
+    if (opened?.id && last.scroll) await ipc.tabRestoreScroll(opened.id, last.scroll[0], last.scroll[1]).catch(ignored("restore tab scroll"));
     // Back where it was, not at the end of the strip.
     if (opened?.id && last.index >= 0 && last.workspace_id === ws) {
       const ordered = orderWithAt(get().tabs, ws, opened.id, last.index);
-      if (ordered.includes(opened.id)) await ipc.tabReorder(ws, ordered).catch(() => undefined);
+      if (ordered.includes(opened.id)) await ipc.tabReorder(ws, ordered).catch(ignored("restore tab order"));
     }
   },
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false, tasks: false },
@@ -806,6 +809,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   counts: {},
   error: null,
+  errorField: null,
   notice: null,
   noticeAction: null,
   notify: (text, ms = 3000, action) => {
@@ -997,7 +1001,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const at = stripIndex(get().tabs, id);
     const opened = await run(set, () => ipc.tabOpen(ws, source.url));
     // Beside its source, as in every browser, not at the end of the strip.
-    if (opened?.id && at >= 0) await ipc.tabReorder(ws, orderWithAt(get().tabs, ws, opened.id, at + 1)).catch(() => undefined);
+    if (opened?.id && at >= 0) await ipc.tabReorder(ws, orderWithAt(get().tabs, ws, opened.id, at + 1)).catch(ignored("place duplicated tab"));
   },
   moveTabToWorkspace: async (id, workspace) => {
     const name = get().workspaces.find((w) => w.id === workspace)?.name;
@@ -1008,7 +1012,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     markClosing(id);
     // Where the page was scrolled, so reopening it lands in the same place.
     // Asked before the close; the answer is picked up by the tab_closed event.
-    const scroll = await ipc.tabScrollPosition(id).catch(() => null);
+    const scroll = await ipc.tabScrollPosition(id).catch((e: unknown) => { ignored("tab scroll position")(e); return null; });
     if (scroll) scrollOfClosing.set(id, scroll);
     const asked = await succeeded(set, () => ipc.tabClose(id));
     if (!asked) unmarkClosing(id);
@@ -1059,7 +1063,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!id) return;
     // ⌘[ on a brand-new tab would go back to the blank page its view was
     // created on; the button is disabled there, and so is the chord.
-    const history = await ipc.tabHistory(id).catch(() => null);
+    const history = await ipc.tabHistory(id).catch((e: unknown) => { ignored("tab history read")(e); return null; });
     if (history && !canGoBack(history)) return;
     await run(set, () => ipc.tabBack(id));
   },
@@ -1437,10 +1441,10 @@ function scheduleCounts(get: () => BrowserState) {
 async function succeeded(set: (p: Partial<BrowserState>) => void, f: () => Promise<unknown>): Promise<boolean> {
   try {
     await f();
-    set({ error: null });
+    set({ error: null, errorField: null });
     return true;
   } catch (e) {
-    set({ error: errorMessage(e) });
+    set({ error: errorMessage(e), errorField: invalidField(e) });
     return false;
   }
 }

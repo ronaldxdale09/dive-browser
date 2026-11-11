@@ -9,6 +9,7 @@ import { leasePreviewMedia } from "./previewMedia";
 import { Renderer } from "./render";
 import { useEditor } from "./store";
 import type { Project } from "./model";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * The preview: a canvas the renderer paints, kept in step with a hidden
@@ -110,7 +111,7 @@ export function Stage() {
         const src = sourceTime(segments, outMs) ?? current.media.durationMs;
         const seg = segments.find((s) => outMs >= s.outStartMs && outMs < s.outEndMs);
         const rate = seg?.speed ?? 1;
-        if (v.paused) void v.play().catch(() => undefined);
+        if (v.paused) void v.play().catch(ignored("stage video play"));
         if (v.playbackRate !== rate) v.playbackRate = Math.min(16, Math.max(0.0625, rate));
         if (Math.abs(v.currentTime * 1000 - src) > 120) v.currentTime = src / 1000;
         clock.wrote(src);

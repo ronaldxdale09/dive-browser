@@ -1843,7 +1843,10 @@ pub(crate) fn profile_delete(
 fn clean_name(name: &str) -> AppResult<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 40 {
-        return Err(AppError::new("workspace name must be 1-40 characters"));
+        return Err(AppError::invalid(
+            "name",
+            "workspace name must be 1-40 characters",
+        ));
     }
     Ok(name.to_owned())
 }
@@ -4861,13 +4864,27 @@ pub(crate) fn log_chrome_error(
     /// Enough for any real stack; a runaway string must not flood the log.
     const LIMIT: usize = 8 * 1024;
     let clip = |text: &str| -> String { text.chars().take(LIMIT).collect() };
-    tracing::error!(
-        chrome = %webview.label(),
-        kind = %clip(&kind),
-        stack = %clip(stack.as_deref().unwrap_or_default()),
-        "chrome error: {}",
-        clip(&message)
-    );
+    let kind = clip(&kind);
+    let stack = clip(stack.as_deref().unwrap_or_default());
+    // The chrome tags a failure it deliberately swallows ("ignored: ...") so
+    // it leaves a trace without reading as a fault in a bug report.
+    if kind.starts_with("ignored") {
+        tracing::debug!(
+            chrome = %webview.label(),
+            kind = %kind,
+            stack = %stack,
+            "chrome error: {}",
+            clip(&message)
+        );
+    } else {
+        tracing::error!(
+            chrome = %webview.label(),
+            kind = %kind,
+            stack = %stack,
+            "chrome error: {}",
+            clip(&message)
+        );
+    }
 }
 
 /// Answer a certificate question: `proceed` loads the page anyway and trusts
@@ -5453,6 +5470,13 @@ mod tests {
         assert!(clean_color("#12345").is_err());
         assert_eq!(clean_name("  Work ").unwrap(), "Work");
         assert!(clean_name("   ").is_err());
+        assert_eq!(
+            clean_name("   ").unwrap_err().kind,
+            Some(crate::error::ErrorKind::Invalid {
+                field: "name".into()
+            }),
+            "the chrome marks the name field from the kind, not from the words"
+        );
         assert_eq!(clean_icon(" Book-Open ").unwrap(), "book-open");
         assert_eq!(clean_icon("  ").unwrap(), Workspace::default_icon());
         assert!(clean_icon("<img onerror=x>").is_err());

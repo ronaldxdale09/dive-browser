@@ -1,7 +1,6 @@
 import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useId, useRef, useState } from "react";
-import { aboutTheName } from "../lib/errors";
 import { colorName, PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -35,6 +34,8 @@ function ProfileForm({ id }: { id: string | null }) {
   // created the profile twice.
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The input the host said the failure is about, if it said.
+  const [failureField, setFailureField] = useState<string | null>(null);
   useCoversContent(true);
   const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
@@ -56,9 +57,11 @@ function ProfileForm({ id }: { id: string | null }) {
     setSaving(false);
     const reason = useBrowser.getState().error ?? "That did not work. Try again.";
     setFailure(reason);
+    const field = useBrowser.getState().errorField;
+    setFailureField(field);
     // A refused name sends the keyboard back to the name, which then reads
     // out why as its description.
-    if (aboutTheName(reason)) nameField.current?.focus();
+    if (field === "name") nameField.current?.focus();
   };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +95,7 @@ function ProfileForm({ id }: { id: string | null }) {
 
         <label className="mt-4 block text-11 text-ink-2">
           Name
-          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={failure && aboutTheName(failure) ? true : undefined} aria-describedby={failure && aboutTheName(failure) ? failureId : undefined} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
+          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={failure && failureField === "name" ? true : undefined} aria-describedby={failure && failureField === "name" ? failureId : undefined} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
         <label className="mt-3 block text-11 text-ink-2">
           Shown under the name <span className="text-ink-3">(optional)</span>

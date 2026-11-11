@@ -3,6 +3,7 @@ import { events, ipc } from "../lib/ipc";
 import type { ExternalLinkAsked } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { useBrowser } from "./browser";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Pages asking to open a link another app handles. One question per tab --
@@ -61,6 +62,6 @@ export const useExternalLink = create<ExternalLinkStore>((set, get) => ({
   },
   cancel: (asked) => {
     set((s) => ({ questions: without(s.questions, asked.token) }));
-    void ipc.externalLinkDismiss(asked.token).catch(() => undefined);
+    void ipc.externalLinkDismiss(asked.token).catch(ignored("external link dismiss"));
   },
 }));

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useSyncExternalStore } from "react";
 import { ipc } from "./ipc";
+import { ignored } from "./chromeErrors";
 
 /**
  * On macOS and Windows a native mask raises chrome without hiding content.
@@ -48,7 +49,7 @@ async function cover(token: number) {
   covering = true;
   let frozen: Awaited<ReturnType<typeof ipc.prepareContentCover>> = [];
   try {
-    if (liveOverlaysAvailable()) await liveQueue.catch(() => undefined);
+    if (liveOverlaysAvailable()) await liveQueue.catch(ignored("overlay queue"));
     frozen = await ipc.prepareContentCover();
   } catch {
     // The dialog must remain usable even when a renderer cannot be captured.
@@ -68,7 +69,7 @@ async function cover(token: number) {
   }
   covered = true;
   covering = false;
-  await ipc.setContentCovered(true).catch(() => undefined);
+  await ipc.setContentCovered(true).catch(ignored("cover content"));
 }
 
 /** Native masks keep CEF rendering the page beneath every chrome overlay. */
@@ -198,13 +199,13 @@ function takesFocus() {
 
 function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean, modal = false, focus = true) {
   const revision = ++liveRevision;
-  liveQueue = liveQueue.catch(() => undefined).then(async () => {
+  liveQueue = liveQueue.catch(ignored("overlay queue")).then(async () => {
     if (revision !== liveRevision) return;
     if (focus) await ipc.setOverlayRegions(regions, active, modal);
     else await ipc.setOverlayRegions(regions, active, modal, false);
   });
   // A closed native window may reject an already queued frame.
-  void liveQueue.catch(() => undefined);
+  void liveQueue.catch(ignored("overlay queue"));
 }
 
 /**
@@ -354,7 +355,7 @@ function sync() {
       covered = false;
       void ipc
         .setContentCovered(false)
-        .catch(() => undefined)
+        .catch(ignored("uncover content"))
         .finally(() => {
           // A later overlay may already have captured and covered the page.
           if (depth === 0 && token === generation) publish({});
@@ -373,7 +374,7 @@ function sync() {
   }
   if (covered) {
     covered = false;
-    liveQueue = liveQueue.catch(() => undefined).then(async () => { await ipc.setContentCovered(false); });
+    liveQueue = liveQueue.catch(ignored("overlay queue")).then(async () => { await ipc.setContentCovered(false); });
   }
   if (!stopLive) {
     generation += 1;

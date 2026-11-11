@@ -384,7 +384,7 @@ pub async fn answer(
         let state = app.state::<AppState>();
         let Some((asked, followers)) = state.http_auth.remove_with_followers(tab_id, request_id)
         else {
-            return Err(AppError::new("that sign-in is no longer waiting"));
+            return Err(AppError::gone("that sign-in is no longer waiting"));
         };
         let session = lock(&state.host)
             .as_ref()

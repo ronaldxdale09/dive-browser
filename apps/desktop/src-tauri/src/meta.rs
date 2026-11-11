@@ -44,7 +44,7 @@ pub async fn snapshot(session: &CdpSession) -> AppResult<MetaSnapshot> {
             }),
         )
         .await
-        .map_err(AppError::new)?;
+        .map_err(AppError::from)?;
     let v = page_json(&result, "the head")?;
     let mut snap = parse_head(v["head"].as_str().unwrap_or_default());
     snap.lang = v["lang"]

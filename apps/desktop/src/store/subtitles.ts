@@ -4,6 +4,7 @@ import { ipc, events } from "../lib/ipc";
 import type { SubtitleModel } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
+import { ignored } from "../lib/chromeErrors";
 
 /** Bytes seen and expected for a model that is downloading; `total` is null until the server reports a length. */
 export type DownloadProgress = { received: number; total: number | null };
@@ -147,7 +148,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
     // finds nothing left to clear, and progress still in flight is ignored.
     cancelledDownloads.add(modelId);
     set((s) => ({ downloading: without(s.downloading, modelId) }));
-    void ipc.subtitleModelCancel(modelId).catch(() => undefined);
+    void ipc.subtitleModelCancel(modelId).catch(ignored("subtitle model cancel"));
   },
 
   remove: async (modelId) => {
@@ -270,7 +271,7 @@ export async function bootSubtitles(): Promise<void> {
       if (now) {
         void ipc.subtitleRunning(now).then((active) => {
           if (revision === stateRevision) useSubtitles.setState({ active });
-        }).catch(() => undefined);
+        }).catch(ignored("subtitles running state"));
       }
     }));
   } catch (e) {

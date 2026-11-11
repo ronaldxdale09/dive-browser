@@ -22,6 +22,7 @@ import { captureFramed } from "./frameCapture";
 import { layoutFor } from "./geometry";
 import type { UiMode, Zoom } from "./geometry";
 import { errorMessage } from "../../lib/errors";
+import { ignored } from "../../lib/chromeErrors";
 
 /** Width of the tool strip down the right edge of the stage. */
 const TOOLS_WIDTH = 44;
@@ -93,7 +94,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   }, [layoutScale, tabId, setScale, sel.deviceId, sel.landscape, sel.ui, customWidth, customHeight]);
 
   const onPageRect = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
-    void ipc.setContentBounds(rect).catch(() => undefined);
+    void ipc.setContentBounds(rect).catch(ignored("device stage bounds"));
   }, []);
 
   useEffect(() => {

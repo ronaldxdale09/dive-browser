@@ -14,6 +14,7 @@ import { paneId, zoneId } from "./TabDnd";
 import { shorten, tabLabel } from "./TabStrip";
 import { isWindows } from "../lib/commands";
 import { RESIZE_GUTTER, useWindowMaximized } from "../lib/windowResize";
+import { ignored } from "../lib/chromeErrors";
 
 const GAP = 6;
 
@@ -76,7 +77,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
           const height = inset ? Math.max(1, r.height - inset) : r.height;
           return [{ tab, bounds: { x: r.left, y: r.top, width, height } }];
         });
-        void ipc.setPanes(panes).catch(() => undefined);
+        void ipc.setPanes(panes).catch(ignored("split panes"));
       });
     };
     report();
@@ -92,7 +93,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
   }, [split.tabs, inset, drawn, active]);
 
   // Leaving the split returns the engine to a single page.
-  useEffect(() => () => void ipc.setPanes([]).catch(() => undefined), []);
+  useEffect(() => () => void ipc.setPanes([]).catch(ignored("split panes clear")), []);
 
   const startResize = (i: number, e: React.PointerEvent<HTMLDivElement>) => {
     const width = root.current?.getBoundingClientRect().width ?? 0;

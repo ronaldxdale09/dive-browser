@@ -1,7 +1,6 @@
 import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useId, useRef, useState } from "react";
-import { aboutTheName } from "../lib/errors";
 import { useBrowser } from "../store/browser";
 import { AVATAR_SEEDS, seedFromName } from "../lib/workspaceAvatar";
 import { colorName } from "../lib/profileAvatar";
@@ -33,6 +32,8 @@ export function WorkspaceDialog() {
   // created the workspace twice.
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The input the host said the failure is about, if it said.
+  const [failureField, setFailureField] = useState<string | null>(null);
   const count = useBrowser((s) => (existing ? (s.counts[existing.id] ?? 0) : 0));
   useCoversContent(Boolean(editing));
   const root = useRef<HTMLDivElement>(null);
@@ -64,9 +65,11 @@ export function WorkspaceDialog() {
     setSaving(false);
     const reason = useBrowser.getState().error ?? "That did not work. Try again.";
     setFailure(reason);
+    const field = useBrowser.getState().errorField;
+    setFailureField(field);
     // A refused name sends the keyboard back to the name, which then reads
     // out why as its description.
-    if (aboutTheName(reason)) nameField.current?.focus();
+    if (field === "name") nameField.current?.focus();
   };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,8 +109,8 @@ export function WorkspaceDialog() {
             ref={nameField}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            aria-invalid={failure && aboutTheName(failure) ? true : undefined}
-            aria-describedby={failure && aboutTheName(failure) ? failureId : undefined}
+            aria-invalid={failure && failureField === "name" ? true : undefined}
+            aria-describedby={failure && failureField === "name" ? failureId : undefined}
             maxLength={40}
             placeholder="Client, Side project, Research…"
             className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"

@@ -10,6 +10,7 @@ import { tabInThisWindow, useBrowser } from "../store/browser";
 import { describeCard, useWallet } from "../store/wallet";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
+import { ignored } from "../lib/chromeErrors";
 
 // The language list and messages are shared with the palette's command.
 export { LANGUAGES, preferredLanguage, translationMessage } from "../lib/translate";
@@ -61,7 +62,7 @@ function Actions({ tabId, url }: { tabId: string; url: string }) {
   // switch and address, and the page may have been changed from elsewhere.
   useEffect(() => {
     let alive = true;
-    void Promise.all([ipc.pageReaderOpen(tabId).catch(() => null), ipc.pageTranslateState(tabId).catch(() => null)]).then(([reader, translation]) => {
+    void Promise.all([ipc.pageReaderOpen(tabId).catch((e: unknown) => { ignored("reader state")(e); return null; }), ipc.pageTranslateState(tabId).catch((e: unknown) => { ignored("translate state")(e); return null; })]).then(([reader, translation]) => {
       if (!alive || acted.current) return;
       const patch: { reader?: boolean; translated?: string | null } = {};
       if (reader !== null) patch.reader = reader;

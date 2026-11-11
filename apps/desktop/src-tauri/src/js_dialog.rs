@@ -153,10 +153,10 @@ pub fn answer(
     let dialog = lock(&state.js_dialogs.open)
         .get(&tab_id)
         .and_then(|list| list.iter().find(|d| d.dialog_id == dialog_id).cloned())
-        .ok_or_else(|| AppError::new("that dialog is no longer open"))?;
+        .ok_or_else(|| AppError::gone("that dialog is no longer open"))?;
     let id: u64 = dialog_id
         .parse()
-        .map_err(|_| AppError::new("that dialog is no longer open"))?;
+        .map_err(|_| AppError::gone("that dialog is no longer open"))?;
     let text = if accept && dialog.kind == "prompt" {
         Some(text.unwrap_or_else(|| dialog.default_value.clone()))
     } else {
@@ -190,7 +190,7 @@ pub fn answer(
     }
     .emit(app);
     if !answered {
-        return Err(AppError::new("that dialog is no longer open"));
+        return Err(AppError::gone("that dialog is no longer open"));
     }
     Ok(dialog)
 }

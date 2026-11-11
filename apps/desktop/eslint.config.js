@@ -21,6 +21,17 @@ export default tseslint.config(
       "@typescript-eslint/no-misused-promises": "error",
       // The agent has a mark of its own (components/AgentIcon.tsx). A sparkle
       // says "generic AI" and nothing about this browser; keep it out for good.
+      // A promise that is allowed to fail still leaves a trace in the host log.
+      // Only a handler that does nothing is flagged: one that sets a fallback
+      // (`.catch(() => setItems([]))`) has handled the failure, not swallowed it.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.property.name='catch'] > ArrowFunctionExpression[params.length=0]:matches([body.type='BlockStatement'][body.body.length=0], [body.type='Identifier'][body.name='undefined'], [body.type='Literal'][body.raw='null'])",
+          message: 'Don\'t swallow errors: use .catch(ignored("what")) from lib/chromeErrors so they reach the log.',
+        },
+      ],
       "no-restricted-imports": [
         "error",
         {

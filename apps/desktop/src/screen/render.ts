@@ -8,6 +8,7 @@ import { Spring, cameraAt, cameraTransform, clickBounce, contentBox, cursorAt, e
 import type { Camera } from "./math";
 import { WALLPAPERS } from "./model";
 import type { AnnotationRegion, CursorSample, Project, ZoomRegion } from "./model";
+import { ignored } from "../lib/chromeErrors";
 
 export type VideoSource = HTMLVideoElement | HTMLCanvasElement | ImageBitmap | OffscreenCanvas;
 
@@ -67,7 +68,7 @@ export class Renderer {
   async preload(project: Project): Promise<void> {
     const pending: Promise<unknown>[] = [];
     const settle = (img: HTMLImageElement): Promise<unknown> => {
-      if (typeof img.decode === "function") return img.decode().catch(() => undefined);
+      if (typeof img.decode === "function") return img.decode().catch(ignored("image decode"));
       if (img.complete) return Promise.resolve();
       return new Promise((resolve) => {
         img.addEventListener("load", resolve, { once: true });

@@ -5,6 +5,7 @@ import { useSubtitles } from "../../store/subtitles";
 import { ipc } from "../../lib/ipc";
 import { Icon } from "../Icon";
 import { Select, Switch } from "../SettingsFields";
+import { ignored } from "../../lib/chromeErrors";
 
 /**
  * Languages the picker offers. English, Japanese and Tagalog lead because
@@ -70,7 +71,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
       void ipc
         .subtitleRunning(activeTab)
         .then((running) => { if (!cancelled) useSubtitles.setState({ active: running }); })
-        .catch(() => undefined);
+        .catch(ignored("subtitles running state"));
     }
     return () => { cancelled = true; };
   }, [activeTab, loadModels]);

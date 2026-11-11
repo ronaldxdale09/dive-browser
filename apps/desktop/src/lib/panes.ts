@@ -1,5 +1,6 @@
 import { ipc } from "./ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
+import { ignored } from "./chromeErrors";
 
 /**
  * The regions F6 and Shift+F6 move the keyboard between, in the order they
@@ -151,7 +152,7 @@ export function cyclePane(step: 1 | -1, root: Document = document): PaneId | nul
     const tab = activeTabHere();
     if (tab) {
       pageHeld = true;
-      void ipc.tabFocus(tab).catch(() => undefined);
+      void ipc.tabFocus(tab).catch(ignored("focus pane tab"));
     }
     return target;
   }

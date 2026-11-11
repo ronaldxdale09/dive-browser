@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ignored } from "./chromeErrors";
 
 /**
  * Dragging the window by its chrome.
@@ -88,11 +89,11 @@ export function windowDrag(): {
     onMouseDown: (e) => {
       // The second press of a double-click is the zoom gesture, not a drag.
       if (!isPlainPrimary(e) || e.detail > 1 || !pressMovesWindow(e.target)) return;
-      void getCurrentWindow().startDragging().catch(() => undefined);
+      void getCurrentWindow().startDragging().catch(ignored("window drag"));
     },
     onDoubleClick: (e) => {
       if (!isPlainPrimary(e) || !pressMovesWindow(e.target)) return;
-      void getCurrentWindow().toggleMaximize().catch(() => undefined);
+      void getCurrentWindow().toggleMaximize().catch(ignored("window maximize toggle"));
     },
   };
 }

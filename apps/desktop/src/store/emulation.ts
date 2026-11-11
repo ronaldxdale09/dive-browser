@@ -8,6 +8,7 @@ import type { DeviceEmulated, DeviceInput, EnvironmentInput, MediaInput, Network
 import { events } from "../lib/ipc";
 import { onTabClosed, useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
+import { ignored } from "../lib/chromeErrors";
 
 export interface Media {
   colorScheme: "light" | "dark" | null;
@@ -404,5 +405,5 @@ export function listenForEmulation() {
   // Outside Tauri (tests) there is no bridge, and nothing is driving a tab.
   void events.deviceEmulated
     .listen((e) => useEmulation.getState().adopt(e.payload))
-    .catch(() => undefined);
+    .catch(ignored("device emulated listen"));
 }

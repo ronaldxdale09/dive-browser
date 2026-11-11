@@ -32,6 +32,7 @@ import { NavigationButtons } from "./NavigationButtons";
 import { ADDRESS_SECURITY_MEANING, addressSecurity } from "../lib/addressSecurity";
 import type { AddressSecurity } from "../lib/addressSecurity";
 import { isImeComposing } from "../lib/ime";
+import { ignored } from "../lib/chromeErrors";
 
 const SECURITY_GLYPHS: Record<AddressSecurity, LucideIcon> = {
   none: Search,
@@ -290,7 +291,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
                   return;
                 }
                 finishEditing();
-                if (activeTab) void ipc.tabFocus(activeTab).catch(() => undefined);
+                if (activeTab) void ipc.tabFocus(activeTab).catch(ignored("focus tab"));
                 return;
               }
               if (event.key === "Enter" && event.altKey) {

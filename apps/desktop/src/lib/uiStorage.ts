@@ -1,4 +1,5 @@
 import { ipc } from "./ipc";
+import { ignored } from "./chromeErrors";
 
 /**
  * The chrome's own small state: panel sizes, the chosen subtitles model,
@@ -28,11 +29,11 @@ export const uiStorage: Storage = {
     // write to the profile store.
     if (entries.get(key) === text) return;
     entries.set(key, text);
-    if (backed) void ipc.uiStateSet(key, text).catch(() => undefined);
+    if (backed) void ipc.uiStateSet(key, text).catch(ignored("ui state save"));
   },
   removeItem(key: string) {
     entries.delete(key);
-    if (backed) void ipc.uiStateSet(key, null).catch(() => undefined);
+    if (backed) void ipc.uiStateSet(key, null).catch(ignored("ui state clear"));
   },
   clear() {
     for (const key of [...entries.keys()]) uiStorage.removeItem(key);

@@ -65,7 +65,7 @@ pub async fn read(session: &CdpSession) -> AppResult<Vitals> {
             json!({"expression": SCRIPT, "returnByValue": true}),
         )
         .await
-        .map_err(AppError::new)?;
+        .map_err(AppError::from)?;
     Ok(parse(&page_json(&result, "the vitals")?))
 }
 

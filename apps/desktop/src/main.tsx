@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { ChromeRoot } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
-import { installChromeErrorReporting } from "./lib/chromeErrors";
+import { installChromeErrorReporting, ignored } from "./lib/chromeErrors";
 import { ipc } from "./lib/ipc";
 import "./styles.css";
 import { isPrivateWindow } from "./lib/privateMode";
@@ -23,7 +23,7 @@ installChromeErrorReporting();
 // This document is new: a first boot, or a reload after the chrome's renderer
 // died. Whatever cover or overlay mask the last document left over the page
 // belonged to dialogs that no longer exist, so the host takes it down.
-void ipc.chromeReady().catch(() => undefined);
+void ipc.chromeReady().catch(ignored("chrome ready"));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
@@ -48,7 +48,7 @@ void loadUiStorage()
     bootMark("ui_storage_loaded");
     useSubtitles.setState({ model: rememberedModel() });
   })
-  .catch(() => undefined)
+  .catch(ignored("ui storage load"))
   .finally(() => {
 // The chrome never scrolls: the page is a native view placed over it, so a
 // scrolled chrome puts every control out of line with the page. Overflow

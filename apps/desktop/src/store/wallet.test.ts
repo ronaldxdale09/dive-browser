@@ -62,8 +62,8 @@ describe("useWallet", () => {
   });
 
   it("keeps a refused card out of the list and hands the reason to the form", async () => {
-    vi.spyOn(ipc, "cardSave").mockRejectedValue(new Error("that does not look like a card number"));
-    expect(await useWallet.getState().saveCard({ label: "", cardholder: "Dale", number: "1234", expiry_month: 9, expiry_year: 2030 })).toContain("card number");
+    vi.spyOn(ipc, "cardSave").mockRejectedValue(Object.assign(new Error("that does not look like a card number"), { kind: { type: "invalid", field: "number" } }));
+    expect(await useWallet.getState().saveCard({ label: "", cardholder: "Dale", number: "1234", expiry_month: 9, expiry_year: 2030 })).toEqual({ message: "that does not look like a card number", field: "number" });
     // The form shows it; the page behind the form does not.
     expect(useWallet.getState().error).toBeNull();
     expect(useWallet.getState().cards).toEqual([]);

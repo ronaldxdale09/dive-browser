@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { events, ipc } from "../lib/ipc";
 import type { NetworkEvent } from "../lib/ipc";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Forget a tab's requests in the host as well: all of them, or those before
@@ -10,7 +11,7 @@ import type { NetworkEvent } from "../lib/ipc";
  * clearing only the panel left all of those describing a page that was gone.
  */
 function clearHost(tabId: string, keepFrom: string | null) {
-  void ipc.tabNetworkClear(tabId, keepFrom).catch(() => undefined);
+  void ipc.tabNetworkClear(tabId, keepFrom).catch(ignored("network clear"));
 }
 
 const CAP = 1000;

@@ -7,6 +7,7 @@ import { useCoversContent } from "../lib/overlay";
 import { isPrivateWindow } from "../lib/privateMode";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * After Dive has quit unexpectedly twice in a row, the host starts with the
@@ -26,7 +27,7 @@ export function SessionRecoveryCard() {
       .then((found) => {
         if (live) setRecovery(found);
       })
-      .catch(() => undefined);
+      .catch(ignored("session recovery check"));
     return () => {
       live = false;
     };

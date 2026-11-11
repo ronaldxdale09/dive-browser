@@ -39,6 +39,7 @@ import { useImportVideo } from "../screen/importVideo";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { isImeComposing } from "../lib/ime";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * The application menu behind the three lines at the end of the toolbar:
@@ -213,7 +214,7 @@ function ZoomRow() {
     void getCurrentWindow()
       .isFullscreen()
       .then(setFull)
-      .catch(() => undefined);
+      .catch(ignored("fullscreen state"));
   }, []);
   return (
     <div className="flex h-10 items-center gap-3 px-4 text-13 text-ink">
@@ -241,7 +242,7 @@ function ZoomRow() {
           void w
             .isFullscreen()
             .then((f) => w.setFullscreen(!f).then(() => setFull(!f)))
-            .catch(() => undefined);
+            .catch(ignored("toggle fullscreen"));
         }}
         className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink aria-pressed:text-highlight"
       >
@@ -264,7 +265,7 @@ function useMenu(close: () => void): Group[] {
     void ipc
       .recordingsList()
       .then((list) => setLatest(list.find((r) => r.editable)?.path ?? null))
-      .catch(() => undefined);
+      .catch(ignored("latest recording"));
   }, []);
   const b = () => useBrowser.getState();
   const done = (fn: () => void | Promise<void>) => () => {

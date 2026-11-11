@@ -4,6 +4,7 @@ import { uiStorage } from "../lib/uiStorage";
 import { events, ipc } from "../lib/ipc";
 import type { RecordingCapabilities, RecordingEvent, RecordingResult } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "./browser";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * Screen recording, start to finish: the setup dialog, a countdown, the
@@ -194,7 +195,7 @@ export const useRecording = create<RecordingState>()(
           // The tab closed while the engine was starting: nothing is shown
           // for this recording any more, so it must not keep running.
           if (get().tab !== tab || get().phase === "idle") {
-            await ipc.tabScreencastCancel(tab).catch(() => undefined);
+            await ipc.tabScreencastCancel(tab).catch(ignored("cancel screencast"));
             return;
           }
           set({ phase: "recording", startedAt: Date.now(), pausedAt: null, pausedTotal: 0, limitHit: false, progress: null, micRequested: settings.microphone !== null, micFailed: false, error: null });
@@ -256,7 +257,7 @@ export const useRecording = create<RecordingState>()(
         const { tab, phase } = get();
         // The pending stop, or the engine's `failed` event for a save it
         // began itself, moves the recording on to `failed`.
-        if (tab && phase === "finishing") await ipc.tabScreencastCancel(tab).catch(() => undefined);
+        if (tab && phase === "finishing") await ipc.tabScreencastCancel(tab).catch(ignored("cancel screencast"));
       },
 
       cancel: async () => {
@@ -265,7 +266,7 @@ export const useRecording = create<RecordingState>()(
         countdownDone?.();
         countdownDone = null;
         if (phase === "finishing") return get().stopSaving();
-        if (tab && (phase === "recording" || phase === "paused" || phase === "failed")) await ipc.tabScreencastCancel(tab).catch(() => undefined);
+        if (tab && (phase === "recording" || phase === "paused" || phase === "failed")) await ipc.tabScreencastCancel(tab).catch(ignored("cancel screencast"));
         useBrowser.setState({ recordingTab: null });
         set({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0, countdown: 0, progress: null, error: null });
       },
@@ -353,11 +354,11 @@ function listen() {
   listening = true;
   // Outside Tauri (tests) there is no event bridge; the recorder still works
   // without these signals.
-  void events.recordingEvent.listen((e) => applyRecordingEvent(e.payload)).catch(() => undefined);
+  void events.recordingEvent.listen((e) => applyRecordingEvent(e.payload)).catch(ignored("recording event listen"));
   // The engine's own close event, not the tab list: that list holds the
   // active workspace only, and switching workspaces used to count as the
   // recorded tab closing.
   void events.stateChanged.listen((e) => {
     if (e.payload.type === "tab_closed") recordedTabClosed(e.payload.data);
-  }).catch(() => undefined);
+  }).catch(ignored("recorded tab closing listen"));
 }

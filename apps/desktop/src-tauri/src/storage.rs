@@ -81,7 +81,7 @@ pub async fn snapshot(session: &CdpSession, url: &str) -> AppResult<StorageSnaps
     let cookies = session
         .call("Network.getCookies", json!({"urls": [url]}))
         .await
-        .map_err(AppError::new)?;
+        .map_err(AppError::from)?;
     let local = storage_items(session, &origin, true)
         .await
         .unwrap_or_default();
@@ -113,7 +113,7 @@ async fn raw_items(session: &CdpSession, origin: &str, is_local: bool) -> AppRes
             json!({"storageId": {"securityOrigin": origin, "isLocalStorage": is_local}}),
         )
         .await
-        .map_err(AppError::new)
+        .map_err(AppError::from)
 }
 
 fn origin_of(url: &str) -> String {

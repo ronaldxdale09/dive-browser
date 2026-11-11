@@ -7,6 +7,7 @@ import { useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { isImeComposing } from "../lib/ime";
+import { ignored } from "../lib/chromeErrors";
 
 const NONE: FindResult = { total: 0, current: 0 };
 
@@ -102,7 +103,7 @@ export function FindBar({ tabId }: { tabId?: string }) {
     if (!activeTab || sleeping || loading) return;
     if (!query) {
       sequence.current += 1;
-      void ipc.tabFind(activeTab, "", true, false).catch(() => undefined);
+      void ipc.tabFind(activeTab, "", true, false).catch(ignored("find clear"));
       return;
     }
     pending.current = setTimeout(() => {
@@ -122,13 +123,13 @@ export function FindBar({ tabId }: { tabId?: string }) {
     const tab = activeTab;
     return () => {
       sequence.current += 1;
-      void ipc.tabFind(tab, "", true, false).catch(() => undefined);
+      void ipc.tabFind(tab, "", true, false).catch(ignored("find clear on tab change"));
     };
   }, [activeTab, sleeping]);
 
   const close = () => {
     // The bar took the keyboard; hand it back so the page scrolls with the keys again.
-    if (activeTab) void ipc.tabFocus(activeTab).catch(() => undefined);
+    if (activeTab) void ipc.tabFocus(activeTab).catch(ignored("focus tab after find"));
     toggle("find", false);
   };
 

@@ -5,6 +5,7 @@ import { useBrowser } from "./browser";
 import { APPEARANCE_KEYS, THEME_VARS, UI_SCALE_MAX, UI_SCALE_MIN, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
 import { errorMessage } from "../lib/errors";
 import { isPrivateWindow } from "../lib/privateMode";
+import { ignored } from "../lib/chromeErrors";
 
 /**
  * User preferences. The host owns them (it clamps and persists), so writes go
@@ -178,7 +179,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
         if (options?.rejectOnError) throw e;
       }
     });
-    writeTail = persisted.catch(() => undefined);
+    writeTail = persisted.catch(ignored("prefs write queue"));
     await persisted;
   },
 }));

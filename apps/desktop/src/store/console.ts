@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { events, ipc } from "../lib/ipc";
 import type { ConsoleEntry } from "../lib/ipc";
+import { ignored } from "../lib/chromeErrors";
 
 const CAP = 500;
 
@@ -15,7 +16,7 @@ export const CLEARED_SOURCE = "clear";
  * `beforeNavigation`, what the new page has already logged stays.
  */
 function clearHost(tabId: string, beforeNavigation: boolean) {
-  void ipc.tabConsoleClear(tabId, beforeNavigation).catch(() => undefined);
+  void ipc.tabConsoleClear(tabId, beforeNavigation).catch(ignored("console clear"));
 }
 
 /** A console entry as kept here: the wire entry plus a key that survives eviction, so a windowed list can reuse rows. */

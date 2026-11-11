@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Address, Card, CardDraft } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
+import { errorMessage, invalidField } from "../lib/errors";
 import { useBrowser } from "./browser";
 
 /**
@@ -15,6 +15,9 @@ import { useBrowser } from "./browser";
  * profile changes: the lists used to stay loaded, so after a switch the
  * wallet offered the previous profile's addresses and cards.
  */
+/** Why a save failed: the host's words, and the input they are about when it named one. */
+export type SaveFailure = { message: string; field: string | null };
+
 interface WalletStore {
   addresses: Address[];
   cards: Card[];
@@ -22,10 +25,10 @@ interface WalletStore {
   error: string | null;
   load: () => Promise<void>;
   /** Save an address; resolves to why it failed, or null once saved. */
-  saveAddress: (address: Address) => Promise<string | null>;
+  saveAddress: (address: Address) => Promise<SaveFailure | null>;
   deleteAddress: (id: string) => Promise<void>;
   /** Save a card; resolves to why it failed, or null once saved. */
-  saveCard: (draft: CardDraft) => Promise<string | null>;
+  saveCard: (draft: CardDraft) => Promise<SaveFailure | null>;
   deleteCard: (id: string) => Promise<void>;
   /**
    * Fill a form on `tabId`, and say how it went. `url` is the page the
@@ -94,7 +97,7 @@ export const useWallet = create<WalletStore>((set, get) => ({
       await get().load();
       return null;
     } catch (error) {
-      return errorMessage(error);
+      return { message: errorMessage(error), field: invalidField(error) };
     }
   },
   deleteAddress: async (id) => {
@@ -111,7 +114,7 @@ export const useWallet = create<WalletStore>((set, get) => ({
       await get().load();
       return null;
     } catch (error) {
-      return errorMessage(error);
+      return { message: errorMessage(error), field: invalidField(error) };
     }
   },
   deleteCard: async (id) => {

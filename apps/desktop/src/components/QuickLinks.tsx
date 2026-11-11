@@ -9,6 +9,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { Favicon } from "./Favicon";
 import { BrandLogo } from "./BrandLogo";
 import { Icon } from "./Icon";
+import { ignored } from "../lib/chromeErrors";
 
 /** The most a rail can pin before it stops being quick; mirrors the host. */
 export const MAX_QUICK_LINKS = 12;
@@ -47,7 +48,7 @@ export function QuickLinks() {
     ipc
       .faviconsFor(urls)
       .then((rows) => alive && setCached(Object.fromEntries(rows)))
-      .catch(() => undefined);
+      .catch(ignored("quick link favicons"));
     return () => {
       alive = false;
     };

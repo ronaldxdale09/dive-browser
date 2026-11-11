@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { isWindows } from "./commands";
+import { ignored } from "./chromeErrors";
 
 /**
  * Width of the strip left uncovered by the page view along the window's
@@ -40,7 +41,7 @@ export type ResizeDirection =
 export function beginWindowResize(direction: ResizeDirection): void {
   getCurrentWindow()
     .startResizeDragging(direction)
-    .catch(() => undefined);
+    .catch(ignored("window resize drag"));
 }
 
 /**
@@ -58,7 +59,7 @@ export function useWindowMaximized(): boolean {
       void window
         .isMaximized()
         .then((v) => alive && setMaximized(v))
-        .catch(() => undefined);
+        .catch(ignored("window maximized state"));
     sync();
     // Coalesced to one read per frame: `tauri://resize` fires per WM_SIZE, so
     // dragging an edge asked the window whether it was maximized dozens of
@@ -75,7 +76,7 @@ export function useWindowMaximized(): boolean {
     return () => {
       alive = false;
       if (frame !== null) cancelAnimationFrame(frame);
-      void stop.then((off) => off()).catch(() => undefined);
+      void stop.then((off) => off()).catch(ignored("window resize unlisten"));
     };
   }, []);
   return maximized;

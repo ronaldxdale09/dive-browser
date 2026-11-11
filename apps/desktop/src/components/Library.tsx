@@ -28,6 +28,7 @@ import { downloadStatus, downloadStatusLabel } from "../store/downloads";
 import type { Download as LiveDownload } from "../store/downloads";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
+import { ignored } from "../lib/chromeErrors";
 
 /** How many rows each list asks for at a time; scrolling to the end asks for the next page. */
 export const LIBRARY_LIMIT = 200;
@@ -676,7 +677,7 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
     ipc
       .downloadsMissing(savedKey.split("\n"))
       .then((gone) => alive && setMissing(new Set(gone)))
-      .catch(() => undefined);
+      .catch(ignored("missing downloads check"));
     return () => {
       alive = false;
     };
