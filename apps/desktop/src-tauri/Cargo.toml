@@ -115,8 +115,6 @@ default = ["cef", "whisper"]
 whisper = ["dep:whisper-rs"]
 # Chromium engine (the product). Requires cmake + ninja and the CEF CLI.
 cef = ["tauri/cef", "dep:cef", "dep:tauri-runtime-cef"]
-# System webview fallback for UI-only development without CEF.
-wry = ["tauri/wry"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

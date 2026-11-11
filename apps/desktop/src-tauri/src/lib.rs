@@ -120,14 +120,11 @@ mod webapp;
 pub use error::AppError;
 pub use startup::StartupTimeline;
 
-/// The Tauri runtime in use: Chromium (CEF) for the product, the system
-/// webview as a UI-only fallback.
+/// The Tauri runtime in use: Chromium (CEF).
 #[cfg(feature = "cef")]
 pub type Runtime = tauri::Cef;
-/// The Tauri runtime in use: Chromium (CEF) for the product, the system
-/// webview as a UI-only fallback.
 #[cfg(not(feature = "cef"))]
-pub type Runtime = tauri::Wry;
+compile_error!("Dive builds only with the `cef` feature; the system-webview fallback was removed.");
 
 /// Label of the React chrome webview.
 pub const CHROME_LABEL: &str = "chrome";

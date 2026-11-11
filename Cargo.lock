@@ -6068,8 +6068,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "url",
- "webkit2gtk",
- "webview2-com",
  "window-vibrancy",
  "windows 0.61.3",
 ]

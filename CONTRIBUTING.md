@@ -24,9 +24,6 @@ a copy you already have.
 Lighter builds when you do not need the whole engine:
 
 ```bash
-# UI-only build on the system webview, no CEF toolchain needed
-cargo run -p dive-desktop --no-default-features --features wry
-
 # Skip the whisper.cpp toolchain (live subtitles become unavailable)
 cargo build -p dive-desktop --no-default-features --features cef
 ```
