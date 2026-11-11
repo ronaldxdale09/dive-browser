@@ -14,8 +14,6 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -338,14 +336,37 @@ pub(crate) fn webapp_for_window(
     Ok(lock(&state.store).web_app(&app_id)?)
 }
 
+/// The first 16 hex digits of SHA-256 over the app id: the same on every
+/// build, unlike the standard library hasher, whose algorithm may change between Rust
+/// releases.
+fn stable_id(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(id.as_bytes()))[..16].to_owned()
+}
+
 /// Where an app's files live: a directory named by a hash of its id, so any
 /// id — they are URLs — is a safe path.
 fn app_dir(id: &str) -> PathBuf {
-    let mut hasher = DefaultHasher::new();
-    id.hash(&mut hasher);
-    state::data_root()
-        .join("webapps")
-        .join(format!("{:016x}", hasher.finish()))
+    state::data_root().join("webapps").join(stable_id(id))
+}
+
+/// Delete an app's data folder, but only one inside Dive's own `webapps`
+/// directory: a record is data, and must not be able to point a delete
+/// somewhere else.
+fn remove_app_dir(dir: &Path) {
+    let webapps = state::data_root().join("webapps");
+    if dir == webapps
+        || !dir.starts_with(&webapps)
+        || dir.components().any(|c| c.as_os_str() == "..")
+    {
+        tracing::warn!(path = %dir.display(), "not removing a folder outside Dive's web app files");
+        return;
+    }
+    if let Err(e) = std::fs::remove_dir_all(dir)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(path = %dir.display(), "could not remove the app's files: {e}");
+    }
 }
 
 /// Render the icon inside the page: no rasterizer needed for SVG or WebP,
@@ -459,6 +480,17 @@ pub(crate) async fn webapp_install(
     let icon_path = write_icon(&dir, &png)?;
 
     let existing = lock(&state.store).web_app(&app_id)?;
+    // An app installed before ids were hashed with SHA-256 keeps its files in
+    // a folder named by the old hash. Carry what it recorded about its
+    // launcher across, then drop that folder: nothing points at it any more.
+    if let Some(old) = existing
+        .as_ref()
+        .and_then(|e| Path::new(&e.icon_path).parent())
+        .filter(|old| *old != dir)
+    {
+        launcher::carry_record(old, &dir);
+        remove_app_dir(old);
+    }
     // The app opens where it was installed from: that workspace's container
     // holds the cookies and logins the page was using.
     let workspace_id = lock(&state.store)
@@ -563,12 +595,19 @@ pub(crate) fn webapp_open(app: AppHandle<Runtime>, app_id: String) -> AppResult<
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn webapp_uninstall(app: AppHandle<Runtime>, app_id: String) -> AppResult<()> {
-    let record = {
+    let (record, others) = {
         let state = app.state::<AppState>();
         let record = lock(&state.store).web_app(&app_id)?;
         let Some(record) = record else {
             return Ok(());
         };
+        // Read in a lock of its own: the launcher must know which other apps
+        // share its name before it deletes anything by name.
+        let others: Vec<WebApp> = lock(&state.store)
+            .list_web_apps()?
+            .into_iter()
+            .filter(|other| other.id != app_id)
+            .collect();
         let open_tab = lock(&state.host)
             .as_ref()
             .and_then(|h| h.tab_for_app(&app_id));
@@ -576,16 +615,16 @@ pub(crate) fn webapp_uninstall(app: AppHandle<Runtime>, app_id: String) -> AppRe
             crate::commands::tab_attach(app.clone(), tab)?;
         }
         lock(&state.store).remove_web_app(&app_id)?;
-        record
+        (record, others)
     };
-    if let Err(e) = launcher::remove(&record) {
+    if let Err(e) = launcher::remove(&record, &others) {
         tracing::warn!(app = %record.name, "could not remove the app launcher: {e}");
     }
-    let dir = app_dir(&record.id);
-    if let Err(e) = std::fs::remove_dir_all(&dir)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!(path = %dir.display(), "could not remove the app's files: {e}");
+    remove_app_dir(&app_dir(&record.id));
+    // An install from before the id hash changed lives in the folder its
+    // icon sits in, which is not `app_dir`'s answer any more.
+    if let Some(old) = Path::new(&record.icon_path).parent() {
+        remove_app_dir(old);
     }
     Ok(())
 }
@@ -613,7 +652,119 @@ pub(crate) fn remember_app_window(window: &tauri::Window<Runtime>, tab: TabId) {
 /// Dive starts and opens it. The bundle carries the app's name and icon, so
 /// Spotlight, Launchpad and the Dock treat it as the app.
 mod launcher {
-    use super::{DefaultHasher, Hash, Hasher, Path, PathBuf, WebApp};
+    use super::{Path, PathBuf, WebApp, stable_id};
+    use serde::{Deserialize, Serialize};
+
+    /// The file in an app's data folder that lists the launcher files Dive
+    /// wrote for it, so removal touches those and nothing else.
+    const OWNED: &str = "launcher.json";
+
+    /// Launcher files an app owns.
+    #[derive(Serialize, Deserialize, Default)]
+    struct Owned {
+        paths: Vec<PathBuf>,
+    }
+
+    /// The folder the record's icon lives in: new installs and installs made
+    /// under the old hash alike, so no old hash is ever recomputed.
+    fn data_folder(app: &WebApp) -> Option<PathBuf> {
+        Path::new(&app.icon_path).parent().map(Path::to_path_buf)
+    }
+
+    /// What the app recorded, or nothing when there is no record.
+    fn read_owned(app: &WebApp) -> Owned {
+        data_folder(app)
+            .and_then(|dir| std::fs::read(dir.join(OWNED)).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn write_owned(app: &WebApp, owned: &Owned) -> Result<(), String> {
+        let dir = data_folder(app).ok_or("the app has no data folder")?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let json = serde_json::to_vec(owned).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(OWNED), json).map_err(|e| e.to_string())
+    }
+
+    /// Copy the launcher record from an app's old data folder to its new one.
+    pub(super) fn carry_record(old: &Path, new: &Path) {
+        let _ = std::fs::copy(old.join(OWNED), new.join(OWNED));
+    }
+
+    /// The launcher file stem for `app` in `root`: its own name when that is
+    /// free or already this app's, else the name with the site's host, else
+    /// with a number. `ours(path)` says whether an existing file belongs to
+    /// this app.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", test)),
+        allow(dead_code)
+    )]
+    pub(super) fn free_name(
+        root: &Path,
+        app: &WebApp,
+        ext: &str,
+        ours: &dyn Fn(&Path) -> bool,
+    ) -> String {
+        let base = bundle_name(app);
+        // The suffix must survive the 64-character cut, so the name gives way.
+        let with = |suffix: &str| {
+            let keep = 64usize.saturating_sub(suffix.chars().count() + 1);
+            let head: String = base.chars().take(keep).collect();
+            safe_name(&format!("{head} {suffix}"))
+        };
+        let mut candidates = vec![base.clone()];
+        let host = url::Url::parse(&app.id)
+            .ok()
+            .and_then(|u| u.host_str().map(safe_name))
+            .filter(|h| !h.is_empty());
+        if let Some(host) = host {
+            candidates.push(with(&format!("({host})")));
+            candidates.extend((2..=9).map(|n| with(&format!("({host} {n})"))));
+        }
+        let last = with(&stable_id(&app.id));
+        for stem in candidates {
+            let path = root.join(format!("{stem}.{ext}"));
+            if !path.exists() || ours(&path) {
+                return stem;
+            }
+        }
+        last
+    }
+
+    /// Launcher files recorded for the app that sit directly in `root`.
+    /// The record is a file; it is only trusted for paths inside the
+    /// launcher folder, so a doctored one cannot aim a delete elsewhere.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", test)),
+        allow(dead_code)
+    )]
+    fn owned_in(root: &Path, app: &WebApp) -> Vec<PathBuf> {
+        read_owned(app)
+            .paths
+            .into_iter()
+            .filter(|p| p.parent() == Some(root))
+            .collect()
+    }
+
+    /// What a Windows removal may delete: exactly the recorded files; for an
+    /// install from before they were recorded, the old name-only pair, but
+    /// only when no other installed app shares the name and so may own them.
+    #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+    fn paths_to_remove(root: &Path, app: &WebApp, others: &[WebApp]) -> Vec<PathBuf> {
+        let owned = owned_in(root, app);
+        if !owned.is_empty() {
+            return owned;
+        }
+        let name = bundle_name(app);
+        if others.iter().any(|other| bundle_name(other) == name) {
+            tracing::warn!(app = %app.name, "another app shares this name; leaving its shortcut");
+            return Vec::new();
+        }
+        vec![
+            root.join(format!("{name}.lnk")),
+            root.join(format!("{name}.ico")),
+        ]
+    }
 
     /// Characters a launcher's file name may keep besides letters and digits.
     const NAME_PUNCTUATION: &[char] = &[' ', '-', '_', '.', '(', ')', '&', '+', ',', '!'];
@@ -693,9 +844,7 @@ mod launcher {
     /// A bundle identifier that is stable for the app and legal for Launch Services.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn bundle_id(app: &WebApp) -> String {
-        let mut hasher = DefaultHasher::new();
-        app.id.hash(&mut hasher);
-        format!("app.dive.browser.webapp.{:016x}", hasher.finish())
+        format!("app.dive.browser.webapp.{}", stable_id(&app.id))
     }
 
     /// Single-quote a string for `sh`.
@@ -750,13 +899,22 @@ mod launcher {
         )
     }
 
+    /// Whether `bundle` was written for this app: its launch script carries
+    /// the app's id as the one quoted argument. No hash is involved, so it
+    /// holds for bundles written under any earlier scheme.
     #[cfg(target_os = "macos")]
-    pub(super) fn install(app: &WebApp) -> Result<Option<PathBuf>, String> {
+    fn bundle_is_for(bundle: &Path, app: &WebApp) -> bool {
+        std::fs::read_to_string(bundle.join("Contents/MacOS/launch"))
+            .is_ok_and(|script| script.contains(&sh_quote(&format!("--app={}", app.id))))
+    }
+
+    /// Write the bundle and the record of it: everything but the icon
+    /// conversion and the Launch Services call.
+    #[cfg(target_os = "macos")]
+    fn write_bundle(root: &Path, app: &WebApp, dive: &Path) -> Result<PathBuf, String> {
         use std::os::unix::fs::PermissionsExt as _;
-        let Some(root) = root() else {
-            return Ok(None);
-        };
-        let bundle = root.join(format!("{}.app", bundle_name(app)));
+        let stem = free_name(root, app, "app", &|bundle| bundle_is_for(bundle, app));
+        let bundle = root.join(format!("{stem}.app"));
         let contents = bundle.join("Contents");
         let macos = contents.join("MacOS");
         let resources = contents.join("Resources");
@@ -764,11 +922,27 @@ mod launcher {
         std::fs::create_dir_all(&resources).map_err(|e| e.to_string())?;
         std::fs::write(contents.join("Info.plist"), info_plist(app)).map_err(|e| e.to_string())?;
 
-        let dive = std::env::current_exe().map_err(|e| e.to_string())?;
         let script = macos.join("launch");
-        std::fs::write(&script, launch_script(&dive, app)).map_err(|e| e.to_string())?;
+        std::fs::write(&script, launch_script(dive, app)).map_err(|e| e.to_string())?;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
+        write_owned(
+            app,
+            &Owned {
+                paths: vec![bundle.clone()],
+            },
+        )?;
+        Ok(bundle)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn install(app: &WebApp) -> Result<Option<PathBuf>, String> {
+        let Some(root) = root() else {
+            return Ok(None);
+        };
+        let dive = std::env::current_exe().map_err(|e| e.to_string())?;
+        let bundle = write_bundle(&root, app, &dive)?;
+        let resources = bundle.join("Contents/Resources");
 
         // `sips` ships with macOS and turns a square PNG into an icns.
         let icns = resources.join("icon.icns");
@@ -872,7 +1046,11 @@ mod launcher {
         };
         std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         let dive = std::env::current_exe().map_err(|e| e.to_string())?;
-        let link = root.join(format!("{}.lnk", bundle_name(app)));
+        let owned = read_owned(app);
+        let stem = free_name(&root, app, "lnk", &|link| {
+            owned.paths.iter().any(|p| p == link)
+        });
+        let link = root.join(format!("{stem}.lnk"));
 
         // A shortcut points at an icon file; it cannot carry a PNG. Write one
         // next to the shortcut, and fall back to Dive's own icon -- index 0 of
@@ -881,19 +1059,19 @@ mod launcher {
             .ok()
             .and_then(|png| png_as_ico(&png))
             .and_then(|ico| {
-                let path = root.join(format!("{}.ico", bundle_name(app)));
+                let path = root.join(format!("{stem}.ico"));
                 std::fs::write(&path, ico).ok().map(|()| path)
-            })
-            .map_or_else(
-                || format!("{},0", dive.display()),
-                |path| path.display().to_string(),
-            );
+            });
+        let icon_text = icon.as_ref().map_or_else(
+            || format!("{},0", dive.display()),
+            |path| path.display().to_string(),
+        );
 
         // A .lnk is a COM object's business. Rather than bind IShellLink for
         // one call, ask the shell scripting host that has always made them.
         let status = std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", SHORTCUT_SCRIPT])
-            .envs(shortcut_env(&link, &dive, app, &icon))
+            .envs(shortcut_env(&link, &dive, app, &icon_text))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -903,20 +1081,19 @@ mod launcher {
                 "could not create the Start Menu shortcut ({status})"
             ));
         }
+        let mut paths = vec![link.clone()];
+        paths.extend(icon);
+        write_owned(app, &Owned { paths })?;
         Ok(Some(link))
     }
 
     #[cfg(target_os = "windows")]
-    pub(super) fn remove(app: &WebApp) -> Result<(), String> {
+    pub(super) fn remove(app: &WebApp, others: &[WebApp]) -> Result<(), String> {
         let Some(root) = root() else {
             return Ok(());
         };
-        // Only what Dive wrote: the folder is Dive's own, and the names come
-        // from the app being removed.
-        for path in [
-            root.join(format!("{}.lnk", bundle_name(app))),
-            root.join(format!("{}.ico", bundle_name(app))),
-        ] {
+        // Only what this app owns: see `paths_to_remove`.
+        for path in paths_to_remove(&root, app, others) {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -932,25 +1109,36 @@ mod launcher {
     }
 
     #[cfg(target_os = "macos")]
-    pub(super) fn remove(app: &WebApp) -> Result<(), String> {
+    pub(super) fn remove(app: &WebApp, others: &[WebApp]) -> Result<(), String> {
         let Some(root) = root() else {
             return Ok(());
         };
-        let bundle = root.join(format!("{}.app", bundle_name(app)));
-        // Only a bundle Dive wrote is removed: the identifier says so.
-        let plist = std::fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap_or_default();
-        if !plist.contains(&bundle_id(app)) {
-            return Ok(());
+        remove_in(&root, app, others)
+    }
+
+    /// Delete the bundles recorded for the app, plus the name-only one an
+    /// install from before they were recorded would have made, but only a
+    /// bundle whose launch script names this app. A same-named bundle that
+    /// belongs to another app, or to the person, stays.
+    #[cfg(target_os = "macos")]
+    fn remove_in(root: &Path, app: &WebApp, _others: &[WebApp]) -> Result<(), String> {
+        let mut bundles = owned_in(root, app);
+        bundles.push(root.join(format!("{}.app", bundle_name(app))));
+        for bundle in bundles {
+            if !bundle_is_for(&bundle, app) {
+                continue;
+            }
+            match std::fs::remove_dir_all(&bundle) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            }
         }
-        match std::fs::remove_dir_all(&bundle) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub(super) fn remove(_app: &WebApp) -> Result<(), String> {
+    pub(super) fn remove(_app: &WebApp, _others: &[WebApp]) -> Result<(), String> {
         Ok(())
     }
 
@@ -1065,6 +1253,134 @@ mod launcher {
                 bounds: String::new(),
                 workspace_id: None,
             }
+        }
+
+        fn temp(tag: &str) -> PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!("dive-webapp-{tag}-{nanos}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        /// An app whose icon, and so launcher record, lives in `data`.
+        fn app_in(data: &Path, name: &str, id: &str) -> WebApp {
+            let mut a = app(name, id);
+            a.icon_path = data.join("icon.png").to_string_lossy().into_owned();
+            a
+        }
+
+        #[test]
+        fn stable_id_is_sha256_and_the_same_every_build() {
+            assert_eq!(stable_id("https://x/"), "4b7efacc825af67f");
+        }
+
+        #[test]
+        fn two_apps_with_the_same_name_get_two_launchers() {
+            let root = temp("names");
+            std::fs::create_dir_all(root.join("Mail.app")).unwrap();
+            let b = app("Mail", "https://b.example/");
+            assert_eq!(free_name(&root, &b, "app", &|_| false), "Mail (b.example)");
+            std::fs::create_dir_all(root.join("Mail (b.example).app")).unwrap();
+            assert_eq!(
+                free_name(&root, &b, "app", &|_| false),
+                "Mail (b.example 2)"
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        fn a_long_name_keeps_its_disambiguator() {
+            let root = temp("long");
+            let long = "N".repeat(100);
+            std::fs::create_dir_all(root.join(format!("{}.app", "N".repeat(64)))).unwrap();
+            let stem = free_name(&root, &app(&long, "https://b.example/"), "app", &|_| false);
+            assert!(
+                stem.ends_with("(b.example)") && stem.chars().count() <= 64,
+                "{stem}"
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        fn reinstalling_an_app_reuses_its_own_launcher() {
+            let root = temp("reuse");
+            std::fs::create_dir_all(root.join("Mail.app")).unwrap();
+            let a = app("Mail", "https://a.example/");
+            assert_eq!(free_name(&root, &a, "app", &|_| true), "Mail");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        fn a_legacy_windows_shortcut_shared_by_name_is_kept() {
+            let root = temp("legacy");
+            let data = temp("legacy-data");
+            let a = app_in(&data, "Mail", "https://a.example/");
+            let data_b = temp("legacy-data-b");
+            let b = app_in(&data_b, "Mail", "https://b.example/");
+            // No record: the name-only pair goes only if nobody else could own it.
+            assert!(paths_to_remove(&root, &a, std::slice::from_ref(&b)).is_empty());
+            assert_eq!(paths_to_remove(&root, &a, &[]).len(), 2);
+            // A record names exactly its files, and nothing outside the folder.
+            write_owned(
+                &a,
+                &Owned {
+                    paths: vec![
+                        root.join("Mail (a.example).lnk"),
+                        PathBuf::from("/etc/passwd"),
+                    ],
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                paths_to_remove(&root, &a, std::slice::from_ref(&b)),
+                vec![root.join("Mail (a.example).lnk")]
+            );
+            let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&data);
+            let _ = std::fs::remove_dir_all(&data_b);
+        }
+
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn removing_one_app_leaves_a_same_named_bundle_alone() {
+            let root = temp("mac");
+            let (data_a, data_b) = (temp("mac-a"), temp("mac-b"));
+            let a = app_in(&data_a, "Mail", "https://a.example/");
+            let b = app_in(&data_b, "Mail", "https://b.example/");
+            let dive = Path::new("/Applications/Dive.app/Contents/MacOS/dive");
+            let bundle_a = write_bundle(&root, &a, dive).unwrap();
+            let bundle_b = write_bundle(&root, &b, dive).unwrap();
+            assert_ne!(bundle_a, bundle_b);
+            // Installing A again lands on A's own bundle.
+            assert_eq!(write_bundle(&root, &a, dive).unwrap(), bundle_a);
+            remove_in(&root, &a, std::slice::from_ref(&b)).unwrap();
+            assert!(!bundle_a.exists());
+            assert!(bundle_b.exists());
+            let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&data_a);
+            let _ = std::fs::remove_dir_all(&data_b);
+        }
+
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn a_bundle_dive_did_not_write_is_not_removed() {
+            let root = temp("mac-foreign");
+            let macos = root.join("Mail.app/Contents/MacOS");
+            std::fs::create_dir_all(&macos).unwrap();
+            std::fs::write(
+                macos.join("launch"),
+                launch_script(Path::new("/dive"), &app("Mail", "https://other.example/")),
+            )
+            .unwrap();
+            let data = temp("mac-foreign-a");
+            let a = app_in(&data, "Mail", "https://a.example/");
+            remove_in(&root, &a, &[]).unwrap();
+            assert!(root.join("Mail.app").exists());
+            let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&data);
         }
 
         #[test]
