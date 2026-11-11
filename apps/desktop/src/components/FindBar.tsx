@@ -6,6 +6,7 @@ import type { FindResult } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { isImeComposing } from "../lib/ime";
 
 const NONE: FindResult = { total: 0, current: 0 };
 
@@ -152,14 +153,14 @@ export function FindBar({ tabId }: { tabId?: string }) {
             lastQuery = e.target.value;
           }}
           onKeyDown={(e) => {
+            // Enter or Escape while an input method is composing confirms or
+            // cancels the candidate; it is not a request to step or close.
+            if (isImeComposing(e)) return;
             if (e.key === "Escape") {
               close();
               return;
             }
             if (e.key !== "Enter") return;
-            // Enter while an input method is composing confirms the
-            // composition; it is not a request for the next match.
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             e.preventDefault();
             step(!e.shiftKey);
           }}

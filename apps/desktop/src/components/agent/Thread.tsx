@@ -14,6 +14,7 @@ import { SpecModal } from "../SpecModal";
 import { Tooltip } from "../Tooltip";
 import { ModelPicker } from "./ModelPicker";
 import { StepList } from "./StepList";
+import { isImeComposing } from "../../lib/ime";
 
 interface Suggestion {
   label: string;
@@ -206,6 +207,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();

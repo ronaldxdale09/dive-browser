@@ -5,6 +5,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { useJsDialog } from "../store/jsDialog";
 import type { JsDialogAsked } from "../lib/ipc";
 import { Icon } from "./Icon";
+import { isImeComposing } from "../lib/ime";
 
 /** The site as the card names it. */
 function site(origin: string) {
@@ -52,6 +53,7 @@ export function JsDialogCard({ tabId }: { tabId: string | null }) {
       aria-describedby="js-dialog-message"
       className="surface-enter w-[380px] max-w-full rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
       onKeyDown={(e) => {
+        if (isImeComposing(e)) return;
         // A focused button answers Enter itself: Enter on Stay or Cancel
         // means Stay or Cancel, never the opposite.
         if (e.target instanceof HTMLButtonElement) return;

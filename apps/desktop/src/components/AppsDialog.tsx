@@ -10,6 +10,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { BuiltinAppIcon } from "./BuiltinAppIcon";
 import { Icon, IconButton } from "./Icon";
+import { isImeComposing } from "../lib/ime";
 
 /**
  * How many cards share a row right now. The grid is `auto-fill`, so the
@@ -86,6 +87,7 @@ export function AppsDialog() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter" && shown[0]) {
                   e.preventDefault();
                   launch(shown[0]);

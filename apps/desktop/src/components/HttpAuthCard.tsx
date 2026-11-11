@@ -4,6 +4,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useHttpAuth } from "../store/httpAuth";
 import { Icon } from "./Icon";
+import { isImeComposing } from "../lib/ime";
 
 /**
  * A server or proxy asking who you are, as a card over the page.
@@ -48,6 +49,7 @@ export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | nul
       aria-label={`Sign in to ${asked.host}`}
       className="surface-enter w-[380px] max-w-full rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
       onKeyDown={(e) => {
+        if (isImeComposing(e)) return;
         // A focused button answers Enter itself, so Enter on Cancel cancels.
         // From a field it signs in, but only once there is a name to send:
         // an empty username is a half-filled form, not an answer.

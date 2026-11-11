@@ -38,6 +38,7 @@ import { screenUrl } from "./internal/InternalPage";
 import { useImportVideo } from "../screen/importVideo";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { isImeComposing } from "../lib/ime";
 
 /**
  * The application menu behind the three lines at the end of the toolbar:
@@ -102,6 +103,7 @@ export function MainMenu() {
   const flat = filtered.filter((g) => g.id !== "zoom").flatMap((g) => g.items);
 
   const onKey = (e: React.KeyboardEvent) => {
+    if (isImeComposing(e)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setCursor((c) => Math.min(flat.length - 1, c + 1));

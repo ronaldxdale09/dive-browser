@@ -10,6 +10,7 @@ import { isReady, useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
 import { ProviderLogo } from "./ProviderLogo";
+import { isImeComposing } from "../../lib/ime";
 
 const EFFORTS = [
   { value: "default", label: "Auto" },
@@ -141,7 +142,9 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
             key={prefs.agent_model}
             defaultValue={prefs.agent_model}
             onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== prefs.agent_model && void update({ agent_model: e.target.value.trim() })}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onKeyDown={(e) => {
+              if (!isImeComposing(e) && e.key === "Enter") e.currentTarget.blur();
+            }}
             aria-label="Model id"
             spellCheck={false}
             className="mx-1 mt-1 block h-7 w-[calc(100%-0.5rem)] rounded-lg border border-line bg-surface-2 px-2 font-mono text-11 text-ink outline-none focus:border-highlight/60"

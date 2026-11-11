@@ -31,6 +31,7 @@ import { usePrefs } from "../store/prefs";
 import { NavigationButtons } from "./NavigationButtons";
 import { ADDRESS_SECURITY_MEANING, addressSecurity } from "../lib/addressSecurity";
 import type { AddressSecurity } from "../lib/addressSecurity";
+import { isImeComposing } from "../lib/ime";
 
 const SECURITY_GLYPHS: Record<AddressSecurity, LucideIcon> = {
   none: Search,
@@ -60,11 +61,6 @@ type Pending = { tabId: string; text: string; base: string; started: boolean };
 
 function freshDraft(tabId: string | null, value: string, base = value): Draft {
   return { tabId, value, base, initial: value, complete: false };
-}
-
-/** A key press that belongs to an input method composing text, not to the bar. */
-function composing(event: React.KeyboardEvent) {
-  return event.nativeEvent.isComposing || event.keyCode === 229;
 }
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
@@ -281,7 +277,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
               }
             }}
             onKeyDown={(event) => {
-              if (composing(event)) return;
+              if (isImeComposing(event)) return;
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();

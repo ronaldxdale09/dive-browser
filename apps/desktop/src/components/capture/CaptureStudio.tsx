@@ -9,6 +9,7 @@ import { fileManagerName, isEditable, isWindows } from "../../lib/commands";
 import { useBrowser } from "../../store/browser";
 import { Icon } from "../Icon";
 import { errorMessage } from "../../lib/errors";
+import { isImeComposing } from "../../lib/ime";
 
 type Tool = "crop" | "rect" | "arrow" | "pen" | "highlight" | "text" | "blur";
 type Point = { x: number; y: number };
@@ -307,7 +308,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
               onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => updateDraft(null)} className="block w-full touch-none bg-white outline-none focus-visible:ring-2 focus-visible:ring-highlight" style={{ cursor: tool === "text" ? "text" : "crosshair" }} />
             <p id="capture-keys" className="sr-only">Arrow keys move the crosshair, with Shift for bigger steps. Enter starts a shape and Enter again finishes it; Escape cancels it.</p>
             <span role="status" className="sr-only">{said}</span>
-            {textAt && <input autoFocus aria-label="Annotation text" placeholder="Type a note…" className="absolute min-w-40 rounded-md border border-highlight bg-surface px-2 py-1 text-xs text-ink shadow-xl outline-none" style={{ left: `${(textAt.x / image.naturalWidth) * 100}%`, top: `${(textAt.y / image.naturalHeight) * 100}%` }} onKeyDown={(event) => { if (event.key === "Enter") commitText(event.currentTarget.value); if (event.key === "Escape") setTextAt(null); }} onBlur={(event) => commitText(event.currentTarget.value)} />}
+            {textAt && <input autoFocus aria-label="Annotation text" placeholder="Type a note…" className="absolute min-w-40 rounded-md border border-highlight bg-surface px-2 py-1 text-xs text-ink shadow-xl outline-none" style={{ left: `${(textAt.x / image.naturalWidth) * 100}%`, top: `${(textAt.y / image.naturalHeight) * 100}%` }} onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") commitText(event.currentTarget.value); if (event.key === "Escape") setTextAt(null); }} onBlur={(event) => commitText(event.currentTarget.value)} />}
           </div>}
         </section>
         <aside aria-label="Tool settings" className="flex w-52 shrink-0 flex-col border-l border-line bg-surface p-4">

@@ -101,6 +101,17 @@ describe("useFocusTrap", () => {
     expect(onEscape).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves an Escape that cancels an input method candidate alone", () => {
+    const onEscape = vi.fn();
+    render(<Dialog onEscape={onEscape} />);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(dialog, { key: "Escape", keyCode: 229 });
+    expect(onEscape).not.toHaveBeenCalled();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
   it("cycles Tab and Shift+Tab inside the container, skipping disabled controls", () => {
     render(<Dialog />);
     const dialog = screen.getByRole("dialog");

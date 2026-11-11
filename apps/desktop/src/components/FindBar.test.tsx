@@ -76,6 +76,16 @@ describe("FindBar", () => {
     expect(ipc.tabFind).not.toHaveBeenCalled();
   });
 
+  it("does not close on an Escape that cancels an input method candidate", () => {
+    render(<FindBar />);
+    const field = screen.getByLabelText("Find in page");
+    fireEvent.keyDown(field, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(field, { key: "Escape", keyCode: 229 });
+    expect(useBrowser.getState().toggle).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("find", false);
+  });
+
   it("steps from the menu's Find Next and Find Previous", async () => {
     useBrowser.setState({ open: { ...initial.open, find: true } });
     render(<FindBar />);

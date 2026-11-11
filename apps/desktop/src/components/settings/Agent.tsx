@@ -7,6 +7,7 @@ import { isReady, useAgent } from "../../store/agent";
 import { Icon } from "../Icon";
 import { Button, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
 import { usePref } from "./usePref";
+import { isImeComposing } from "../../lib/ime";
 
 const EFFORTS = [
   { value: "default", label: "Auto" },
@@ -209,6 +210,7 @@ function KeyRow({ provider, saved }: { provider: ProviderInfo; saved: boolean })
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 onKeyDown={(e) => {
+                  if (isImeComposing(e)) return;
                   if (e.key === "Enter" && key.trim()) void submit();
                   // Escape clears a half-pasted key first; the next one
                   // closes Settings. It used to close Settings with the key

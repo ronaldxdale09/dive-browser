@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
+import { isImeComposing } from "./ime";
 
 /** What Tab can land on. `tabindex="-1"` is reachable by script only, so it is left out. */
 const FOCUSABLE = [
@@ -170,6 +171,8 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     document.addEventListener("focusin", onFocusIn);
 
     const onKey = (e: KeyboardEvent) => {
+      // An Escape that cancels an IME candidate must not close the dialog.
+      if (isImeComposing(e)) return;
       for (let node = e.target instanceof HTMLElement ? e.target : null; node && node !== root; node = node.parentElement) {
         if (activeTraps.has(node)) return;
       }

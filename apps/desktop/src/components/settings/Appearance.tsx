@@ -12,6 +12,7 @@ import type { Preset, Scheme, Seeds } from "../../lib/theme";
 import { copyText } from "../../lib/clipboard";
 import { rovingRadio } from "../../lib/useRovingRadio";
 import type { RovingRadioProps } from "../../lib/useRovingRadio";
+import { isImeComposing } from "../../lib/ime";
 
 const ACCENTS = ["#7FD8C8", "#8FB8F0", "#B79CF0", "#F0B35E", "#E58C8C", "#9ED67B", "#E9E9E9"];
 
@@ -452,6 +453,7 @@ function HexInput({ id, label, value, onCommit }: { id: string; label: string; v
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
+          if (isImeComposing(e)) return;
           if (e.key === "Enter") e.currentTarget.blur();
           // An edit is taken back without closing Settings; see TextInput.
           if (e.key === "Escape" && draft !== value.toUpperCase()) {

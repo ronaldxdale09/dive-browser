@@ -65,6 +65,18 @@ describe("JsDialogCard", () => {
     await waitFor(() => expect(ipc.jsDialogAnswer).toHaveBeenCalledWith("t1", "7", true, "dale"));
   });
 
+  it("does not accept a prompt on an Enter that confirms an input method candidate", async () => {
+    useJsDialog.setState({ byTab: { t1: [{ ...confirm, kind: "prompt", message: "Your name?", default_value: "" }] } });
+    render(<JsDialogCard tabId="t1" />);
+    const field = screen.getByRole("textbox", { name: "Your answer" });
+    fireEvent.change(field, { target: { value: "ni" } });
+    fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(field, { key: "Enter", keyCode: 229 });
+    expect(ipc.jsDialogAnswer).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(ipc.jsDialogAnswer).toHaveBeenCalledWith("t1", "7", true, "ni"));
+  });
+
   it("words a leave-page question as Leave or Stay, and Stay is a cancel", async () => {
     useJsDialog.setState({ byTab: { t1: [{ ...confirm, kind: "beforeunload", origin: "", message: "" }] } });
     render(<JsDialogCard tabId="t1" />);

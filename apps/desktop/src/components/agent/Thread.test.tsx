@@ -194,6 +194,17 @@ describe("Thread", () => {
     expect(useAgent.getState().send).toHaveBeenCalledTimes(2);
   });
 
+  it("does not submit on an Enter or Escape that belongs to an input method", () => {
+    render(<Thread onAddProvider={() => {}} />);
+    const box = screen.getByPlaceholderText(placeholder);
+    fireEvent.change(box, { target: { value: "ni hao" } });
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    expect(useAgent.getState().send).not.toHaveBeenCalled();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(useAgent.getState().send).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores blank drafts and submissions while busy", () => {
     render(<Thread onAddProvider={() => {}} />);
     const box = screen.getByPlaceholderText(placeholder);

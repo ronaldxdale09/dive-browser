@@ -3,6 +3,7 @@ import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
 import { Button, Group } from "../SettingsFields";
 import { errorMessage } from "../../lib/errors";
+import { isImeComposing } from "../../lib/ime";
 
 /**
  * What was typed, as the site address the host expects. A bare host
@@ -60,6 +61,7 @@ function Sites({ profile }: { profile: string }) {
         value={url}
         onChange={(event) => { setUrl(event.target.value); setError(null); }}
         onKeyDown={(event) => {
+          if (isImeComposing(event)) return;
           if (event.key === "Enter") { event.preventDefault(); add(); }
           // A half-typed site is cleared by Escape before Escape closes Settings.
           if (event.key === "Escape" && url) { event.stopPropagation(); setUrl(""); }

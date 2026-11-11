@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { FieldHint, useDescribedBy } from "../lib/fieldHint";
 import { useRovingRadio } from "../lib/useRovingRadio";
+import { isImeComposing } from "../lib/ime";
 export { Select } from "./Select";
 
 /**
@@ -196,6 +197,7 @@ export function TextInput({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
+        if (isImeComposing(e)) return;
         if (e.key === "Enter") e.currentTarget.blur();
         // Escape with an edit in the field takes the edit back and stops
         // there; it used to go on and close the whole of Settings with it.
@@ -238,6 +240,7 @@ export function TextArea({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
+        if (isImeComposing(e)) return;
         // As in TextInput: Escape takes back an edit before it closes anything.
         if (e.key === "Escape" && draft !== value) {
           e.stopPropagation();

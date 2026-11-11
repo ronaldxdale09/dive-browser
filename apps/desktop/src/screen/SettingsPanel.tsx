@@ -8,6 +8,7 @@ import { ASPECT_RATIOS, SOLID_COLORS, WALLPAPERS } from "./model";
 import type { AnnotationRegion, Project, TextAnimation, ZoomRegion } from "./model";
 import { useEditor } from "./store";
 import type { Selection } from "./store";
+import { isImeComposing } from "../lib/ime";
 
 /**
  * The right-hand panel: a rail of sections beside their controls. What is
@@ -204,6 +205,7 @@ function TimeField({ label, value, refused, onCommit }: { label: string; value: 
         onChange={(ev) => setDraft(ev.target.value)}
         onBlur={commit}
         onKeyDown={(ev) => {
+          if (isImeComposing(ev)) return;
           if (ev.key === "Enter") commit();
         }}
         className="h-8 rounded-lg border border-line bg-surface px-2 font-mono text-xs text-ink outline-none focus:border-highlight/60"
