@@ -1468,3 +1468,9 @@ export function nextZoom(current: number, direction: 1 | -1): number {
   const j = i === -1 ? ZOOM_STEPS.findIndex((z) => z > current) - (direction === 1 ? 0 : 1) : i + direction;
   return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, j))] ?? 1;
 }
+
+/** Show a failure in the chrome's error bar. */
+export function reportError(e: unknown, prefix?: string): void {
+  const message = errorMessage(e);
+  useBrowser.setState({ error: prefix ? `${prefix}: ${message}` : message });
+}

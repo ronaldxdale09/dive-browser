@@ -4,10 +4,8 @@ import { orderTabs } from "./tabOrder";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { useLayout } from "../store/layout";
 import { useTabAudio } from "../store/tabAudio";
-// The menu's own rule for split view, so the palette and the menu agree on
-// what "split" does to a given tab. The command list loads this module only
-// when one of these runs, since the strip imports that list in turn.
-import { splitAction, tabLabel } from "../components/TabStrip";
+// The split rule lives in tabNames so the menu and the palette share it.
+import { splitAction, tabLabel } from "./tabNames";
 
 /**
  * The tab menu's actions, for the tab in front of you. The menu is reached

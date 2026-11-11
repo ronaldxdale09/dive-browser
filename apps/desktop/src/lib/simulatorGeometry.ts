@@ -16,8 +16,8 @@
  * scale, which is what keeps `window.innerWidth` at the device's real value
  * while the pixels on screen are smaller.
  */
-import type { DevicePreset, FrameKind, Insets } from "../../data/devices";
-import { stripsFor } from "../../data/devices";
+import type { DevicePreset, FrameKind, Insets } from "../data/devices";
+import { stripsFor } from "../data/devices";
 
 /** What Dive draws around the page. */
 export type UiMode =

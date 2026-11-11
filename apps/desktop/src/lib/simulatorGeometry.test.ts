@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { customDevice, deviceById } from "../../data/devices";
-import { layoutFor, safeAreaFor, scaleFor, stripsAround, viewportFor } from "./geometry";
+import { customDevice, deviceById } from "../data/devices";
+import { layoutFor, safeAreaFor, scaleFor, stripsAround, viewportFor } from "./simulatorGeometry";
 
 const iphone15 = deviceById("iphone-15")!;
 const pixel8 = deviceById("pixel-8")!;

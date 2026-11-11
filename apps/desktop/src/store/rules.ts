@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { Rule, RuleAction } from "../lib/ipc";
-import { useBrowser } from "./browser";
-import { errorMessage } from "../lib/errors";
+import { reportError } from "./browser";
 
 /** Where a workspace's rules are: being read, read, or unreadable. */
 export type RulesStatus = "loading" | "ready" | "failed";
@@ -68,7 +67,7 @@ export const useRules = create<RulesState>((set, get) => ({
       // Rules we could not read are not "no rules": adding one to an empty
       // list and saving it would replace whatever is really there.
       if (!get().byWorkspace[workspace]) set((s) => ({ status: { ...s.status, [workspace]: "failed" } }));
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   save: async (workspace, rules) => {
@@ -81,7 +80,7 @@ export const useRules = create<RulesState>((set, get) => ({
       // Put back what the host still has, so the panel does not show rules
       // that are not in force.
       if (before && get().byWorkspace[workspace] === rules) set((s) => ({ byWorkspace: { ...s.byWorkspace, [workspace]: before } }));
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
       return false;
     }
   },

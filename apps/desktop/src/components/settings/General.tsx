@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Check, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
-import { useBrowser } from "../../store/browser";
+import { reportError, useBrowser } from "../../store/browser";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { prettyBundleId } from "../DefaultBrowserDialog";
 import { isPrivateWindow } from "../../lib/privateMode";
@@ -56,7 +56,7 @@ export function General() {
       const path = await ipc.backupExport();
       if (path) notify(`Backup saved to ${path}`, 5000);
     } catch (error) {
-      useBrowser.setState({ error: errorMessage(error) });
+      reportError(error);
     }
   };
   // Off by default: a backup's preferences replace every setting here,
@@ -73,7 +73,7 @@ export function General() {
         notify(restoreNotice(summary), 6000);
       }
     } catch (error) {
-      useBrowser.setState({ error: errorMessage(error) });
+      reportError(error);
     }
   };
   const [folderError, setFolderError] = useState<string | null>(null);

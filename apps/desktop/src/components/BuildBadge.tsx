@@ -1,12 +1,11 @@
 import { useDismiss } from "../lib/useDismiss";
 import { Copy } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { errorMessage } from "../lib/errors";
 import type { AppInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { copyText } from "../lib/clipboard";
@@ -62,7 +61,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
   const copy = () => {
     copyText(summary)
       .then(() => useBrowser.getState().notify("Build details copied"))
-      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+      .catch((e: unknown) => reportError(e));
   };
 
   return (

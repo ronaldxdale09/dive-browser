@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { HttpAuthAsked } from "../lib/ipc";
-import { errorKind, errorMessage } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { errorKind } from "../lib/errors";
+import { reportError } from "./browser";
 
 /**
  * Servers and proxies waiting to be told who you are, one queue per tab.
@@ -92,7 +92,7 @@ export const useHttpAuth = create<HttpAuthStore>((set, get) => {
         await ipc.httpAuthAnswer(asked.tab_id, asked.request_id, username, username === null ? null : password);
       } catch (e) {
         if (errorKind(e)?.type !== "gone") {
-          useBrowser.setState({ error: errorMessage(e) });
+          reportError(e);
         }
       }
     },

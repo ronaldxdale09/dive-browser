@@ -46,6 +46,27 @@ export default tseslint.config(
       ],
     },
   },
+  // lib/ and store/ sit under the components. A pure helper a component and a
+  // module both need belongs in lib/. markdown.tsx is a component in all but
+  // location; type imports are free.
+  {
+    files: ["src/lib/**/*.{ts,tsx}", "src/store/**/*.{ts,tsx}"],
+    ignores: ["src/lib/markdown.tsx", "**/*.test.*"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/components/*", "**/components/**"],
+              message: "lib/ and store/ must not import components; move the pure helper into lib/.",
+              allowTypeImports: true,
+            },
+          ],
+        },
+      ],
+    },
+  },
   // TypeScript keeps only one of `X.test.ts` / `X.test.tsx` when both exist, so
   // these two sit outside every program. Vitest still runs them; they just
   // cannot be typed-linted until they get distinct names.

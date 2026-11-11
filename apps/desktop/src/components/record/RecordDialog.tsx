@@ -2,14 +2,12 @@ import { Select } from "../Select";
 import { AppWindow, Check, FileText, Loader2, Mic, MicOff, Timer, Video } from "lucide-react";
 import { useRef } from "react";
 import type { ReactNode } from "react";
-import { useCoversContent } from "../../lib/overlay";
-import { useFadeClose } from "../../lib/useFadeClose";
-import { useFocusTrap } from "../../lib/useFocusTrap";
 import { useBrowser } from "../../store/browser";
 import { describeLimits, effectiveSettings, useRecording } from "../../store/recording";
 import type { RecordSettings } from "../../store/recording";
 import { Favicon } from "../Favicon";
 import { Icon } from "../Icon";
+import { Modal } from "../Modal";
 import { orderTabs, tabLabel } from "../TabStrip";
 
 /**
@@ -31,11 +29,7 @@ export function RecordDialog() {
   const detached = useBrowser((s) => s.detached);
   const starting = phase === "starting";
   const open = phase === "setup" || starting;
-  useCoversContent(open);
-  const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  useFocusTrap(root, { active: open, initialFocus: primary });
-  const { close, className } = useFadeClose(closeSetup);
 
   // The chosen tab may have closed while the dialog was open; the first
   // remaining one stands in until a choice is made.
@@ -49,22 +43,22 @@ export function RecordDialog() {
   const noMic = !canVideo || live.format === "gif";
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
-      <form
-        role="dialog"
-        aria-modal="true"
-        aria-label="New recording"
-        aria-busy={starting}
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!chosen) return;
-          if (chosen !== tab) setTab(chosen);
-          void start();
-        }}
-        className="mx-auto mt-16 flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <Modal
+      label="New recording"
+      backdropClassName=""
+      busy={starting}
+      onClose={closeSetup}
+      initialFocus={primary}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!chosen) return;
+        if (chosen !== tab) setTab(chosen);
+        void start();
+      }}
+      className="mx-auto mt-16 flex w-[600px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
+    >
+      {(close) => (
+        <>
         <header className="flex items-center gap-3 border-b border-line px-5 py-4">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-danger/15 text-danger">
             <Icon icon={Video} size={17} />
@@ -177,8 +171,9 @@ export function RecordDialog() {
             {!starting && <kbd className="ml-1 font-mono text-10 opacity-70">⏎</kbd>}
           </button>
         </footer>
-      </form>
-    </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

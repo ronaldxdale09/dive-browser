@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { Cookie } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
-import { tabInThisWindow, useBrowser } from "../store/browser";
+import { tabInThisWindow, reportError, useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { errorMessage } from "../lib/errors";
 import { copyText } from "../lib/clipboard";
@@ -89,7 +89,7 @@ export function StoragePanel() {
     void ipc
       .tabStorageDelete(activeTab, section, row.key, row.cookie?.domain ?? null, row.cookie?.path ?? null)
       .then(refresh)
-      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+      .catch((e: unknown) => reportError(e));
   };
   // Copy the whole value. What the row holds may be only its start, so a
   // long one is read again in full rather than copied cut short.

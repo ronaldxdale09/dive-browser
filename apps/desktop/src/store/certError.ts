@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { CertErrorAsked } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { reportError } from "./browser";
 
 /**
  * Pages stopped on a certificate the network would not accept, one question
@@ -70,7 +69,7 @@ export const useCertError = create<CertErrorStore>((set, get) => {
       try {
         await ipc.certErrorAnswer(asked.tab_id, asked.request_id, proceed);
       } catch (e) {
-        useBrowser.setState({ error: errorMessage(e) });
+        reportError(e);
       }
     },
   };

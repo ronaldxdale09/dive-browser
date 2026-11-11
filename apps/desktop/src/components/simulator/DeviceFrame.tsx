@@ -14,7 +14,7 @@ import { stripsFor } from "../../data/devices";
 import { createBoundsReporter, elementBounds } from "../../lib/boundsReporter";
 import type { Bounds } from "../../lib/boundsReporter";
 import { BottomBar, Cutout, HomeIndicator, StatusBar, TopBar } from "./Chrome";
-import type { Layout, UiMode } from "./geometry";
+import type { Layout, UiMode } from "../../lib/simulatorGeometry";
 
 export interface DeviceFrameProps {
   /** Unrotated device. */

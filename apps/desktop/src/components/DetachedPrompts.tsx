@@ -1,6 +1,5 @@
 import { ipc } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { CrashBanner, PermissionDialog, UnresponsiveBanner } from "./Content";
 import { CredentialPromptCard } from "./CredentialPromptCard";
 import { ExternalLinkDialog } from "./ExternalLinkDialog";
@@ -39,7 +38,7 @@ export function DetachedPrompts({ tabId }: { tabId: string }) {
  */
 export function DetachedCrashBanner({ tabId }: { tabId: string }) {
   const crash = useBrowser((s) => s.crashedTabs[tabId]);
-  const reload = () => void ipc.tabReload(tabId).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+  const reload = () => void ipc.tabReload(tabId).catch((e: unknown) => reportError(e));
   return (
     <>
       {crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} reason={crash.reason} onReload={reload} />}

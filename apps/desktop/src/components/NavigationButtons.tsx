@@ -6,9 +6,8 @@ import { useCoversContent } from "../lib/overlay";
 import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { firstBackIndex, useTabHistory } from "../lib/useTabHistory";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
-import { errorMessage } from "../lib/errors";
 
 export function NavigationButtons({ tabId, url }: { tabId: string | null; url: string }) {
   const { canBack, canForward, loadHistory } = useTabHistory(tabId, url);
@@ -69,7 +68,7 @@ function HistoryButton({ direction, tabId, loadHistory, disabled, navigate }: {
         onClick={() => {
           close();
           if (tabId && history) void ipc.tabHistoryNavigate(tabId, history.generation, entry.id).catch((error: unknown) => {
-            useBrowser.setState({ error: errorMessage(error) });
+            reportError(error);
           });
         }}>
         <span className="block truncate leading-4">{entry.title.trim() || entry.url}</span>

@@ -2,11 +2,9 @@ import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { colorName, PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Modal } from "./Modal";
 
 /** Create or edit a profile: a name, a line under it, a face and a colour. */
 export function ProfileDialog() {
@@ -36,12 +34,8 @@ function ProfileForm({ id }: { id: string | null }) {
   const [failure, setFailure] = useState<string | null>(null);
   // The input the host said the failure is about, if it said.
   const [failureField, setFailureField] = useState<string | null>(null);
-  useCoversContent(true);
-  const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const failureId = useId();
-  useFocusTrap(root, { initialFocus: nameField });
-  const { close, className } = useFadeClose(() => setEditing(null));
   const avatar = seed || seedFromProfileName(name);
   const seeds = [seedFromProfileName(name), ...PROFILE_SEEDS.filter((s) => s !== seedFromProfileName(name))].slice(0, 12);
   const spaces = existing ? workspaces.filter((w) => w.profile_id === existing.id).length : 0;
@@ -73,18 +67,18 @@ function ProfileForm({ id }: { id: string | null }) {
   return (
     // Scrolls rather than clips: at the window's smallest height a fixed top
     // margin pushed Save and Delete below the bottom edge.
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 flex overflow-y-auto p-4 ${className}`} onMouseDown={close}>
-      <form
-        onSubmit={submit}
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={existing ? "Edit profile" : "New profile"}
-        aria-describedby={failure ? failureId : undefined}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        aria-busy={saving}
-        className="m-auto w-[420px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
-      >
+    <Modal
+      label={existing ? "Edit profile" : "New profile"}
+      backdropClassName="flex overflow-y-auto p-4"
+      describedBy={failure ? failureId : undefined}
+      busy={saving}
+      onSubmit={submit}
+      onClose={() => setEditing(null)}
+      initialFocus={nameField}
+      className="m-auto w-[420px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+    >
+      {(close) => (
+        <>
         <div className="flex items-center gap-3">
           <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={44} height={44} className="size-11 shrink-0 rounded-full" />
           <div className="min-w-0">
@@ -150,7 +144,8 @@ function ProfileForm({ id }: { id: string | null }) {
             {failure}
           </p>
         )}
-      </form>
-    </div>
+        </>
+      )}
+    </Modal>
   );
 }

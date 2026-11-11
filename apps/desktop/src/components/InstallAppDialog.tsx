@@ -1,9 +1,8 @@
 import { useId, useLayoutEffect, useRef } from "react";
+import type { RefObject } from "react";
 import { Icon } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { AppWindow } from "lucide-react";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { originOf, useWebApps } from "../store/webapps";
 import type { WebAppProbe } from "../lib/ipc";
 import { isWindows } from "../lib/commands";
@@ -20,36 +19,40 @@ export function installAppLauncherCopy(windows = isWindows()): string {
  * so the page you were looking at is the app you just installed.
  */
 export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; probe: WebAppProbe; onClose: () => void }) {
-  const installing = useWebApps((s) => s.installing);
   const error = useWebApps((s) => s.error);
-  const install = useWebApps((s) => s.install);
-  useCoversContent(true);
-  const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
   const app = useId();
   const launcher = useId();
   const failure = useId();
-  const { close, className } = useFadeClose(onClose);
+  return (
+    <Modal
+      labelledBy="install-app-title"
+      // What is being installed and what installing does, read with the
+      // title; a failure joins them so a second try says why the first did not work.
+      describedBy={[app, launcher, error ? failure : null].filter(Boolean).join(" ")}
+      onClose={onClose}
+      initialFocus={primary}
+      className="w-[420px] max-w-[92vw] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
+    >
+      <InstallAppBody tabId={tabId} probe={probe} onClose={onClose} primary={primary} ids={{ app, launcher, failure }} />
+    </Modal>
+  );
+}
+
+function InstallAppBody({ tabId, probe, onClose, primary, ids }: { tabId: string; probe: WebAppProbe; onClose: () => void; primary: RefObject<HTMLButtonElement | null>; ids: { app: string; launcher: string; failure: string } }) {
+  const installing = useWebApps((s) => s.installing);
+  const error = useWebApps((s) => s.error);
+  const install = useWebApps((s) => s.install);
+  const close = useModalClose();
+  const { app, launcher, failure } = ids;
   // A failure belongs to the attempt that made it: opening the dialog again,
   // for this page or another, starts clean.
   useLayoutEffect(() => useWebApps.setState({ error: null }), []);
-  useFocusTrap(root, { active: true, initialFocus: primary, onEscape: close });
   const name = probe.name ?? "";
   const origin = originOf(probe.start_url ?? "");
 
   return (
-    <div className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      <div
-        ref={root}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="install-app-title"
-        // What is being installed and what installing does, read with the
-        // title; a failure joins them so a second try says why the first did not work.
-        aria-describedby={[app, launcher, error ? failure : null].filter(Boolean).join(" ")}
-        onMouseDown={(e) => e.stopPropagation()}
-        className="w-[420px] max-w-[92vw] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <>
         <div className="px-5 pt-5 pb-4">
           <h2 id="install-app-title" className="text-15 font-medium text-ink">Install app</h2>
           <div className="mt-4 flex items-center gap-3.5">
@@ -82,7 +85,6 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
             {installing ? "Installing…" : "Install"}
           </button>
         </div>
-      </div>
-    </div>
+    </>
   );
 }

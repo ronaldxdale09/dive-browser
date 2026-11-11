@@ -5,13 +5,10 @@ import { ipc } from "../../lib/ipc";
 import { showInFileManagerLabel } from "../../lib/commands";
 import { captureMediaUrl } from "../../lib/mediaUrl";
 import { recordingBytes, recordingClock } from "../../lib/recordingFormat";
-import { useCoversContent } from "../../lib/overlay";
-import { useFadeClose } from "../../lib/useFadeClose";
-import { useFocusTrap } from "../../lib/useFocusTrap";
-import { useBrowser } from "../../store/browser";
+import { reportError, useBrowser } from "../../store/browser";
 import { useRecording } from "../../store/recording";
 import { Icon } from "../Icon";
-import { errorMessage } from "../../lib/errors";
+import { Modal } from "../Modal";
 import { copyText } from "../../lib/clipboard";
 
 /**
@@ -28,11 +25,7 @@ export function RecordingDoneDialog() {
   const deleteResult = useRecording((s) => s.deleteResult);
   const openSetup = useRecording((s) => s.openSetup);
   const open = phase === "done" && result !== null;
-  useCoversContent(open);
-  const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  useFocusTrap(root, { active: open, initialFocus: primary });
-  const { close, className } = useFadeClose(dismiss);
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileId = useId();
@@ -43,21 +36,21 @@ export function RecordingDoneDialog() {
   if (!open || !result) return null;
   const name = result.path.split("/").pop() ?? result.path;
   const notify = (notice: string) => useBrowser.getState().notify(notice, 4000);
-  const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
+  const fail = (e: unknown) => reportError(e);
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Recording saved"
-        // Which file, how long and how big: what someone deciding to keep or
-        // share it needs, read with the title rather than found by browsing.
-        aria-describedby={`${fileId} ${statsId}`}
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        className="mx-auto mt-12 flex w-[720px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <Modal
+      label="Recording saved"
+      // Which file, how long and how big: what someone deciding to keep or
+      // share it needs, read with the title rather than found by browsing.
+      describedBy={`${fileId} ${statsId}`}
+      backdropClassName=""
+      onClose={dismiss}
+      initialFocus={primary}
+      className="mx-auto mt-12 flex w-[720px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
+    >
+      {(close) => (
+        <>
         <header className="flex items-center gap-3 px-5 py-4">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-highlight-soft text-highlight">
             <Icon icon={Check} size={17} />
@@ -163,8 +156,9 @@ export function RecordingDoneDialog() {
             </>
           )}
         </footer>
-      </div>
-    </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

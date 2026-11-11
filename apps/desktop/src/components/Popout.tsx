@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { events, ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { usePrefs, watchHostPrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { Favicon } from "./Favicon";
@@ -20,7 +20,6 @@ import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
 import { isMac, isWindows, shortcutFor } from "../lib/commands";
 import { selectAllInChromeField } from "../lib/chromeEditing";
-import { errorMessage } from "../lib/errors";
 import { PageErrorPanels } from "./Content";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
@@ -28,7 +27,7 @@ import { NATIVE_FOCUS_ADDRESS } from "../lib/nativeEvents";
 
 /** Keep commands in a detached window on the same visible error path as the main chrome. */
 function run(action: Promise<unknown>) {
-  void action.catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
+  void action.catch((error: unknown) => reportError(error));
 }
 
 /**
@@ -81,7 +80,7 @@ export function Popout({ tabId }: { tabId: string }) {
         inputRef.current?.select();
       }
     }).catch((error: unknown) => {
-      if (live) useBrowser.setState({ error: errorMessage(error) });
+      if (live) reportError(error);
     });
     return () => { live = false; };
   }, [ready, menuReady, tabId]);
@@ -140,7 +139,7 @@ export function Popout({ tabId }: { tabId: string }) {
         if (live) { stop = un; setMenuReady(true); }
         else un();
       })
-      .catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
+      .catch((error: unknown) => reportError(error));
     return () => {
       live = false;
       stop?.();

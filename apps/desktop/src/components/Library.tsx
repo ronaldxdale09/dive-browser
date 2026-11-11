@@ -5,6 +5,7 @@ import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import type { WebApp } from "../lib/ipc";
 import { displayChord, BOOKMARKS_CHANGED, fileManagerName } from "../lib/commands";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
 import type { Bookmark, DownloadRecord, HistoryEntry, RecordingInfo } from "../lib/ipc";
@@ -12,12 +13,9 @@ import { renameBookmark } from "../lib/bookmarks";
 import { recordingBytes } from "../lib/recordingFormat";
 import { useDownloads } from "../store/downloads";
 import { screenUrl } from "./internal/InternalPage";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { focusAfterRemovalOf } from "../lib/focusAfterRemoval";
 import { radioStep } from "../lib/useRovingRadio";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { isPrivateWindow } from "../lib/privateMode";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
 import { OpenVideoButton } from "../screen/OpenVideoButton";
@@ -28,6 +26,7 @@ import { downloadStatus, downloadStatusLabel } from "../store/downloads";
 import type { Download as LiveDownload } from "../store/downloads";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { ignored } from "../lib/chromeErrors";
 
 /** How many rows each list asks for at a time; scrolling to the end asks for the next page. */
@@ -53,12 +52,17 @@ const TABS: { id: LibraryTab; label: string; icon: typeof Star }[] = [
 export { titleOf };
 
 export function Library() {
-  useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
-  const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const { close, className } = useFadeClose(() => toggle("library", false));
-  useFocusTrap(root, { initialFocus: input, onEscape: close });
+  return (
+    <Modal label="Library" onClose={() => toggle("library", false)} initialFocus={input} className="flex h-[min(620px,88vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <LibraryBody input={input} />
+    </Modal>
+  );
+}
+
+function LibraryBody({ input }: { input: RefObject<HTMLInputElement | null> }) {
+  const close = useModalClose();
   const initial = useBrowser((s) => s.libraryTab);
   // A private window keeps no bookmarks or history; its library is files.
   const tabs = isPrivateWindow() ? TABS.filter((t) => t.id === "downloads" || t.id === "recordings") : TABS;
@@ -67,14 +71,7 @@ export function Library() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Library"
-        onMouseDown={(e) => e.stopPropagation()}
-        className="flex h-[min(620px,88vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <>
         <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
           <div
             role="tablist"
@@ -127,8 +124,7 @@ export function Library() {
         <div key={tab} ref={panelRef} role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
           {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} scrollRef={panelRef} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} onOpened={close} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
         </div>
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -344,7 +340,7 @@ function RenameField({ bookmark, onDone, onRename }: { bookmark: Bookmark; onDon
       await onRename(bookmark, next);
       onDone();
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
       setBusy(false);
     }
   };
@@ -399,13 +395,13 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
                 });
                 changed();
               })
-              .catch((err: unknown) => useBrowser.setState({ error: errorMessage(err) }));
+              .catch((err: unknown) => reportError(err));
           },
         });
       })
       .catch((err) => {
         setItems(prev);
-        useBrowser.setState({ error: errorMessage(err) });
+        reportError(err);
       });
   };
   const rename = async (bookmark: Bookmark, title: string) => {
@@ -533,7 +529,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
       await ipc.historyRemove(url);
     } catch (e) {
       setItems(before);
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   };
   const groups = useMemo(() => groupByDay(items ?? []), [items]);
@@ -661,7 +657,7 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
     ipc
       .downloadsHistory(500)
       .then((rows) => alive && setKept(rows))
-      .catch((e: unknown) => alive && useBrowser.setState({ error: errorMessage(e) }));
+      .catch((e: unknown) => alive && reportError(e));
     return () => {
       alive = false;
     };
@@ -683,7 +679,7 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
     };
   }, [savedKey]);
   const shown = items.filter((d) => matches(query, d.name, d.url));
-  const fail = (err: unknown) => useBrowser.setState({ error: errorMessage(err) });
+  const fail = (err: unknown) => reportError(err);
   const reveal = (path: string | null) => void ipc.downloadsReveal(path).catch(fail);
   // A row opens its file, as a row in the downloads menu does; showing it in
   // the file manager is the folder button's job. A PDF opens in a tab, the

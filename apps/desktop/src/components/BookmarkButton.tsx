@@ -2,10 +2,9 @@ import { useDismiss } from "../lib/useDismiss";
 import { Star } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
-import { tabInThisWindow, useBrowser } from "../store/browser";
+import { tabInThisWindow, reportError, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
-import { errorMessage } from "../lib/errors";
 import { renameBookmark } from "../lib/bookmarks";
 import { hostOf } from "../lib/omnibox";
 import { EDIT_BOOKMARK, BOOKMARKS_CHANGED } from "../lib/commands";
@@ -65,7 +64,7 @@ export function BookmarkButton() {
     if (open) titleInput.current?.select();
   }, [open]);
 
-  const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
+  const fail = (e: unknown) => reportError(e);
   const show = (name: string, edit: boolean) => {
     setTitle(name);
     setInitial(name);

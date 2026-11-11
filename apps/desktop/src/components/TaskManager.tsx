@@ -2,11 +2,10 @@ import { Moon, RotateCw, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { TaskRow } from "../lib/ipc";
-import { useCoversContent } from "../lib/overlay";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { focusAfterRemovalOf } from "../lib/focusAfterRemoval";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Modal } from "./Modal";
 import { errorMessage } from "../lib/errors";
 
 /** The pause between one measurement finishing and the next starting. */
@@ -90,11 +89,8 @@ export function TaskManager() {
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const previous = useRef<Record<string, { seconds: number; at: number }>>({});
-  const root = useRef<HTMLDivElement>(null);
   // Where focus goes once the last row is closed.
   const heading = useRef<HTMLHeadingElement>(null);
-  useCoversContent(open);
-  useFocusTrap(root, { active: open, onEscape: () => toggle("tasks", false) });
 
   useEffect(() => {
     if (!open) {
@@ -152,14 +148,7 @@ export function TaskManager() {
   const holders = rows.filter((row) => row.memory_bytes != null).length;
   const cell = "px-3 py-2 text-left";
   return (
-    <div ref={root} className="overlay-backdrop fixed inset-0 z-50 grid place-items-center" onMouseDown={() => toggle("tasks", false)}>
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Task manager"
-        className="max-h-[70vh] w-[min(720px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <Modal label="Task manager" fade={false} onClose={() => toggle("tasks", false)} className="max-h-[70vh] w-[min(720px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <h2 ref={heading} className="text-sm font-semibold">Task manager</h2>
           <span className="text-11 text-ink-3">{holders > 0 ? `${formatMemory(total)} of JavaScript in ${holders} ${holders === 1 ? "tab" : "tabs"} across this profile` : "No JavaScript heap reported"}</span>
@@ -219,7 +208,6 @@ export function TaskManager() {
             </tbody>
           </table>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { events, ipc } from "./ipc";
 import type { Tab } from "./ipc";
-import { useBrowser, withoutRequest } from "../store/browser";
-import { errorMessage } from "./errors";
+import { reportError, useBrowser, withoutRequest } from "../store/browser";
 
 /** A detached window owns one page, independently of the main workspace. */
 export function usePopoutPage(tabId: string) {
@@ -14,7 +13,7 @@ export function usePopoutPage(tabId: string) {
     let revision = 0;
     const stops: (() => void)[] = [];
     const report = (error: unknown) => {
-      if (live) useBrowser.setState({ error: errorMessage(error) });
+      if (live) reportError(error);
     };
     void events.stateChanged.listen(({ payload }) => {
       if (!live) return;

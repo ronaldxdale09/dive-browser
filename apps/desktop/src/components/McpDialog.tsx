@@ -4,10 +4,8 @@ import type { AppInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { copySecret } from "../lib/clipboard";
 import { Icon } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { ClaudeMark, CodexMark, CursorMark, WindsurfMark, ZedMark } from "./agent/AgentMarks";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 
 /** These clients have documented skill installation; each still needs its own MCP connection. */
 const AGENTS = [
@@ -42,15 +40,20 @@ export function instruction(url: string, tokenPath: string, token: string): stri
 
 /** Install the browser workflow skill and connect the agent's local MCP client. */
 export function McpDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal labelledBy="mcp-title" describedBy="mcp-description" onClose={onClose} className="flex max-h-[calc(100dvh-32px)] w-[600px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <McpBody />
+    </Modal>
+  );
+}
+
+function McpBody() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
   const alive = useRef(true);
-  useCoversContent(true);
-  const root = useRef<HTMLDivElement>(null);
-  const { close, className } = useFadeClose(onClose);
-  useFocusTrap(root, { active: true, onEscape: close });
+  const close = useModalClose();
 
   useEffect(() => {
     let active = true;
@@ -95,16 +98,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      <div
-        ref={root}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="mcp-title"
-        aria-describedby="mcp-description"
-        onMouseDown={(e) => e.stopPropagation()}
-        className="flex max-h-[calc(100dvh-32px)] w-[600px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <>
         <div className="flex shrink-0 items-start gap-3 px-5 pt-5">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-highlight">
             <Icon icon={Plug} size={17} />
@@ -166,7 +160,6 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
             Done
           </button>
         </div>
-      </div>
-    </div>
+    </>
   );
 }

@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { RecordedStep } from "../lib/ipc";
-import { useBrowser } from "./browser";
-import { errorMessage } from "../lib/errors";
+import { reportError, useBrowser } from "./browser";
 
 interface RecorderState {
   recordingTab: string | null;
@@ -87,7 +86,7 @@ export const useRecorder = create<RecorderState>((set, get) => ({
       const tab = useBrowser.getState().tabs.find((t) => t.id === tabId);
       set({ recordingTab: tabId, startUrl: tab?.url ?? null, startTitle: tab?.title ?? null, steps: [], isOpen: false });
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   stop: async () => {

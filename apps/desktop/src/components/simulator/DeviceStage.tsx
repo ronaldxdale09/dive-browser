@@ -11,7 +11,7 @@ import { Camera, Maximize2, MonitorSmartphone, RotateCw, Smartphone, X, ZoomIn }
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import { useContentPreview } from "../../lib/overlay";
-import { useBrowser } from "../../store/browser";
+import { reportError, useBrowser } from "../../store/browser";
 import { baseFor, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
 import type { DeviceSelection } from "../../store/emulation";
 import { usePicker } from "../../store/simulator";
@@ -19,9 +19,8 @@ import { IconButton } from "../Icon";
 import { useBarsDark } from "./Chrome";
 import { DeviceFrame } from "./DeviceFrame";
 import { captureFramed } from "./frameCapture";
-import { layoutFor } from "./geometry";
-import type { UiMode, Zoom } from "./geometry";
-import { errorMessage } from "../../lib/errors";
+import { layoutFor } from "../../lib/simulatorGeometry";
+import type { UiMode, Zoom } from "../../lib/simulatorGeometry";
 import { ignored } from "../../lib/chromeErrors";
 
 /** Width of the tool strip down the right edge of the stage. */
@@ -123,7 +122,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
       const path = await captureFramed({ tabId, device, landscape: sel.landscape, mode: sel.ui, dark, url });
       useBrowser.getState().notify(`Saved ${path.split("/").pop() ?? path}`, 4000);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   };
 

@@ -3,7 +3,7 @@ import { Download, FolderOpen, RotateCw, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useShallow } from "zustand/react/shallow";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { downloadFailureReason, downloadStatusLabel, selectActiveInWindow, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
 import { usePrefs } from "../store/prefs";
@@ -12,7 +12,6 @@ import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { errorMessage } from "../lib/errors";
 import { formatBytes, fileUrl, opensInTab} from "../lib/paths";
 import { defaultDownloadsFolderLabel } from "../lib/commands";
 
@@ -29,7 +28,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   // Clearing one and not the other means the button does not do what it says.
   const clear = useCallback(() => {
     clearList();
-    void ipc.downloadsClear().catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    void ipc.downloadsClear().catch((e: unknown) => reportError(e));
   }, [clearList]);
   const folder = defaultDownloadsFolderLabel(usePrefs((s) => s.prefs.download_dir));
   const [open, setOpen] = useState(false);
@@ -51,7 +50,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   }, [open]);
 
   const reveal = (path: string | null) => {
-    void ipc.downloadsReveal(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    void ipc.downloadsReveal(path).catch((e: unknown) => reportError(e));
   };
   // One click opens, as in every browser's download shelf. Someone used to
   // Finder double-clicks it out of habit, which would open the file twice --
@@ -72,15 +71,15 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
         void openTab(fileUrl(path));
         return;
       }
-      void ipc.downloadsOpen(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+      void ipc.downloadsOpen(path).catch((e: unknown) => reportError(e));
     },
     [openTab],
   );
   const cancel = (id: number) => {
-    void ipc.downloadsCancel(id).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    void ipc.downloadsCancel(id).catch((e: unknown) => reportError(e));
   };
   const resume = (id: number) => {
-    void ipc.downloadsResume(id).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    void ipc.downloadsResume(id).catch((e: unknown) => reportError(e));
   };
 
   return (

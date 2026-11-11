@@ -1,9 +1,8 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { reportError, useBrowser } from "./browser";
 import { APPEARANCE_KEYS, THEME_VARS, UI_SCALE_MAX, UI_SCALE_MIN, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
-import { errorMessage } from "../lib/errors";
 import { isPrivateWindow } from "../lib/privateMode";
 import { ignored } from "../lib/chromeErrors";
 
@@ -233,7 +232,7 @@ function complete(wire: WirePrefs): Prefs {
 }
 
 function report(e: unknown) {
-  useBrowser.setState({ error: errorMessage(e) });
+  reportError(e);
 }
 
 /** The scheme the OS asks for, used when the theme follows the system. */

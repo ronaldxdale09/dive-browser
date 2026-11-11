@@ -14,7 +14,7 @@ import { useCertError } from "../store/certError";
 import { usePrefs } from "../store/prefs";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { tabInThisWindow, useBrowser } from "../store/browser";
+import { tabInThisWindow, reportError, useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
 import type { CertErrorAsked, CrashReason } from "../lib/ipc";
 import { Icon } from "./Icon";
@@ -289,7 +289,7 @@ export function NavErrorPanel({ url, error, method, tabId: forTab, active = true
   const blockTrackers = usePrefs((s) => s.prefs.block_trackers);
   const exceptions = usePrefs((s) => s.prefs.privacy_exceptions);
   const updatePrefs = usePrefs((s) => s.update);
-  const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
+  const fail = (e: unknown) => reportError(e);
   const reloadTab = () => {
     if (onRetry) onRetry();
     else if (tabId) void ipc.tabReload(tabId).catch(fail);

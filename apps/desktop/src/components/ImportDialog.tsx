@@ -1,12 +1,9 @@
 import { Download } from "lucide-react";
-import { useRef } from "react";
 import { importFromWhere } from "../lib/commands";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { useBrowserImport } from "../store/browserImport";
 import { Icon } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { ImportPanel } from "./import/ImportPanel";
 
 /**
@@ -18,22 +15,25 @@ export function ImportDialog() {
   const toggle = useBrowser((s) => s.toggle);
   const prefer = useBrowserImport((s) => s.preferBrowser);
   const reset = useBrowserImport((s) => s.reset);
-  useCoversContent(true);
-  const root = useRef<HTMLDivElement>(null);
-  const { close, className } = useFadeClose(() => {
-    reset();
-    toggle("import", false);
-  });
-  useFocusTrap(root, { onEscape: close });
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Import from another browser"
-        className="mx-auto mt-24 w-[480px] max-w-[92vw] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
-      >
+    <Modal
+      label="Import from another browser"
+      backdropClassName=""
+      onClose={() => {
+        reset();
+        toggle("import", false);
+      }}
+      className="mx-auto mt-24 w-[480px] max-w-[92vw] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+    >
+      <ImportBody prefer={prefer} />
+    </Modal>
+  );
+}
+
+function ImportBody({ prefer }: { prefer: ReturnType<typeof useBrowserImport.getState>["preferBrowser"] }) {
+  const close = useModalClose();
+  return (
+    <>
         <div className="flex items-center gap-2.5">
           <span className="grid size-8 shrink-0 place-items-center rounded-[11px] bg-surface-2 text-ink-2">
             <Icon icon={Download} size={16} />
@@ -51,7 +51,6 @@ export function ImportDialog() {
             Close
           </button>
         </div>
-      </div>
-    </div>
+    </>
   );
 }

@@ -1,13 +1,11 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { COMMAND_TITLES, SHORTCUTS, formatChord, isMac } from "../lib/commands";
 import { ipc } from "../lib/ipc";
 import type { Command } from "../lib/ipc";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { ignored } from "../lib/chromeErrors";
 
 /** One row of the cheatsheet. */
@@ -57,11 +55,16 @@ export function groupShortcuts(shortcuts: Record<string, string> = SHORTCUTS, kn
 
 /** Every chord Dive answers to, grouped by area: ⌘/. */
 export function Shortcuts() {
-  useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
-  const root = useRef<HTMLDivElement>(null);
-  const { close, className } = useFadeClose(() => toggle("shortcuts", false));
-  useFocusTrap(root, { onEscape: close });
+  return (
+    <Modal label="Keyboard shortcuts" onClose={() => toggle("shortcuts", false)} className="flex max-h-[88vh] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <ShortcutsBody />
+    </Modal>
+  );
+}
+
+function ShortcutsBody() {
+  const close = useModalClose();
   const [known, setKnown] = useState<Command[]>([]);
   useEffect(() => {
     let alive = true;
@@ -77,14 +80,7 @@ export function Shortcuts() {
   const areas = groupShortcuts(SHORTCUTS, known);
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-        onMouseDown={(e) => e.stopPropagation()}
-        className="flex max-h-[88vh] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <>
         <header className="flex h-12 shrink-0 items-center border-b border-line px-5">
           <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
           <span className="flex-1" />
@@ -112,7 +108,6 @@ export function Shortcuts() {
           ))}
         </div>
         <footer className="shrink-0 border-t border-line px-5 py-2.5 text-11 text-ink-3">Every command is also in the palette ({formatChord("mod+k", mac)}).</footer>
-      </div>
-    </div>
+    </>
   );
 }

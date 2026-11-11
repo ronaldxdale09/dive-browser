@@ -1,11 +1,10 @@
 import { ExternalLink } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { useCoversContent } from "../lib/overlay";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import type { ExternalLinkAsked } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { questionFor, useExternalLink } from "../store/externalLink";
 import { Icon } from "./Icon";
+import { Modal } from "./Modal";
 
 /**
  * "Open Claude?" -- the question a page has to get through before it can
@@ -33,27 +32,24 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
   const open = useExternalLink((s) => s.open);
   const cancel = useExternalLink((s) => s.cancel);
   const [always, setAlways] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
   const body = useId();
   const target = useId();
-  useCoversContent(true);
-  useFocusTrap(root, { active: true, initialFocus: primary, onEscape: () => cancel(asked) });
   const name = asked.app ?? `the ${asked.scheme} app`;
   const title = asked.app ? `Open ${asked.app}?` : `Open this link in another app?`;
   const site = asked.origin || "This page";
   return (
-    <div ref={root} className="overlay-backdrop fixed inset-0 z-50" onMouseDown={() => cancel(asked)}>
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        // Who is asking and where it goes is the question itself: a screen
-        // reader landing on Open hears it, not only the title.
-        aria-describedby={`${body} ${target}`}
-        className="mx-auto mt-28 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
-      >
+    <Modal
+      label={title}
+      // Who is asking and where it goes is the question itself: a screen
+      // reader landing on Open hears it, not only the title.
+      describedBy={`${body} ${target}`}
+      fade={false}
+      backdropClassName=""
+      onClose={() => cancel(asked)}
+      initialFocus={primary}
+      className="mx-auto mt-28 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+    >
         <div className="flex items-center gap-2.5">
           <span className="grid size-8 shrink-0 place-items-center rounded-[11px] bg-surface-2 text-ink-2">
             <Icon icon={ExternalLink} size={16} />
@@ -84,7 +80,6 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
             {asked.app ? `Open ${asked.app}` : "Open"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

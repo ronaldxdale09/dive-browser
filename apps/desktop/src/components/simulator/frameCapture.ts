@@ -11,8 +11,8 @@ import type { DevicePreset } from "../../data/devices";
 import { browserFor, stripsFor } from "../../data/devices";
 import { ipc } from "../../lib/ipc";
 import { displayHost, formatClock } from "./Chrome";
-import { bezelFor, screenFor, stripsAround } from "./geometry";
-import type { UiMode } from "./geometry";
+import { bezelFor, screenFor, stripsAround } from "../../lib/simulatorGeometry";
+import type { UiMode } from "../../lib/simulatorGeometry";
 
 /** Size of the framed image in output pixels, and the bezel in those pixels. */
 export function framedSize(device: DevicePreset, landscape: boolean, ratio: number): { width: number; height: number; bezel: { sides: number; top: number; bottom: number } } {

@@ -4,9 +4,8 @@ import { ipc } from "../lib/ipc";
 import type { Bookmark, HistoryEntry, Tab } from "../lib/ipc";
 import { SUGGESTION_DEBOUNCE_MS, SUGGESTION_LIMIT, buildSuggestions, inlineCompletion, looksLikeUrl, placeOf, searchWords, stepHighlight, suggestionKey } from "../lib/omnibox";
 import type { Suggestion } from "../lib/omnibox";
-import { errorMessage } from "../lib/errors";
 import { useCoversContent } from "../lib/overlay";
-import { useBrowser } from "../store/browser";
+import { reportError } from "../store/browser";
 import { Favicon } from "./Favicon";
 import { Icon } from "./Icon";
 
@@ -94,7 +93,7 @@ export function useAddressSuggestions(
     point(rows[index + 1] ?? rows[index - 1]);
     setHistory((entries) => entries.filter((entry) => entry.url !== row.url));
     if (held) setFrozen({ query: trimmed, rows: held.filter((candidate) => candidate !== row) });
-    ipc.historyRemove(row.url).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    ipc.historyRemove(row.url).catch((e: unknown) => reportError(e));
     return true;
   };
   return { rows, highlight, setHighlight, move, remove, completion: completion?.text ?? null };

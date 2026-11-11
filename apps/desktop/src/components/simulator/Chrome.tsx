@@ -14,7 +14,7 @@ import type { DevicePreset } from "../../data/devices";
 import { browserFor, stripsFor } from "../../data/devices";
 import { FOCUS_ADDRESS } from "../../lib/commands";
 import { useBrowser } from "../../store/browser";
-import type { UiMode } from "./geometry";
+import type { UiMode } from "../../lib/simulatorGeometry";
 
 /** Wall-clock time as a phone shows it: hours and minutes, no seconds. */
 export function useClock(): string {

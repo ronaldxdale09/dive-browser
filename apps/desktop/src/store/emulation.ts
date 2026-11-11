@@ -1,13 +1,12 @@
 import { create } from "zustand";
 import { DEVICES, customDevice, rotate } from "../data/devices";
 import type { DevicePreset } from "../data/devices";
-import { defaultMode, safeAreaFor, viewportFor } from "../components/simulator/geometry";
-import type { UiMode, Zoom } from "../components/simulator/geometry";
+import { defaultMode, safeAreaFor, viewportFor } from "../lib/simulatorGeometry";
+import type { UiMode, Zoom } from "../lib/simulatorGeometry";
 import { ipc } from "../lib/ipc";
 import type { DeviceEmulated, DeviceInput, EnvironmentInput, MediaInput, NetworkProfile } from "../lib/ipc";
 import { events } from "../lib/ipc";
-import { onTabClosed, useBrowser } from "./browser";
-import { errorMessage } from "../lib/errors";
+import { onTabClosed, reportError, useBrowser } from "./browser";
 import { ignored } from "../lib/chromeErrors";
 
 export interface Media {
@@ -169,7 +168,7 @@ async function push(tabId: string, sel: DeviceSelection | undefined, scale: numb
       if (last) pushed.set(tabId, last);
       else pushed.delete(tabId);
     }
-    useBrowser.setState({ error: errorMessage(e) });
+    reportError(e);
   }
 }
 
@@ -196,7 +195,7 @@ export async function suspendDevice(tabId: string) {
     await ipc.tabEmulate(tabId, null, false);
   } catch (e) {
     if (pushed.get(tabId) === entry) pushed.set(tabId, last);
-    useBrowser.setState({ error: errorMessage(e) });
+    reportError(e);
   }
 }
 
@@ -237,7 +236,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabThrottle(tabId, profile);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   setDevice: async (tabId, deviceId) => {
@@ -347,7 +346,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabMedia(tabId, toMediaInput(media));
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   setEnvironment: async (tabId, patch) => {
@@ -356,7 +355,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabEnvironment(tabId, toEnvironmentInput(environment));
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   drop: (tabId) => {

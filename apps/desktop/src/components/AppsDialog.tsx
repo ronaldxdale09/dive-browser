@@ -1,15 +1,13 @@
 import { LayoutGrid, Search, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 import { APP_CATEGORIES, appsFor, chordOf, launchApp, searchApps } from "../lib/apps";
 import type { AppEntry } from "../lib/apps";
 import { chordsByCommand, formatChord } from "../lib/commands";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { BuiltinAppIcon } from "./BuiltinAppIcon";
 import { Icon, IconButton } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 import { isImeComposing } from "../lib/ime";
 
 /**
@@ -33,13 +31,21 @@ function columnsOf(grid: HTMLElement | null): number {
  */
 export function AppsDialog() {
   const toggle = useBrowser((s) => s.toggle);
-  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
-  const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  return (
+    // Sized to its content and to the window: three cards across on a
+    // desktop, two below 900px, one below 640px, never taller than the
+    // window leaves room for.
+    <Modal label="Apps" onClose={() => toggle("apps", false)} initialFocus={field} className="flex max-h-[min(86vh,720px)] w-[min(780px,calc(100vw-48px))] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <AppsBody field={field} />
+    </Modal>
+  );
+}
+
+function AppsBody({ field }: { field: RefObject<HTMLInputElement | null> }) {
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const grid = useRef<HTMLDivElement>(null);
-  const { close, className } = useFadeClose(() => toggle("apps", false));
-  useCoversContent(true);
-  useFocusTrap(root, { initialFocus: field, onEscape: close });
+  const close = useModalClose();
   const [query, setQuery] = useState("");
   const all = useMemo(() => appsFor(), []);
   const shown = useMemo(() => searchApps(all, query), [all, query]);
@@ -68,11 +74,7 @@ export function AppsDialog() {
   };
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      {/* Sized to its content and to the window: three cards across on a
-          desktop, two below 900px, one below 640px, never taller than the
-          window leaves room for. */}
-      <div role="dialog" aria-modal="true" aria-label="Apps" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[min(86vh,720px)] w-[min(780px,calc(100vw-48px))] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+    <>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/15 text-accent">
             <Icon icon={LayoutGrid} size={16} />
@@ -124,8 +126,7 @@ export function AppsDialog() {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </>
   );
 }
 

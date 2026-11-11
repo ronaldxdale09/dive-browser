@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Address, Card, CardDraft } from "../lib/ipc";
 import { errorMessage, invalidField } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { reportError, useBrowser } from "./browser";
 
 /**
  * Saved addresses and cards, and putting one into a form.
@@ -129,14 +129,14 @@ export const useWallet = create<WalletStore>((set, get) => ({
     try {
       useBrowser.getState().notify(fillMessage(await ipc.addressFill(tabId, id, url), "address"), 3000);
     } catch (error) {
-      useBrowser.setState({ error: errorMessage(error) });
+      reportError(error);
     }
   },
   fillCard: async (tabId, id, url) => {
     try {
       useBrowser.getState().notify(fillMessage(await ipc.cardFill(tabId, id, url), "payment"), 3000);
     } catch (error) {
-      useBrowser.setState({ error: errorMessage(error) });
+      reportError(error);
     }
   },
 }));

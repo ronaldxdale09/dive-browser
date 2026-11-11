@@ -1,10 +1,9 @@
 import { FIND_STEP, FOCUS_FIND } from "./commands";
 import { ipc } from "./ipc";
-import { errorMessage } from "./errors";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 
 function run(action: Promise<unknown>) {
-  void action.catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
+  void action.catch((error: unknown) => reportError(error));
 }
 
 /**

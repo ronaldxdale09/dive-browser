@@ -3,7 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { AppWindow, ArrowRightToLine, ChevronRight, Columns2, CopyPlus, FolderInput, Link, Loader2, Moon, Pin, Plus, RotateCw, Star, Volume2, VolumeX, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tabsToTheRight, useBrowser } from "../store/browser";
-import { MAX_PANES, useLayout, type Split } from "../store/layout";
+import { useLayout } from "../store/layout";
 import type { Tab, Workspace } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { Favicon } from "./Favicon";
@@ -17,31 +17,16 @@ import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 import { essentialTabs, orderTabs } from "../lib/tabOrder";
 import { copyText } from "../lib/clipboard";
 import { quietDragAttributes } from "../lib/dragA11y";
+import { shorten, splitAction, tabHoverTitle, tabLabel } from "../lib/tabNames";
+import type { SplitAction } from "../lib/tabNames";
 
 export { essentialTabs, orderTabs };
+export { tabLabel, tabHoverTitle, splitAction, shorten };
+export type { SplitAction };
 
-/**
- * What a tab is called in the strip: its title, else its host. A new view
- * reports "about:blank" as its title until the first real page commits, so
- * that stands in only while the address is blank too.
- */
-export function tabLabel(t: Tab) {
-  if (t.title && (t.title !== "about:blank" || t.url === "about:blank")) return t.title;
-  try {
-    return new URL(t.url).host || t.url;
-  } catch {
-    return t.url;
-  }
-}
 const label = tabLabel;
 
-/** Hover text when the strip has squeezed the title away. */
-export function tabHoverTitle(t: Tab, detached = false): string {
-  const name = tabLabel(t);
-  if (detached) return `${name} (in its own window)`;
-  if (t.state === "discarded") return `${name} (sleeping, click to wake)`;
-  return name;
-}
+
 
 /** What a tab is doing, for its accessible name. */
 export interface TabNameState {
@@ -77,41 +62,7 @@ export function tabAccessibleName(title: string, state: TabNameState): string {
 /** The page the active tab controls: the chrome's main element, labelled by that tab. */
 export const PAGE_ID = "dive-page";
 
-/** What the tab menu offers for split view, if anything. */
-export type SplitAction =
-  /** The tab is already a pane: take it out. */
-  | { kind: "leave" }
-  /** Put `tab` beside `partner`: a new split with the two, or a pane added to the existing one. */
-  | { kind: "with"; partner: Tab; index: number; anchor: string; label: string };
 
-/**
- * Split view from the menu: an inactive tab splits with the active one,
- * the active tab splits with its neighbour, and a tab that is already a
- * pane can leave. While a split is showing, another tab joins it at the
- * end. Tabs in their own window cannot be panes.
- */
-export function splitAction(tab: Tab, active: string | null, split: Split | undefined, ordered: Tab[], detached: string[]): SplitAction | null {
-  if (detached.includes(tab.id)) return null;
-  const live = (split?.tabs ?? []).filter((id) => ordered.some((t) => t.id === id) && !detached.includes(id));
-  if (live.includes(tab.id)) return { kind: "leave" };
-  const name = (t: Tab) => `Split with “${shorten(label(t))}”`;
-  if (live.length >= 2) {
-    if (live.length >= MAX_PANES) return null;
-    const partner = ordered.find((t) => t.id === live[live.length - 1]);
-    return partner ? { kind: "with", partner, index: live.length, anchor: live[0]!, label: "Add to split view" } : null;
-  }
-  const current = ordered.find((t) => t.id === active);
-  if (!current || detached.includes(current.id)) return null;
-  if (current.id !== tab.id) return { kind: "with", partner: current, index: 1, anchor: current.id, label: name(current) };
-  const usable = ordered.filter((t) => t.tier !== "pinned" && !detached.includes(t.id));
-  const at = usable.findIndex((t) => t.id === tab.id);
-  const partner = usable[at + 1] ?? usable[at - 1];
-  return partner ? { kind: "with", partner, index: 1, anchor: tab.id, label: name(partner) } : null;
-}
-
-export function shorten(text: string, max = 22): string {
-  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
-}
 
 /**
  * The workspace's tabs: pill tabs across the title bar, or rows down the

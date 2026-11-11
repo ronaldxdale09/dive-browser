@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { ExternalLinkAsked } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { reportError } from "./browser";
 import { ignored } from "../lib/chromeErrors";
 
 /**
@@ -57,7 +56,7 @@ export const useExternalLink = create<ExternalLinkStore>((set, get) => ({
     try {
       await ipc.externalLinkOpen(asked.token, always);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   cancel: (asked) => {

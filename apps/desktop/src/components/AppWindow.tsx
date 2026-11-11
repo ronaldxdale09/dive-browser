@@ -10,13 +10,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import type { WebApp } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
-import { useBrowser } from "../store/browser";
+import { reportError, useBrowser } from "../store/browser";
 import { usePrefs, watchHostPrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
 import { useDismiss } from "../lib/useDismiss";
-import { errorMessage } from "../lib/errors";
 import { PageErrorPanels } from "./Content";
 import { inScope, originOf, useWebApps } from "../store/webapps";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
@@ -25,7 +24,7 @@ import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
 
 function run(action: Promise<unknown>) {
-  void action.catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
+  void action.catch((error: unknown) => reportError(error));
 }
 
 /**
@@ -56,7 +55,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   useEffect(() => {
     let live = true;
     void ipc.webappForWindow(appId).then((found) => { if (live) setApp(found); }).catch((e: unknown) => {
-      if (live) useBrowser.setState({ error: errorMessage(e) });
+      if (live) reportError(e);
     });
     return () => { live = false; };
   }, [appId]);
@@ -86,7 +85,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   useEffect(() => {
     if (!ready || readyRequested.current === tabId) return;
     readyRequested.current = tabId;
-    void ipc.popoutReady(tabId).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    void ipc.popoutReady(tabId).catch((e: unknown) => reportError(e));
   }, [ready, tabId]);
 
   // The menu's shortcuts arrive as commands while this window is focused;

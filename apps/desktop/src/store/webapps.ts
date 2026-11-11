@@ -3,7 +3,7 @@ import { ipc } from "../lib/ipc";
 import type { WebApp, WebAppProbe } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { forgetWebAppIcon } from "../lib/useWebAppIcon";
-import { useBrowser } from "./browser";
+import { reportError } from "./browser";
 
 /** Fired on `window` when the installed apps change, so lists and buttons refresh. */
 export const WEBAPPS_CHANGED = "dive-webapps-changed";
@@ -54,7 +54,7 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
       set({ apps, loaded: true });
     } catch (e) {
       set({ loaded: true });
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
 
@@ -110,7 +110,7 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
       await ipc.webappOpen(appId);
       await get().load();
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
 
@@ -123,7 +123,7 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
       await get().load();
       announce();
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
 }));

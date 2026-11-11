@@ -2,7 +2,7 @@ import { ArrowDownLeft, ArrowUpRight, Ban, Copy, FileDown, FileJson, Repeat, Ter
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
-import { tabInThisWindow, useBrowser } from "../store/browser";
+import { tabInThisWindow, reportError, useBrowser } from "../store/browser";
 import { isReady, useAgent } from "../store/agent";
 import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
@@ -25,7 +25,7 @@ export function NetworkTools() {
     ipc
       .tabHar(activeTab)
       .then((path) => useBrowser.getState().notify(`HAR exported · saved ${saved(path)}`, 4000))
-      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+      .catch((e: unknown) => reportError(e));
   };
   // The spec is saved either way; the notice says "copied" only when the
   // clipboard really took it.
@@ -34,7 +34,7 @@ export function NetworkTools() {
     ipc
       .tabOpenapi(activeTab)
       .then(({ path, copied }) => useBrowser.getState().notify(`${copied ? "OpenAPI copied" : "OpenAPI exported, not copied"} · saved ${saved(path)}`, 4000))
-      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+      .catch((e: unknown) => reportError(e));
   };
   return (
     <>

@@ -1,11 +1,9 @@
 import { Check, Copy, Download, PlayCircle, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { copyText } from "../lib/clipboard";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { IconButton } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 
 /**
  * A generated Playwright test, ready to copy or save.
@@ -17,26 +15,17 @@ import { IconButton } from "./Icon";
  *
  * Mounted only while it is open, so covering the page is scoped to that.
  */
-export function SpecModal({
-  title,
-  subtitle,
-  spec,
-  filename,
-  onClose,
-  footer,
-}: {
-  title: string;
-  subtitle: string;
-  spec: string;
-  filename: string;
-  onClose: () => void;
-  footer?: ReactNode;
-}) {
+export function SpecModal(props: { title: string; subtitle: string; spec: string; filename: string; onClose: () => void; footer?: ReactNode }) {
+  return (
+    <Modal label={props.title} layer="z-[60]" nativeOverlay onClose={props.onClose} className="flex h-[min(560px,85vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <SpecBody {...props} />
+    </Modal>
+  );
+}
+
+function SpecBody({ title, subtitle, spec, filename, footer }: { title: string; subtitle: string; spec: string; filename: string; footer?: ReactNode }) {
   const [copied, setCopied] = useState(false);
-  useCoversContent(true);
-  const root = useRef<HTMLDivElement>(null);
-  useFocusTrap(root, { active: true });
-  const { close, className } = useFadeClose(onClose);
+  const close = useModalClose();
 
   const handleCopy = async () => {
     try {
@@ -61,16 +50,7 @@ export function SpecModal({
   };
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-[60] grid place-items-center ${className}`} onMouseDown={close}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        data-native-overlay
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        className="flex h-[min(560px,85vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
-      >
+    <>
         <div className="flex h-12 items-center gap-2.5 border-b border-line px-4">
           <span className="grid size-6 place-items-center rounded-lg bg-highlight-soft text-highlight">
             <PlayCircle size={15} strokeWidth={2} aria-hidden />
@@ -109,7 +89,6 @@ export function SpecModal({
             <code>{spec}</code>
           </pre>
         </div>
-      </div>
-    </div>
+    </>
   );
 }

@@ -1,23 +1,27 @@
 import { AlertTriangle, FolderOpen, Puzzle, RotateCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { unpackedExtensionHint } from "../lib/commands";
 import { errorMessage } from "../lib/errors";
 import { ipc } from "../lib/ipc";
 import type { ExtensionInfo, ExtensionList } from "../lib/ipc";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
+import { Modal, useModalClose } from "./Modal";
 
 /** Manage unpacked Chromium extensions loaded into CEF on restart. */
 export function Extensions() {
-  useCoversContent(true);
   const toggle = useBrowser((state) => state.toggle);
-  const root = useRef<HTMLDivElement>(null);
   const loadButton = useRef<HTMLButtonElement>(null);
-  const { close, className } = useFadeClose(() => toggle("extensions", false));
-  useFocusTrap(root, { initialFocus: loadButton, onEscape: close });
+  return (
+    <Modal label="Extensions" onClose={() => toggle("extensions", false)} initialFocus={loadButton} className="flex h-[min(680px,88vh)] w-[760px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+      <ExtensionsBody loadButton={loadButton} />
+    </Modal>
+  );
+}
+
+function ExtensionsBody({ loadButton }: { loadButton: RefObject<HTMLButtonElement | null> }) {
+  const close = useModalClose();
   const [data, setData] = useState<ExtensionList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,8 +43,7 @@ export function Extensions() {
   };
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
-      <div role="dialog" aria-modal="true" aria-label="Extensions" onMouseDown={(event) => event.stopPropagation()} className="flex h-[min(680px,88vh)] w-[760px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+    <>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/10 text-accent"><Icon icon={Puzzle} size={17} /></span>
           <div className="min-w-0 flex-1"><h2 className="text-sm font-medium text-ink">Chromium extensions</h2><p className="text-11 text-ink-3">Load trusted unpacked Manifest V2 or V3 extensions</p></div>
@@ -54,8 +57,7 @@ export function Extensions() {
           {data === null && !error ? <p className="p-6 text-center text-xs text-ink-3">Loading extensions…</p> : data?.items.length === 0 ? <EmptyState /> : <div className="flex flex-col gap-3">{data?.items.map((item) => <ExtensionCard key={item.id} item={item} busy={busy} onToggle={(enabled) => void update(() => ipc.extensionSetEnabled(item.id, enabled))} onRemove={() => void update(() => ipc.extensionRemove(item.id))} />)}</div>}
         </main>
         <footer className="flex items-center gap-2 border-t border-line px-4 py-3 text-11 text-ink-3"><Icon icon={ShieldCheck} size={13} />Extensions can read pages covered by their declared permissions. Only load code you trust.</footer>
-      </div>
-    </div>
+    </>
   );
 }
 

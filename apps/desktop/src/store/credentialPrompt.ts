@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { CredentialPrompt } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { reportError, useBrowser } from "./browser";
 
 /**
  * The host's questions about logins: save this one, update it, or forget
@@ -75,7 +74,7 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
     } catch (e) {
       // Letting a login go has nothing to report: a prompt a newer sign-in
       // already replaced is gone either way.
-      if (save) useBrowser.setState({ error: errorMessage(e) });
+      if (save) reportError(e);
     }
   },
   never: async (prompt) => {
@@ -84,7 +83,7 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       const origin = await ipc.passwordsNever(prompt.token);
       useBrowser.getState().notify(`Won't offer to save passwords for ${origin.replace(/^https?:\/\//, "")}. Change it under Settings › Passwords & forms.`, 4000);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   forget: async (prompt) => {
@@ -94,7 +93,7 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       const site = prompt.origin.replace(/^https?:\/\//, "");
       useBrowser.getState().notify(`Forgot the login for ${prompt.username} on ${site}. Sign in again to save it.`, 4000);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      reportError(e);
     }
   },
   dismiss: (tabId) =>

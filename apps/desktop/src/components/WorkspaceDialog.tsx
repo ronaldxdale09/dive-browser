@@ -5,9 +5,7 @@ import { useBrowser } from "../store/browser";
 import { AVATAR_SEEDS, seedFromName } from "../lib/workspaceAvatar";
 import { colorName } from "../lib/profileAvatar";
 import { Icon } from "./Icon";
-import { useCoversContent } from "../lib/overlay";
-import { useFadeClose } from "../lib/useFadeClose";
-import { useFocusTrap } from "../lib/useFocusTrap";
+import { Modal } from "./Modal";
 import { rovingRadio } from "../lib/useRovingRadio";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
@@ -35,15 +33,11 @@ export function WorkspaceDialog() {
   // The input the host said the failure is about, if it said.
   const [failureField, setFailureField] = useState<string | null>(null);
   const count = useBrowser((s) => (existing ? (s.counts[existing.id] ?? 0) : 0));
-  useCoversContent(Boolean(editing));
-  const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const failureId = useId();
   // Set by the confirmation's Cancel, so the Delete button that comes back
   // takes focus again instead of focus falling out of the dialog.
   const backToDelete = useRef(false);
-  useFocusTrap(root, { active: Boolean(editing), initialFocus: nameField });
-  const { close, className } = useFadeClose(() => setEditing(null));
   if (!editing) return null;
   const icon = seed || seedFromName(name);
   // The current choices lead their rows even when they are not in the
@@ -80,18 +74,18 @@ export function WorkspaceDialog() {
   return (
     // Scrolls rather than clips: at the window's smallest height a fixed top
     // margin pushed Save and Delete below the bottom edge.
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 flex overflow-y-auto p-4 ${className}`} onMouseDown={close}>
-      <form
-        onSubmit={submit}
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={existing ? "Edit workspace" : "New workspace"}
-        aria-describedby={failure ? failureId : undefined}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        aria-busy={saving}
-        className="m-auto w-[380px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
-      >
+    <Modal
+      label={existing ? "Edit workspace" : "New workspace"}
+      backdropClassName="flex overflow-y-auto p-4"
+      describedBy={failure ? failureId : undefined}
+      busy={saving}
+      onSubmit={submit}
+      onClose={() => setEditing(null)}
+      initialFocus={nameField}
+      className="m-auto w-[380px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+    >
+      {(close) => (
+        <>
         <div className="flex items-center gap-2.5">
           <AvatarImage kind="workspace" seed={icon} color={color} alt="" width={32} height={32} className="size-8 shrink-0 rounded-[11px]" />
           <div className="min-w-0">
@@ -233,7 +227,8 @@ export function WorkspaceDialog() {
             {failure}
           </p>
         )}
-      </form>
-    </div>
+        </>
+      )}
+    </Modal>
   );
 }

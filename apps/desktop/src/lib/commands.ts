@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
-import { isClosing, nextCloseTarget, tabInThisWindow, useBrowser } from "../store/browser";
+import { isClosing, nextCloseTarget, tabInThisWindow, reportError, useBrowser } from "../store/browser";
 import { useLayout } from "../store/layout";
 import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
@@ -8,7 +8,6 @@ import { useRecorder } from "../store/recorder";
 import { usePicker } from "../store/simulator";
 import type { Command, Tab } from "./ipc";
 import { traceInputCommand } from "./inputTimingProbe";
-import { errorMessage } from "./errors";
 import { essentialTabs, orderTabs } from "./tabOrder";
 import { cyclePane, pageHasKeyboard } from "./panes";
 
@@ -28,8 +27,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "tabs.search": () => useBrowser.getState().openPalette("tabs"),
   "tab.new": () => useBrowser.getState().toggle("palette", true),
   "window.new": () => openWindow(),
-  "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
-  "window.private": () => ipc.windowPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
+  "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => reportError(e)),
+  "window.private": () => ipc.windowPrivate().then(() => undefined).catch((e: unknown) => reportError(e)),
   "tab.close": () => {
     const { tabs, activeTab, detached, closeTab } = useBrowser.getState();
     const here = tabInThisWindow(activeTab, detached);
@@ -187,7 +186,7 @@ async function openWindow() {
     await ipc.windowOpen();
     useBrowser.setState({ error: null });
   } catch (error) {
-    useBrowser.setState({ error: errorMessage(error) });
+    reportError(error);
   }
 }
 
@@ -204,7 +203,7 @@ async function toggleBookmark() {
     if (saved) useBrowser.getState().notify("Bookmark saved", 4000, { label: "Edit", run: () => window.dispatchEvent(new CustomEvent(EDIT_BOOKMARK)) });
     else useBrowser.getState().notify("Bookmark removed");
   } catch (error) {
-    useBrowser.setState({ error: errorMessage(error) });
+    reportError(error);
   }
 }
 
@@ -307,7 +306,7 @@ export function runCommand(id: string, source: "keyboard" | "native-menu" | "com
     return;
   }
   void ipc.commandRun(id).catch((e: unknown) => {
-    useBrowser.setState({ error: errorMessage(e) });
+    reportError(e);
   });
 }
 
