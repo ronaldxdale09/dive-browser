@@ -144,6 +144,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   const fps = gif ? e.export.gifFps : e.export.fps;
   const { width, height } = outputSize(e.aspectRatio, gif ? "720p" : e.export.resolution, project.media);
   const durationMs = segments.length ? segments[segments.length - 1]!.outEndMs : 0;
+  if (durationMs <= 0) throw new Error("Nothing is left to export: the whole recording is cut.");
   const frames = Math.max(1, Math.round((durationMs / 1000) * fps));
   if ((frames / fps) * 1000 > MAX_OUTPUT_MS) {
     throw new Error(`This export would be ${Math.round(frames / fps / 60)} minutes long; DiveScreen exports up to ${MAX_OUTPUT_MS / 60_000} minutes at a time. Trim the recording or speed it up first.`);
@@ -208,6 +209,8 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     const ctx = canvas.getContext("2d", { willReadFrequently: e.annotations.some((a) => a.type === "blur") });
     if (!ctx) throw new Error("no canvas");
     const renderer = new Renderer();
+    await renderer.preload(project);
+    checkCancelled(signal);
 
     const codec = "vp09.00.10.08";
     const support = await bounded(VideoEncoder.isConfigSupported({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps }), "configuring video encoder", 10_000, signal);

@@ -285,6 +285,13 @@ export function clickBounce(sinceMs: number, amount: number): number {
 
 /* ------------------------------------------------------------------ auto zoom */
 
+/** A frame-normalised point as a fraction of the cropped picture, clamped to it. */
+export function toCropped(p: { cx: number; cy: number }, crop: { x: number; y: number; width: number; height: number }): { cx: number; cy: number } {
+  const fx = crop.width > 0 ? (p.cx - crop.x) / crop.width : p.cx;
+  const fy = crop.height > 0 ? (p.cy - crop.y) / crop.height : p.cy;
+  return { cx: Math.min(1, Math.max(0, fx)), cy: Math.min(1, Math.max(0, fy)) };
+}
+
 /**
  * Where the pointer dwelled long enough to be worth a closer look. A dwell
  * is a run of samples moving less than 2% between neighbours, lasting

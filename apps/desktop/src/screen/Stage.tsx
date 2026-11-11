@@ -3,7 +3,8 @@ import { Maximize2, Minimize2, Pause, Play } from "lucide-react";
 import { Icon } from "../components/Icon";
 import { recordingClock } from "../lib/recordingFormat";
 import { RATIO_VALUE, contentBox, outputTime, sourceTime } from "./math";
-import { previewNeedsFrame } from "./previewLoop";
+import { dragOnWindow } from "./drag";
+import { PlaybackClock, previewNeedsFrame } from "./previewLoop";
 import { leasePreviewMedia } from "./previewMedia";
 import { Renderer } from "./render";
 import { useEditor } from "./store";
@@ -27,7 +28,9 @@ export function Stage() {
   const setPlaying = useEditor((s) => s.setPlaying);
   const seek = useEditor((s) => s.seek);
   const update = useEditor((s) => s.update);
-  const checkpoint = useEditor((s) => s.checkpoint);
+  const beginEdit = useEditor((s) => s.beginEdit);
+  const endEdit = useEditor((s) => s.endEdit);
+  const activeDrag = useRef<(() => void) | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -74,7 +77,7 @@ export function Stage() {
     if (!ctx) return;
     let raf = 0;
     let last = performance.now();
-    let outMs = outputTime(segments, useEditor.getState().playhead);
+    const clock = new PlaybackClock(outputTime(segments, useEditor.getState().playhead));
     const scale = window.devicePixelRatio || 1;
     const W = Math.round(size.w * scale);
     const H = Math.round(size.h * scale);
@@ -92,6 +95,8 @@ export function Stage() {
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(tick);
     };
+    const drawer = renderer.current;
+    drawer.setOnImage(schedule);
     const tick = (now: number) => {
       raf = 0;
       const state = useEditor.getState();
@@ -101,26 +106,26 @@ export function Stage() {
         return;
       }
       if (state.playing) {
-        outMs += now - last;
-        if (outMs >= duration) {
-          outMs = duration;
-          setPlaying(false);
-        }
+        const { outMs, ended } = clock.advance(now - last, duration);
         const src = sourceTime(segments, outMs) ?? current.media.durationMs;
         const seg = segments.find((s) => outMs >= s.outStartMs && outMs < s.outEndMs);
         const rate = seg?.speed ?? 1;
         if (v.paused) void v.play().catch(() => undefined);
         if (v.playbackRate !== rate) v.playbackRate = Math.min(16, Math.max(0.0625, rate));
         if (Math.abs(v.currentTime * 1000 - src) > 120) v.currentTime = src / 1000;
+        clock.wrote(src);
         useEditor.setState({ playhead: src });
         paintControls(outMs);
         drawAt(current, src, true);
+        // Stop only after the last position is written, so the subscriber
+        // below resets the clock from this frame and not the one before.
+        if (ended) setPlaying(false);
       } else {
         if (!v.paused) v.pause();
         const src = state.playhead;
-        outMs = outputTime(segments, src);
+        clock.jump(outputTime(segments, src));
         if (Math.abs(v.currentTime * 1000 - src) > 8) v.currentTime = src / 1000;
-        paintControls(outMs);
+        paintControls(clock.outMs);
         drawAt(current, src, false);
       }
       last = now;
@@ -131,7 +136,12 @@ export function Stage() {
         renderer.current.snap();
         schedule();
       } else if (state.playing !== previous.playing) {
-        outMs = outputTime(segments, state.playhead);
+        clock.jump(outputTime(segments, state.playhead));
+        last = performance.now();
+        schedule();
+      } else if (state.playing && state.playhead !== previous.playhead && clock.sought(state.playhead)) {
+        clock.jump(outputTime(segments, state.playhead));
+        renderer.current.snap();
         last = performance.now();
         schedule();
       } else if (state.playhead !== previous.playhead && !state.playing) {
@@ -146,6 +156,7 @@ export function Stage() {
     schedule();
     return () => {
       unsubscribe();
+      drawer.setOnImage(null);
       v.removeEventListener("loadeddata", schedule);
       v.removeEventListener("seeked", schedule);
       if (raf) cancelAnimationFrame(raf);
@@ -182,13 +193,15 @@ export function Stage() {
     };
   }, [playable, setVideoEl]);
 
+  useEffect(() => () => activeDrag.current?.(), []);
+
   if (!project) return null;
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const sel = selection;
     if (!sel || (sel.kind !== "zoom" && sel.kind !== "annotation")) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    checkpoint();
+    beginEdit();
     const move = (ev: PointerEvent) => {
       const nx = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
       const ny = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
@@ -199,12 +212,11 @@ export function Stage() {
         update((ed) => ({ ...ed, annotations: ed.annotations.map((a) => (a.id === sel.id ? { ...a, position: { x: nx * 100, y: ny * 100 } } : a)) }), false);
       }
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    activeDrag.current?.();
+    activeDrag.current = dragOnWindow(move, () => {
+      activeDrag.current = null;
+      endEdit();
+    });
     move(e.nativeEvent);
   };
 

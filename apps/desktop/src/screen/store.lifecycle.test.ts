@@ -36,6 +36,39 @@ beforeEach(async () => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe("recording editor persistence lifecycle", () => {
+  it("a click that changes nothing leaves redo alone", async () => {
+    await store.getState().open("A");
+    edit(41);
+    store.getState().undo();
+    expect(store.getState().future).toHaveLength(1);
+    const past = store.getState().past;
+    store.getState().beginEdit();
+    store.getState().endEdit();
+    expect(store.getState().future).toHaveLength(1);
+    expect(store.getState().past).toBe(past);
+  });
+
+  it("an edit made with history off becomes one undo step", async () => {
+    await store.getState().open("A");
+    const before = padding();
+    const quiet = (value: number) => store.getState().update((editor) => ({ ...editor, padding: value }), false);
+    store.getState().beginEdit();
+    quiet(11); quiet(12); quiet(13);
+    store.getState().endEdit();
+    expect(store.getState().past).toHaveLength(1);
+    store.getState().undo();
+    expect(padding()).toBe(before);
+  });
+
+  it("undo closes an open edit first", async () => {
+    await store.getState().open("A");
+    const before = padding();
+    store.getState().beginEdit();
+    store.getState().update((editor) => ({ ...editor, padding: 17 }), false);
+    store.getState().undo();
+    expect(padding()).toBe(before);
+  });
+
   it.each(["{not json", "[]"])("opens the recording without its edits when the saved sidecar is %s", async (sidecar) => {
     mocks.read.mockResolvedValue(sidecar);
     await store.getState().open("A");

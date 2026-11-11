@@ -14,6 +14,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe("Export dialog keyboard ownership", () => {
+  it("disables Export when everything is cut", () => {
+    useEditor.setState({ duration: 0 });
+    render(<ExportDialog onClose={vi.fn()} />);
+    expect((screen.getByRole("button", { name: "Export" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Everything is cut. Remove a cut to export.")).toBeTruthy();
+  });
+
   it("focuses inside, wraps both Tab directions, and restores its trigger", () => {
     const trigger = document.createElement("button");
     document.body.appendChild(trigger); trigger.focus();

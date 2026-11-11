@@ -134,7 +134,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               </>
             )}
             {error && <p role={error === "export cancelled" ? "status" : "alert"} className={error === "export cancelled" ? "text-ink-2" : "text-danger"}>{error === "export cancelled" ? "Export cancelled." : error}</p>}
-            <button type="button" onClick={() => void run()} className="mt-1 h-9 rounded-lg bg-accent text-xs font-medium text-accent-ink hover:brightness-110">
+            {duration <= 0 && <p role="status" className="text-ink-2">Everything is cut. Remove a cut to export.</p>}
+            <button type="button" disabled={duration <= 0} onClick={() => void run()} className="mt-1 h-9 rounded-lg bg-accent text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100">
               Export
             </button>
           </div>

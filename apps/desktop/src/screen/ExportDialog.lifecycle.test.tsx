@@ -9,7 +9,7 @@ import { useEditor } from "./store";
 vi.mock("./export", () => ({ exportProject: vi.fn() }));
 const result = (path: string): RecordingResult => ({ path, duration_secs: 3, bytes: 1000, width: 640, height: 360, format: "mp4", frames: 90, has_audio: true, events: null, preview: null });
 function open(source: string) {
-  useEditor.setState({ generation: useEditor.getState().generation + 1, source, project: newProject({ source, playable: `${source}.webm`, events: null, durationMs: 3000, width: 640, height: 360 }), playable: `asset:${source}`, exporting: false, playing: false });
+  useEditor.setState({ generation: useEditor.getState().generation + 1, source, project: newProject({ source, playable: `${source}.webm`, events: null, durationMs: 3000, width: 640, height: 360 }), playable: `asset:${source}`, duration: 3000, exporting: false, playing: false });
 }
 function pendingExport() {
   let resolve!: (value: RecordingResult) => void;

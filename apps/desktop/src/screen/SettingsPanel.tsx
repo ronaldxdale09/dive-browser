@@ -107,7 +107,8 @@ function Switch({ label, checked, onChange, hint }: { label: string; checked: bo
 }
 
 function Slider({ label, value, min, max, step, onChange, format }: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; format?: (v: number) => string }) {
-  const checkpoint = useEditor((s) => s.checkpoint);
+  const beginEdit = useEditor((s) => s.beginEdit);
+  const endEdit = useEditor((s) => s.endEdit);
   return (
     <Card>
       <label className="flex flex-col gap-2">
@@ -115,7 +116,7 @@ function Slider({ label, value, min, max, step, onChange, format }: { label: str
           {label}
           <span className="ml-auto font-mono text-11 text-ink-3">{format ? format(value) : value}</span>
         </span>
-        <input type="range" min={min} max={max} step={step} value={value} onPointerDown={checkpoint} onChange={(ev) => onChange(Number(ev.target.value))} className="h-1 accent-emerald-400" />
+        <input type="range" min={min} max={max} step={step} value={value} onFocus={beginEdit} onPointerDown={beginEdit} onKeyDown={beginEdit} onPointerUp={endEdit} onKeyUp={endEdit} onBlur={endEdit} onChange={(ev) => onChange(Number(ev.target.value))} className="h-1 accent-emerald-400" />
       </label>
     </Card>
   );
@@ -245,7 +246,7 @@ function BackgroundSettings({ project }: { project: Project }) {
           {SOLID_COLORS.map((c) => (
             <button key={c} type="button" aria-label={c} aria-pressed={e.wallpaper === c} onClick={() => set({ wallpaper: c })} className={`aspect-square rounded-lg border border-line ring-offset-2 ring-offset-surface ${e.wallpaper === c ? "ring-2 ring-emerald-400" : ""}`} style={{ background: c }} />
           ))}
-          <input type="color" aria-label="Custom colour" value={/^#[0-9a-f]{6}$/i.test(e.wallpaper) ? e.wallpaper : "#222222"} onChange={(ev) => set({ wallpaper: ev.target.value }, false)} className="aspect-square w-full rounded-lg border border-line bg-surface-2" />
+          <input type="color" onFocus={() => useEditor.getState().beginEdit()} onBlur={() => useEditor.getState().endEdit()} aria-label="Custom colour" value={/^#[0-9a-f]{6}$/i.test(e.wallpaper) ? e.wallpaper : "#222222"} onChange={(ev) => set({ wallpaper: ev.target.value }, false)} className="aspect-square w-full rounded-lg border border-line bg-surface-2" />
         </div>
       </Card>
       <Card>
@@ -315,14 +316,15 @@ function LayoutSettings({ project }: { project: Project }) {
 }
 
 function Small({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void }) {
-  const checkpoint = useEditor((s) => s.checkpoint);
+  const beginEdit = useEditor((s) => s.beginEdit);
+  const endEdit = useEditor((s) => s.endEdit);
   return (
     <label className="flex flex-col gap-1 text-ink-2">
       <span className="flex">
         {label}
         <span className="ml-auto font-mono text-ink-3">{value}%</span>
       </span>
-      <input type="range" min={min} max={max} step={1} value={value} onPointerDown={checkpoint} onChange={(ev) => onChange(Number(ev.target.value))} className="h-1 accent-emerald-400" />
+      <input type="range" min={min} max={max} step={1} value={value} onFocus={beginEdit} onPointerDown={beginEdit} onKeyDown={beginEdit} onPointerUp={endEdit} onKeyUp={endEdit} onBlur={endEdit} onChange={(ev) => onChange(Number(ev.target.value))} className="h-1 accent-emerald-400" />
     </label>
   );
 }
@@ -453,7 +455,7 @@ function NoteSettings({ note }: { note: AnnotationRegion }) {
         <>
           <Card>
             <Label>Text</Label>
-            <textarea value={note.text ?? ""} onChange={(ev) => patch({ text: ev.target.value }, false)} onBlur={() => useEditor.getState().checkpoint()} rows={3} className="mt-2 w-full rounded-lg border border-line bg-surface p-2 text-xs text-ink outline-none focus:border-highlight/60" />
+            <textarea value={note.text ?? ""} onFocus={() => useEditor.getState().beginEdit()} onChange={(ev) => { useEditor.getState().beginEdit(); patch({ text: ev.target.value }, false); }} onBlur={() => useEditor.getState().endEdit()} rows={3} className="mt-2 w-full rounded-lg border border-line bg-surface p-2 text-xs text-ink outline-none focus:border-highlight/60" />
             <div className="mt-2 flex gap-1">
               {(["bold", "italic", "underline"] as const).map((k) => (
                 <button key={k} type="button" aria-pressed={note.style[k]} onClick={() => style({ [k]: !note.style[k] })} className="h-7 flex-1 rounded-md bg-surface text-11 text-ink-2 aria-pressed:bg-surface-3 aria-pressed:text-ink">
@@ -470,11 +472,11 @@ function NoteSettings({ note }: { note: AnnotationRegion }) {
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1 text-ink-2">
                 Text
-                <input type="color" value={note.style.color} onChange={(ev) => style({ color: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
+                <input type="color" onFocus={() => useEditor.getState().beginEdit()} onBlur={() => useEditor.getState().endEdit()} value={note.style.color} onChange={(ev) => style({ color: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
               </label>
               <label className="flex flex-col gap-1 text-ink-2">
                 Background
-                <input type="color" value={note.style.background === "transparent" ? "#000000" : note.style.background} onChange={(ev) => style({ background: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
+                <input type="color" onFocus={() => useEditor.getState().beginEdit()} onBlur={() => useEditor.getState().endEdit()} value={note.style.background === "transparent" ? "#000000" : note.style.background} onChange={(ev) => style({ background: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
               </label>
             </div>
             <Switch label="No background" checked={note.style.background === "transparent"} onChange={(v) => style({ background: v ? "transparent" : "#000000cc" })} />
@@ -497,7 +499,7 @@ function NoteSettings({ note }: { note: AnnotationRegion }) {
             </div>
             <label className="mt-3 flex flex-col gap-1 text-ink-2">
               Colour
-              <input type="color" value={note.style.color} onChange={(ev) => style({ color: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
+              <input type="color" onFocus={() => useEditor.getState().beginEdit()} onBlur={() => useEditor.getState().endEdit()} value={note.style.color} onChange={(ev) => style({ color: ev.target.value }, false)} className="h-8 w-full rounded border border-line bg-surface" />
             </label>
           </Card>
           <Slider label="Thickness" value={note.style.strokeWidth} min={1} max={6} step={1} onChange={(v) => style({ strokeWidth: v }, false)} />

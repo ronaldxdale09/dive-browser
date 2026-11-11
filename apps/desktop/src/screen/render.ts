@@ -4,7 +4,7 @@
  * annotations. Pure with respect to time, so the stage and the export call
  * the same function and get the same picture.
  */
-import { Spring, cameraAt, cameraTransform, clickBounce, contentBox, cursorAt, easeOutBack, easeOutCubic, lerp } from "./math";
+import { Spring, cameraAt, cameraTransform, clickBounce, contentBox, cursorAt, easeOutBack, easeOutCubic, lerp, toCropped } from "./math";
 import type { Camera } from "./math";
 import { WALLPAPERS } from "./model";
 import type { AnnotationRegion, CursorSample, Project, ZoomRegion } from "./model";
@@ -15,6 +15,7 @@ export type VideoSource = HTMLVideoElement | HTMLCanvasElement | ImageBitmap | O
 export class Renderer {
   private wallpaperImage: HTMLImageElement | null = null;
   private wallpaperKey = "";
+  private wallpaperPending: HTMLImageElement | null = null;
   private images = new Map<string, HTMLImageElement>();
   private scale = new Spring(1);
   private fx = new Spring(0.5);
@@ -22,6 +23,76 @@ export class Renderer {
   private lastMs = Number.NaN;
   private cursorX = new Spring(0.5, 340, 58, 1);
   private cursorY = new Spring(0.5, 340, 58, 1);
+  private onImage: (() => void) | null = null;
+
+  /** Called when a wallpaper or picture finishes loading, so a paused preview can redraw. */
+  setOnImage(fn: (() => void) | null) {
+    this.onImage = fn;
+  }
+
+  /** The wallpaper image for `css`, created once per value. */
+  private requestWallpaper(css: string): HTMLImageElement | null {
+    if (this.wallpaperKey !== css) {
+      this.wallpaperKey = css;
+      this.wallpaperImage = null;
+      this.wallpaperPending = new Image();
+      const img = this.wallpaperPending;
+      img.onload = () => {
+        if (this.wallpaperKey !== css) return;
+        this.wallpaperImage = img;
+        this.onImage?.();
+      };
+      img.src = css;
+    }
+    return this.wallpaperPending;
+  }
+
+  /** The decoded-or-loading picture for an annotation, created once per source. */
+  private requestImage(src: string): HTMLImageElement {
+    let img = this.images.get(src);
+    if (!img) {
+      const created = new Image();
+      created.onload = () => this.onImage?.();
+      created.src = src;
+      this.images.set(src, created);
+      img = created;
+    }
+    return img;
+  }
+
+  /**
+   * Decode the wallpaper and picture notes before a frame needs them. Never
+   * throws: an image that cannot load draws as it does now. Waits at most 5 s.
+   */
+  async preload(project: Project): Promise<void> {
+    const pending: Promise<unknown>[] = [];
+    const settle = (img: HTMLImageElement): Promise<unknown> => {
+      if (typeof img.decode === "function") return img.decode().catch(() => undefined);
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      });
+    };
+    const css = wallpaperCss(project.editor.wallpaper);
+    if (isImageUrl(css)) {
+      const img = this.requestWallpaper(css);
+      if (img) pending.push(settle(img));
+    }
+    for (const a of project.editor.annotations) {
+      if (a.type === "image" && a.image) pending.push(settle(this.requestImage(a.image)));
+    }
+    if (!pending.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, 5000);
+    });
+    try {
+      await Promise.race([Promise.all(pending).then(() => undefined), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   /** Forget motion state: after a seek the camera lands, it does not chase. */
   snap() {
@@ -98,7 +169,7 @@ export class Renderer {
     ctx.restore();
 
     // Pointer.
-    if (e.cursor.show && smoothed.length) this.drawCursor(ctx, project, smoothed, raw, tMs, box, cam2, W, H, opts.playing);
+    if (e.cursor.show && smoothed.length) this.drawCursor(ctx, project, smoothed, raw, tMs, box, cam2, W, H, opts.playing, dt);
 
     // Annotations over everything, in canvas space.
     for (const a of sortedAnnotations(e.annotations).filter((a) => a.type !== "blur" && inRange(a, tMs))) {
@@ -119,19 +190,13 @@ export class Renderer {
     const auto = project.editor.autoFocusAll || z.focusMode === "auto";
     if (!auto) return z.focus;
     const c = cursorAt(smoothed, tMs);
-    return c ?? z.focus;
+    return c ? toCropped(c, project.editor.crop) : z.focus;
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D, wallpaper: string, W: number, H: number, blur: boolean) {
-    const css = WALLPAPERS.find((w) => w.id === wallpaper)?.css ?? wallpaper;
-    if (css.startsWith("data:") || css.startsWith("http") || css.startsWith("file:")) {
-      if (this.wallpaperKey !== css) {
-        this.wallpaperKey = css;
-        this.wallpaperImage = null;
-        const img = new Image();
-        img.onload = () => (this.wallpaperImage = img);
-        img.src = css;
-      }
+    const css = wallpaperCss(wallpaper);
+    if (isImageUrl(css)) {
+      this.requestWallpaper(css);
       const img = this.wallpaperImage;
       if (img && img.naturalWidth) {
         const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
@@ -151,12 +216,12 @@ export class Renderer {
     ctx.fillRect(0, 0, W, H);
   }
 
-  private drawCursor(ctx: CanvasRenderingContext2D, project: Project, smoothed: CursorSample[], raw: CursorSample[], tMs: number, box: { x: number; y: number; w: number; h: number }, cam: { scale: number; x: number; y: number }, W: number, H: number, playing: boolean) {
+  private drawCursor(ctx: CanvasRenderingContext2D, project: Project, smoothed: CursorSample[], raw: CursorSample[], tMs: number, box: { x: number; y: number; w: number; h: number }, cam: { scale: number; x: number; y: number }, W: number, H: number, playing: boolean, dt: number) {
     const c = project.editor.cursor;
     const target = cursorAt(smoothed, tMs);
     if (!target) return;
     // A little extra lag while playing keeps the pointer feeling physical.
-    const p = playing ? { cx: this.cursorX.step(target.cx, 16), cy: this.cursorY.step(target.cy, 16) } : (this.cursorX.snap(target.cx), this.cursorY.snap(target.cy), target);
+    const p = this.stepCursor(target, dt, playing);
     const crop = project.editor.crop;
     // From frame-normalised to cropped-picture-normalised, then through the camera.
     const px = ((p.cx - crop.x) / crop.width) * box.w;
@@ -191,6 +256,20 @@ export class Renderer {
     ctx.shadowOffsetY = 2 * (W / 1920);
     drawArrowCursor(ctx, base);
     ctx.restore();
+  }
+
+  /**
+   * The pointer position for this frame. While playing it chases the target
+   * by the content time since the last frame (`dt`, the same one the camera
+   * uses), so a 10 fps export lags the arrow no more than a 60 fps preview.
+   * Shared by `drawCursor` and tested directly.
+   */
+  stepCursor(target: { cx: number; cy: number }, dt: number, playing: boolean): { cx: number; cy: number } {
+    const step = playing && Number.isFinite(dt) && dt >= 0 && dt <= 500;
+    if (step) return { cx: this.cursorX.step(target.cx, dt), cy: this.cursorY.step(target.cy, dt) };
+    this.cursorX.snap(target.cx);
+    this.cursorY.snap(target.cy);
+    return target;
   }
 
   private drawMosaic(ctx: CanvasRenderingContext2D, a: AnnotationRegion, w: number, h: number, camScale: number) {
@@ -326,16 +405,19 @@ export class Renderer {
       ctx.closePath();
       ctx.fill();
     } else if (a.type === "image" && a.image) {
-      let img = this.images.get(a.image);
-      if (!img) {
-        img = new Image();
-        img.src = a.image;
-        this.images.set(a.image, img);
-      }
+      const img = this.requestImage(a.image);
       if (img.naturalWidth) ctx.drawImage(img, -w / 2, -h / 2, w, h);
     }
     ctx.restore();
   }
+}
+
+function wallpaperCss(wallpaper: string): string {
+  return WALLPAPERS.find((w) => w.id === wallpaper)?.css ?? wallpaper;
+}
+
+function isImageUrl(css: string): boolean {
+  return css.startsWith("data:") || css.startsWith("http") || css.startsWith("file:");
 }
 
 function inRange(a: { startMs: number; endMs: number }, tMs: number) {

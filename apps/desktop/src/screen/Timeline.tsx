@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Icon } from "../components/Icon";
 import { Tooltip } from "../components/Tooltip";
 import { recordingClock } from "../lib/recordingFormat";
+import { dragOnWindow } from "./drag";
 import { zoomScale } from "./math";
 import { ASPECT_RATIOS } from "./model";
 import type { Selection } from "./store";
@@ -39,7 +40,8 @@ export function Timeline() {
   const retime = useEditor((s) => s.retime);
   const seek = useEditor((s) => s.seek);
   const update = useEditor((s) => s.update);
-  const checkpoint = useEditor((s) => s.checkpoint);
+  const beginEdit = useEditor((s) => s.beginEdit);
+  const endEdit = useEditor((s) => s.endEdit);
   const addZoom = useEditor((s) => s.addZoom);
   const addTrim = useEditor((s) => s.addTrim);
   const addSpeed = useEditor((s) => s.addSpeed);
@@ -47,6 +49,9 @@ export function Timeline() {
   const autoZoom = useEditor((s) => s.autoZoom);
   const hasPointer = useEditor((s) => s.cursorRaw.length > 0);
   const root = useRef<HTMLDivElement>(null);
+  // The drag in progress, so unmounting mid-drag lets go of the window.
+  const activeDrag = useRef<(() => void) | null>(null);
+  const hasProject = project !== null;
   const lanesRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ start: 0, span: 0 });
@@ -84,35 +89,45 @@ export function Timeline() {
     });
   }, [start, span, width]);
 
+  useEffect(() => () => activeDrag.current?.(), []);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        const at = start + (ev.clientX - (lanesRef.current?.getBoundingClientRect().left ?? 0) - PAD) / pxPerMs;
+        const factor = ev.deltaY > 0 ? 1.15 : 1 / 1.15;
+        const next = Math.min(total, Math.max(300, span * factor));
+        const s = Math.min(Math.max(0, at - (at - start) * (next / span)), Math.max(0, total - next));
+        setView({ start: s, span: next });
+      } else if (span < total) {
+        ev.preventDefault();
+        const s = Math.min(Math.max(0, start + (ev.deltaY + ev.deltaX) / pxPerMs), Math.max(0, total - span));
+        setView({ start: s, span });
+      }
+    };
+    // React's onWheel is passive, so its preventDefault was ignored and
+    // ⌘-scroll reached the webview as a page zoom.
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [hasProject, start, span, total, pxPerMs]);
+
   if (!project) return null;
   const e = project.editor;
-
-  const onWheel = (ev: React.WheelEvent) => {
-    if (ev.ctrlKey || ev.metaKey) {
-      ev.preventDefault();
-      const at = toMs(ev.clientX - (lanesRef.current?.getBoundingClientRect().left ?? 0));
-      const factor = ev.deltaY > 0 ? 1.15 : 1 / 1.15;
-      const next = Math.min(total, Math.max(300, span * factor));
-      const s = Math.min(Math.max(0, at - (at - start) * (next / span)), Math.max(0, total - next));
-      setView({ start: s, span: next });
-    } else if (span < total) {
-      ev.preventDefault();
-      const s = Math.min(Math.max(0, start + (ev.deltaY + ev.deltaX) / pxPerMs), Math.max(0, total - span));
-      setView({ start: s, span });
-    }
-  };
 
   const atClient = (x: number) => Math.max(0, Math.min(total, toMs(x - (lanesRef.current?.getBoundingClientRect().left ?? 0))));
 
   const scrub = (ev: React.PointerEvent) => {
     seek(atClient(ev.clientX));
-    const move = (m: PointerEvent) => seek(atClient(m.clientX));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    activeDrag.current?.();
+    activeDrag.current = dragOnWindow(
+      (m) => seek(atClient(m.clientX)),
+      () => {
+        activeDrag.current = null;
+      },
+    );
   };
 
   /** On an empty lane: a click scrubs, a drag draws a new item of that lane's kind. */
@@ -129,11 +144,11 @@ export function Timeline() {
       if (drawing) setDraft({ kind, startMs: Math.min(t0, t), endMs: Math.max(t0, t) });
       else seek(t);
     };
-    const up = (m: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    const up = (m: PointerEvent | null) => {
+      activeDrag.current = null;
       setDraft(null);
-      if (!drawing) return;
+      // A cancelled drag (or one cut off by the window losing focus) adds nothing.
+      if (!m || !drawing) return;
       const t = atClient(m.clientX);
       const s = Math.min(t0, t);
       const en = Math.max(t0, t);
@@ -154,8 +169,8 @@ export function Timeline() {
         }, false);
       }
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    activeDrag.current?.();
+    activeDrag.current = dragOnWindow(move, up);
   };
 
   const snapPoints = (kind: string, id: string): number[] => {
@@ -189,7 +204,7 @@ export function Timeline() {
     const origin = { startMs: item.startMs, endMs: item.endMs };
     const x0 = ev.clientX;
     const pts = snapPoints(kind, id);
-    checkpoint();
+    beginEdit();
     const move = (m: PointerEvent) => {
       const d = (m.clientX - x0) / pxPerMs;
       let s = origin.startMs;
@@ -224,12 +239,11 @@ export function Timeline() {
         }
       }, false);
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    activeDrag.current?.();
+    activeDrag.current = dragOnWindow(move, () => {
+      activeDrag.current = null;
+      endEdit();
+    });
   };
 
   const { major, minor } = tickMarks(start, span, inner);
@@ -286,7 +300,7 @@ export function Timeline() {
   };
 
   return (
-    <div ref={root} className="flex h-full min-w-0 flex-col rounded-2xl border border-line bg-surface select-none" onWheel={onWheel}>
+    <div ref={root} className="flex h-full min-w-0 flex-col rounded-2xl border border-line bg-surface select-none">
       {/* Toolbar */}
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-3">
         <Tool icon={ZoomIn} label="Add zoom at the playhead" shortcut="Z" onClick={() => addZoom()} />
@@ -387,11 +401,10 @@ function Tool({ icon, label, shortcut, disabled, active, onClick }: { icon: Luci
   );
 }
 
-/** m:ss, with tenths when the view is tight. */
-function stamp(ms: number) {
-  const base = recordingClock(Math.floor(ms / 1000));
-  const tenth = Math.round((ms % 1000) / 100);
-  return tenth ? `${base}.${tenth}` : `${base}.0`;
+/** m:ss.t, rounded to the tenth first so 1950 ms reads 0:02.0, not 0:01.10. */
+export function stamp(ms: number) {
+  const tenths = Math.round(ms / 100);
+  return `${recordingClock(Math.floor(tenths / 10))}.${tenths % 10}`;
 }
 
 function tickMarks(start: number, span: number, px: number): { major: number[]; minor: number[] } {

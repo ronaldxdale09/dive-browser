@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Spring, buildSegments, cameraAt, cameraTransform, clampFocus, clickBounce, contentBox, cursorAt, outputDuration, outputSize, outputTime, smoothCursorPath, sourceTime, suggestZooms, zoomScale, zoomStrength } from "./math";
+import { Spring, buildSegments, cameraAt, cameraTransform, clampFocus, clickBounce, contentBox, cursorAt, outputDuration, outputSize, outputTime, smoothCursorPath, sourceTime, suggestZooms, toCropped, zoomScale, zoomStrength } from "./math";
 import type { CursorSample, ZoomRegion } from "./model";
 
 const zoom = (startMs: number, endMs: number, extra: Partial<ZoomRegion> = {}): ZoomRegion => ({ id: `z${startMs}`, startMs, endMs, depth: 3, focus: { cx: 0.5, cy: 0.5 }, focusMode: "manual", source: "manual", ...extra });
@@ -132,5 +132,22 @@ describe("canvas", () => {
     expect(box.w).toBeLessThanOrEqual(1920 * 0.8);
     expect(box.h).toBeCloseTo(box.w / 1.6, 5);
     expect(box.x).toBeCloseTo((1920 - box.w) / 2, 5);
+  });
+});
+
+describe("toCropped", () => {
+  it("is the identity without a crop", () => {
+    expect(toCropped({ cx: 0.3, cy: 0.7 }, { x: 0, y: 0, width: 1, height: 1 })).toEqual({ cx: 0.3, cy: 0.7 });
+  });
+
+  it("maps a frame point into the cropped picture", () => {
+    const out = toCropped({ cx: 0.75, cy: 0.4 }, { x: 0.5, y: 0, width: 0.5, height: 1 });
+    expect(out.cx).toBeCloseTo(0.5);
+    expect(out.cy).toBeCloseTo(0.4);
+  });
+
+  it("clamps a point outside the crop to its edge", () => {
+    expect(toCropped({ cx: 0.1, cy: 0.5 }, { x: 0.5, y: 0, width: 0.5, height: 1 }).cx).toBe(0);
+    expect(toCropped({ cx: 1, cy: 0.5 }, { x: 0, y: 0, width: 0.5, height: 1 }).cx).toBe(1);
   });
 });

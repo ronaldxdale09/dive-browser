@@ -4,7 +4,7 @@ import { editorOwnsKey } from "./DiveScreen";
 import { buildSegments, outputDuration } from "./math";
 import { newProject } from "./model";
 import { canRetime, useEditor } from "./store";
-import { Timeline } from "./Timeline";
+import { Timeline, stamp } from "./Timeline";
 
 const media = { source: "/tmp/recording.mp4", playable: "/tmp/recording.webm", events: null, durationMs: 10_000, width: 1280, height: 720 };
 const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
@@ -105,5 +105,23 @@ describe("Timeline keyboard", () => {
     expect(screen.getByRole("status").textContent).toMatch(/cannot overlap/);
     // The playhead is the editor's arrows' business, not the item's.
     expect(useEditor.getState().playhead).toBe(0);
+  });
+});
+
+describe("stamp", () => {
+  it("rounds to the tenth before splitting minutes, seconds and tenths", () => {
+    expect(stamp(1950)).toBe("0:02.0");
+    expect(stamp(1040)).toBe("0:01.0");
+    expect(stamp(61_250)).toBe("1:01.3");
+  });
+});
+
+describe("timeline wheel", () => {
+  it("prevents the page zoom on a command-scroll", () => {
+    render(<Timeline />);
+    const root = screen.getByRole("group", { name: "Timeline" }).parentElement!;
+    const event = new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, cancelable: true, bubbles: true });
+    act(() => { root.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { useEditor } from "./store";
 
 const mock = vi.hoisted(() => ({ begin: vi.fn(), append: vi.fn(), finish: vi.fn(), cancel: vi.fn(), draw: vi.fn() }));
 vi.mock("../lib/ipc", () => ({ ipc: { screenExportBegin: mock.begin, screenExportAppend: mock.append, screenExportFinish: mock.finish, screenExportCancel: mock.cancel } }));
-vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} } }));
+vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} async preload() {} } }));
 vi.mock("webm-muxer", () => ({
   StreamTarget: class { constructor(public options: { onData: (data: Uint8Array, position: number) => void }) {} },
   Muxer: class {
@@ -94,6 +94,12 @@ async function expectCancelled(pending: Promise<unknown>, controller: AbortContr
 }
 
 describe("export frontend ownership and bounded waits", () => {
+  it("refuses a project with nothing left", async () => {
+    const empty = { ...input(video()), segments: [] };
+    await expect(exportProject(empty)).rejects.toThrow(/Nothing is left to export/);
+    expect(mock.begin).not.toHaveBeenCalled();
+  });
+
   it("cancels media readiness and removes its callbacks", async () => {
     const element = video(0);
     const removed = vi.spyOn(element, "removeEventListener");

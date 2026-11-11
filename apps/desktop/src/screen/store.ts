@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import { captureMediaUrl } from "../lib/mediaUrl";
 import { useBrowser } from "../store/browser";
-import { buildSegments, outputDuration, smoothCursorPath, suggestZooms } from "./math";
+import { buildSegments, outputDuration, smoothCursorPath, suggestZooms, toCropped } from "./math";
 import type { Segment } from "./math";
 import { cursorSamples, newId, newProject, normalizeProject, DEFAULT_ANNOTATION_STYLE } from "./model";
 import type { AnnotationRegion, AnnotationType, CursorSample, Project, RecordingEvents, SpeedRegion, TrimRegion, ZoomRegion } from "./model";
@@ -52,6 +52,10 @@ export interface EditorState {
   /** Change the project; `history` false for drags in progress. */
   update: (fn: (e: Project["editor"]) => Project["editor"], history?: boolean) => void;
   checkpoint: () => void;
+  /** Start an edit whose steps all undo together: a drag, a typed note, a picked colour. */
+  beginEdit: () => void;
+  /** Close it; it becomes one undo step only if something actually changed. */
+  endEdit: () => void;
   undo: () => void;
   redo: () => void;
   select: (s: Selection) => void;
@@ -90,6 +94,8 @@ export function canRetime(list: readonly Timed[], id: string, startMs: number, e
 
 const MAX_HISTORY = 80;
 let saveTimer = 0;
+/** The editor as it was when the open edit began; null when no edit is open. */
+let editBase: Project["editor"] | null = null;
 let nextRevision = 0;
 let activeRevision = 0;
 interface Draft { project: Project; revision: number; error: string | null }
@@ -240,6 +246,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const derived = derive(project, project.editor.cursor.smoothing, raw);
       activeRevision = draft?.revision ?? ++nextRevision;
       if (draft) drafts.set(source, { ...draft, project });
+      editBase = null;
       set({ project, playable: url.href, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: unreadable ? false : Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
       if (!saved && !draft && project.editor.autoZoom && raw.length) get().autoZoom();
     } catch (e) {
@@ -255,10 +262,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (state.dirty) void state.save();
     if (state.playable?.startsWith("blob:")) URL.revokeObjectURL(state.playable);
     window.clearTimeout(saveTimer);
+    editBase = null;
     set({ generation: state.generation + 1, source: null, project: null, playable: null, loading: null, error: null, saveError: null, cursorRaw: [], cursorSmooth: [], segments: [], duration: 0, playhead: 0, playing: false, selection: null, past: [], future: [], dirty: false, saved: false, videoEl: null, exporting: false });
   },
 
   update: (fn, history = true) => {
+    if (history) get().endEdit();
     const { source, project, past, cursorRaw } = get();
     if (!source || !project) return;
     const editor = fn(project.editor);
@@ -279,7 +288,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { project, past } = get();
     if (project) set({ past: [...past.slice(-MAX_HISTORY + 1), project.editor], future: [] });
   },
+  beginEdit: () => {
+    const { project } = get();
+    if (editBase === null && project) editBase = project.editor;
+  },
+  endEdit: () => {
+    const base = editBase;
+    editBase = null;
+    const { project, past } = get();
+    if (base && project && project.editor !== base) set({ past: [...past.slice(-MAX_HISTORY + 1), base], future: [] });
+  },
   undo: () => {
+    get().endEdit();
     const { source, project, past, future, cursorRaw } = get();
     if (!source || !project || past.length === 0) return;
     const editor = past[past.length - 1]!;
@@ -289,6 +309,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     scheduleSave();
   },
   redo: () => {
+    get().endEdit();
     const { source, project, past, future, cursorRaw } = get();
     if (!source || !project || future.length === 0) return;
     const editor = future[0]!;
@@ -400,7 +421,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       startMs,
       endMs,
       depth: 3,
-      focus: { cx, cy },
+      focus: toCropped({ cx, cy }, project.editor.crop),
       focusMode: project.editor.autoFocusAll ? "auto" : "manual",
       source: "auto",
     }));

@@ -9,7 +9,7 @@ import { newProject } from "./model";
  */
 const mock = vi.hoisted(() => ({ begin: vi.fn(), append: vi.fn(), finish: vi.fn(), cancel: vi.fn(), draw: vi.fn() }));
 vi.mock("../lib/ipc", () => ({ ipc: { screenExportBegin: mock.begin, screenExportAppend: mock.append, screenExportFinish: mock.finish, screenExportCancel: mock.cancel } }));
-vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} } }));
+vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} async preload() {} } }));
 
 type OnData = (data: Uint8Array, position: number) => void;
 const fake = vi.hoisted(() => {
