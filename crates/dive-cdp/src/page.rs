@@ -221,6 +221,72 @@ pub async fn capture_full_page_instant(
     .await
 }
 
+/// Most bytes a printed PDF may have before printing is abandoned.
+pub const MAX_PDF_BYTES: usize = 256 * 1024 * 1024;
+/// Bytes asked for per `IO.read`; small enough that no reply comes near the ingress limit.
+const PDF_READ_CHUNK: usize = 1024 * 1024;
+
+/// Print the page with `params` (`Page.printToPDF` parameters; `transferMode`
+/// is set here) and read the result as a stream.
+pub async fn print_to_pdf(session: &CdpSession, params: Value) -> Result<Vec<u8>> {
+    print_to_pdf_capped(session, params, MAX_PDF_BYTES).await
+}
+
+async fn print_to_pdf_capped(
+    session: &CdpSession,
+    mut params: Value,
+    cap: usize,
+) -> Result<Vec<u8>> {
+    params["transferMode"] = json!("ReturnAsStream");
+    let printed = session.call("Page.printToPDF", params).await?;
+    let handle = printed
+        .get("stream")
+        .and_then(Value::as_str)
+        .ok_or(CdpError::MissingField("stream"))?
+        .to_owned();
+    let read = read_pdf_stream(session, &handle, cap).await;
+    // Always free the stream in Chromium, whatever happened while reading.
+    let _ = session.call("IO.close", json!({ "handle": handle })).await;
+    read
+}
+
+async fn read_pdf_stream(session: &CdpSession, handle: &str, cap: usize) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    loop {
+        let chunk = session
+            .call(
+                "IO.read",
+                json!({ "handle": handle, "size": PDF_READ_CHUNK }),
+            )
+            .await?;
+        let data = chunk
+            .get("data")
+            .and_then(Value::as_str)
+            .ok_or(CdpError::MissingField("data"))?;
+        if chunk
+            .get("base64Encoded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|e| CdpError::Transport(format!("PDF stream was not base64: {e}")))?;
+            out.extend_from_slice(&bytes);
+        } else {
+            out.extend_from_slice(data.as_bytes());
+        }
+        if out.len() > cap {
+            return Err(CdpError::ResponseTooLarge {
+                bytes: out.len(),
+                limit: cap,
+            });
+        }
+        if chunk.get("eof").and_then(Value::as_bool).unwrap_or(false) {
+            return Ok(out);
+        }
+    }
+}
+
 /// How many times a screenshot is attempted before its failure is reported.
 const SCREENSHOT_ATTEMPTS: u32 = 3;
 /// Pause between attempts, long enough for the compositor to produce a frame
@@ -364,6 +430,48 @@ mod tests {
         });
         *slot.lock().unwrap() = Some(session.clone());
         (session, sent)
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    #[tokio::test]
+    async fn a_pdf_is_read_in_chunks_and_the_stream_closed() {
+        let (session, sent) = scripted(vec![
+            json!({"stream": "h1"}),
+            json!({"data": b64(b"%PDF-"), "base64Encoded": true, "eof": false}),
+            json!({"data": b64(b"1.7"), "base64Encoded": true, "eof": true}),
+            json!({}),
+        ]);
+        let bytes = print_to_pdf(&session, json!({"landscape": false}))
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"%PDF-1.7");
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent[0]["params"]["transferMode"], "ReturnAsStream");
+        assert_eq!(sent[1]["method"], "IO.read");
+        assert_eq!(sent[3]["method"], "IO.close");
+        assert_eq!(sent[3]["params"]["handle"], "h1");
+    }
+
+    #[tokio::test]
+    async fn a_pdf_over_the_cap_is_refused_and_the_stream_still_closed() {
+        let (session, sent) = scripted(vec![
+            json!({"stream": "h2"}),
+            json!({"data": b64(b"12345678"), "base64Encoded": true, "eof": false}),
+            json!({}),
+        ]);
+        let error = print_to_pdf_capped(&session, json!({}), 4)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CdpError::ResponseTooLarge { bytes: 8, limit: 4 }
+        ));
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.last().unwrap()["method"], "IO.close");
+        assert_eq!(sent.last().unwrap()["params"]["handle"], "h2");
     }
 
     #[tokio::test]

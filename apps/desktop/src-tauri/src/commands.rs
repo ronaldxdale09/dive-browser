@@ -2625,7 +2625,7 @@ pub(crate) async fn tab_reload_hard(
     }
 }
 
-fn rebuild_failed_protocol(
+pub(crate) fn rebuild_failed_protocol(
     app: &AppHandle<Runtime>,
     state: &AppState,
     id: TabId,

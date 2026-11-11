@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::Engine as _;
 use dive_cdp::CdpSession;
 use dive_core::TabId;
 use dive_mcp::{
@@ -2004,6 +2003,27 @@ impl Browser for AppBrowser {
         let url = self.web_url(&url)?;
         self.tracked(tab, "tab_navigate", Some(url.to_string()), async {
             let state = self.state();
+            // A tab whose protocol session died (an overload, a crash) is
+            // rebuilt the way the chrome's own navigation does it, so later
+            // automation calls have a session again.
+            let needs_rebuild = lock(&state.host)
+                .as_ref()
+                .is_some_and(|host| host.needs_protocol_rebuild(tab));
+            if needs_rebuild {
+                let target = url.to_string();
+                return self
+                    .on_main(move |app| {
+                        crate::commands::rebuild_failed_protocol(
+                            app,
+                            &app.state::<AppState>(),
+                            tab,
+                            Some(target),
+                        )
+                        .map(|_| ())
+                        .map_err(|e| other(e.message))
+                    })
+                    .await?;
+            }
             let host = lock(&state.host);
             host.as_ref()
                 .ok_or_else(|| other("engine not ready"))?
@@ -2375,6 +2395,15 @@ impl Browser for AppBrowser {
         self.tracked(tab, "tab_history", Some(action.into()), async {
             self.on_main(move |app| {
                 let state = app.state::<AppState>();
+                // A dead protocol session is rebuilt, which also reloads the
+                // tab's URL. Back and forward keep the native path: a rebuild
+                // would load the current URL, not the previous one.
+                if action == "reload"
+                    && crate::commands::rebuild_failed_protocol(app, &state, tab, None)
+                        .map_err(|e| other(e.message))?
+                {
+                    return Ok(());
+                }
                 let step: fn(&tauri::Webview<Runtime>) -> tauri::Result<()> = match action {
                     "back" => tauri::Webview::go_back,
                     "forward" => tauri::Webview::go_forward,
@@ -3530,29 +3559,18 @@ impl Browser for AppBrowser {
         let (width, height) = paper_size(params.paper.as_deref())?;
         let name = pdf_filename(params.filename.as_deref())?;
         let session = self.session_for(tab).await?;
-        let answer = session
-            .call(
-                "Page.printToPDF",
-                json!({
-                    "landscape": params.landscape.unwrap_or(false),
-                    "displayHeaderFooter": params.headers.unwrap_or(false),
-                    "printBackground": params.background.unwrap_or(true),
-                    "paperWidth": width,
-                    "paperHeight": height,
-                    // Base64 rather than a stream: a page that prints to more
-                    // than this is a book, and the caller gets a path either
-                    // way.
-                    "transferMode": "ReturnAsBase64",
-                }),
-            )
-            .await
-            .map_err(|e| other(e.to_string()))?;
-        let encoded = answer["data"]
-            .as_str()
-            .ok_or_else(|| other("the page produced no PDF"))?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .map_err(|e| other(format!("the PDF came back unreadable: {e}")))?;
+        let bytes = dive_cdp::page::print_to_pdf(
+            &session,
+            json!({
+                "landscape": params.landscape.unwrap_or(false),
+                "displayHeaderFooter": params.headers.unwrap_or(false),
+                "printBackground": params.background.unwrap_or(true),
+                "paperWidth": width,
+                "paperHeight": height,
+            }),
+        )
+        .await
+        .map_err(|e| other(e.to_string()))?;
         let dir = {
             let state = self.state();
             state.prefs.get(&state).download_dir()
