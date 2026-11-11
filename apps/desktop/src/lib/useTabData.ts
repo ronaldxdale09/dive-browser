@@ -17,7 +17,8 @@ export function readErrorText(e: unknown): string {
   return isTransientReadError(e) ? "The page was still loading when it was read." : errorMessage(e);
 }
 
-const RETRY_MS = 700;
+/** How long a read waits before its one retry of a page that was still loading. */
+export const RETRY_MS = 700;
 
 /**
  * Fetch something about the active tab whenever the tab or its URL changes,

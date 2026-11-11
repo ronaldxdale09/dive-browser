@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { create } from "zustand";
 import type { ColorFormats } from "../lib/ipc";
-import { errorMessage } from "../lib/errors";
+import { isTransientReadError, readErrorText, RETRY_MS } from "../lib/useTabData";
 import { onTabClosed } from "./browser";
 
 /** The dock panels that read the page on request rather than as it changes. */
@@ -76,11 +76,24 @@ export function usePanelRead<T>(panel: PanelRead, tabId: string | null, url: str
           const base: Slot = old && old.url === at ? old : { url: at, data: null, busy: false, error: null };
           return { slots: { ...s.slots, [key]: { ...base, ...next, url: at } } };
         });
+      // A page that was still loading when it was read gets one more try
+      // before anything is shown, as the automatic panels do.
+      const attempt = async (again: boolean): Promise<T> => {
+        try {
+          return await read(tabId);
+        } catch (e) {
+          if (again && isTransientReadError(e)) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+            return attempt(false);
+          }
+          throw e;
+        }
+      };
       put({ busy: true, error: null });
       try {
-        put({ data: await read(tabId), busy: false });
+        put({ data: await attempt(true), busy: false });
       } catch (e) {
-        put({ busy: false, error: errorMessage(e) });
+        put({ busy: false, error: readErrorText(e) });
       }
     },
     [key, tabId, url],
