@@ -13,12 +13,20 @@ import type { CursorSample, Project } from "./model";
 import { Renderer } from "./render";
 import { recordMediaProbe, setMediaProbePhase } from "./mediaProbe";
 import { ignored } from "../lib/chromeErrors";
+import { ExportTimings, publishExportTimings } from "./exportTimings";
 
 /** Longest output the exporter renders in one go; past this the render
  * alone would take longer than anyone waits at a progress bar. */
 export const MAX_OUTPUT_MS = 20 * 60 * 1000;
 /** Size of the pieces the muxer hands over; under the engine's 8 MB cap. */
 const UPLOAD_CHUNK = 6 * 1024 * 1024;
+/** Mirrors `TOTAL_LIMIT` in `screen_export_jobs.rs`; change both together. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Bytes of the staged VP9 stream: the configured bitrate over the output, with headroom for rate-control overshoot. */
+export function exportSizeEstimate(width: number, height: number, fps: number, durationMs: number): number {
+  return (bitrateFor(width, height, fps) / 8) * (durationMs / 1000) * 1.15;
+}
 
 export interface ExportProgress {
   phase: "preparing" | "rendering" | "uploading" | "finishing" | "done";
@@ -150,7 +158,12 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   if ((frames / fps) * 1000 > MAX_OUTPUT_MS) {
     throw new Error(`This export would be ${Math.round(frames / fps / 60)} minutes long; DiveScreen exports up to ${MAX_OUTPUT_MS / 60_000} minutes at a time. Trim the recording or speed it up first.`);
   }
+  const estimate = exportSizeEstimate(width, height, fps, durationMs);
+  if (estimate > MAX_UPLOAD_BYTES) {
+    throw new Error(`This export would be about ${(estimate / 1024 ** 3).toFixed(1)} GB before compression, over DiveScreen's 2 GB limit. Choose 1080p, or trim the recording.`);
+  }
   onProgress({ phase: "preparing", progress: 0 });
+  const timings = new ExportTimings();
 
   // Borrow the stage's element when it is there; otherwise make one in the
   // document (hidden) and nudge it with a play/pause, since a detached
@@ -199,9 +212,11 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       video.pause();
     }
     // Never reload the Stage's existing decoder.
-    await ready(video, !borrowed, signal);
-    setMediaProbePhase(video, "seeking", 0, 0);
-    await seekTo(video, 0, signal);
+    await timings.time("prepare", async () => {
+      await ready(video, !borrowed, signal);
+      setMediaProbePhase(video, "seeking", 0, 0);
+      await seekTo(video, 0, signal);
+    });
     video.pause();
 
     const canvas = document.createElement("canvas");
@@ -222,7 +237,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     checkCancelled(signal);
     jobId = await ipc.screenExportBegin();
     if (signal?.aborted) cancelJob();
-    const stream = new Uploader(jobId);
+    const stream = new Uploader(jobId, timings);
     const target = new StreamTarget({ onData: (data, position) => stream.push(data, position), chunked: true, chunkSize: UPLOAD_CHUNK });
     const muxer = new Muxer({ target, video: { codec: "V_VP9", width, height, frameRate: fps }, firstTimestampBehavior: "offset", streaming: true });
     let encodeError: Error | null = null;
@@ -233,6 +248,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     encoder.configure({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps, latencyMode: "quality" });
     const failed = () => { if (encodeError) throw encodeError; stream.check(); };
 
+    const live = encoder;
     renderer.snap();
     for (let i = 0; i < frames; i++) {
       checkCancelled(signal);
@@ -240,23 +256,25 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       const outMs = (i / fps) * 1000;
       const srcMs = sourceTime(segments, outMs) ?? project.media.durationMs;
       setMediaProbePhase(video, "seeking", i + 1, srcMs);
-      await seekTo(video, srcMs, signal);
+      await timings.time("seek", () => seekTo(video, srcMs, signal));
       setMediaProbePhase(video, "draining", i + 1, srcMs);
-      await drain(encoder, failed, signal);
+      await timings.time("drain", () => drain(live, failed, signal));
       setMediaProbePhase(video, "rendering", i + 1, srcMs);
-      renderer.draw(ctx, project, video, srcMs, cursorSmooth, cursorRaw, { width, height, playing: true });
-      const frame = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: Math.round(1_000_000 / fps) });
-      try {
-        encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-      } finally {
-        frame.close();
-      }
+      timings.timeSync("draw", () => renderer.draw(ctx, project, video, srcMs, cursorSmooth, cursorRaw, { width, height, playing: true }));
+      timings.timeSync("encode", () => {
+        const frame = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: Math.round(1_000_000 / fps) });
+        try {
+          live.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+        } finally {
+          frame.close();
+        }
+      });
       // Pieces the muxer finished while this frame encoded go out now, in order.
-      await stream.flush(signal);
+      await timings.time("upload", () => stream.flush(signal));
       if (i % 3 === 0) onProgress({ phase: "rendering", progress: (i + 1) / frames, frame: i + 1, frames });
     }
     setMediaProbePhase(video, "flushing");
-    await bounded(encoder.flush(), "flushing video encoder", 10_000, signal);
+    await timings.time("flush", () => bounded(live.flush(), "flushing video encoder", 10_000, signal));
     failed();
     encoder.close();
     muxer.finalize();
@@ -265,7 +283,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     checkCancelled(signal);
     setMediaProbePhase(video, "uploading");
     onProgress({ phase: "uploading", progress: 0 });
-    await stream.flush(signal, (done) => onProgress({ phase: "uploading", progress: done }));
+    await timings.time("upload", () => stream.flush(signal, (done) => onProgress({ phase: "uploading", progress: done })));
     onProgress({ phase: "uploading", progress: 1 });
 
     // Cancellation requests run beside finish; the native job acknowledges only
@@ -273,21 +291,23 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     checkCancelled(signal);
     setMediaProbePhase(video, "finishing");
     onProgress({ phase: "finishing", progress: 0 });
-    const result = await ipc.screenExportFinish({
-      job_id: jobId,
+    const job = jobId;
+    const result = await timings.time("finish", () => ipc.screenExportFinish({
+      job_id: job,
       source: project.media.source,
       format: gif ? "gif" : "mp4",
       fps,
       gif_fps: e.export.gifFps,
       segments: segments.map((s) => ({ src_start_ms: s.srcStartMs, src_end_ms: s.srcEndMs, speed: s.speed })),
       with_audio: !gif,
-    });
+    }));
     completed = true;
     await confirmCleanup();
     setMediaProbePhase(video, "done");
     onProgress({ phase: "done", progress: 1 });
     return result;
   } finally {
+    publishExportTimings(timings.summary({ frames, fps, width, height, sourceWidth: video.videoWidth, sourceHeight: video.videoHeight, format: gif ? "gif" : "mp4" }));
     recordMediaProbe(video, "export_end");
     try {
       if (encoder && encoder.state !== "closed") encoder.close();
@@ -310,7 +330,7 @@ class Uploader {
   private queued = 0;
   private sent = 0;
   private error: Error | null = null;
-  constructor(private readonly jobId: string) {}
+  constructor(private readonly jobId: string, private readonly timings: ExportTimings) {}
 
   push(data: Uint8Array, position: number): void {
     if (this.error) return;
@@ -334,6 +354,7 @@ class Uploader {
       const piece = this.queue.shift()!;
       await ipc.screenExportAppend(this.jobId, this.sent, toBase64(piece));
       this.sent += piece.byteLength;
+      this.timings.uploadBytes += piece.byteLength;
       onProgress?.(this.queued ? this.sent / this.queued : 1);
     }
   }

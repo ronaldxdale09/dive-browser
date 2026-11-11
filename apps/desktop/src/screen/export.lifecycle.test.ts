@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exportProject } from "./export";
+import { exportProject, exportSizeEstimate, MAX_UPLOAD_BYTES } from "./export";
 import { newProject } from "./model";
 import { useEditor } from "./store";
 
@@ -98,6 +98,24 @@ describe("export frontend ownership and bounded waits", () => {
     const empty = { ...input(video()), segments: [] };
     await expect(exportProject(empty)).rejects.toThrow(/Nothing is left to export/);
     expect(mock.begin).not.toHaveBeenCalled();
+  });
+
+  it("refuses a 4K export that would exceed the upload limit", async () => {
+    const big = input(video());
+    big.project = newProject({ source: "original.mp4", playable: "original.webm", events: null, durationMs: 900_000, width: 3840, height: 2160 });
+    big.project.editor.export.resolution = "source";
+    big.project.editor.export.fps = 30;
+    big.segments = [{ srcStartMs: 0, srcEndMs: 900_000, outStartMs: 0, outEndMs: 900_000, speed: 1 }];
+    await expect(exportProject(big)).rejects.toThrow(/2 GB limit/);
+    expect(mock.begin).not.toHaveBeenCalled();
+  });
+
+  it("sizes the 20-minute cases against the limit the host enforces", () => {
+    const twenty = 20 * 60 * 1000;
+    // 12 Mbps x 1200 s x 1.15 = 2.07e9 bytes, under 2 GiB (2.147e9).
+    expect(exportSizeEstimate(1920, 1080, 30, twenty)).toBeLessThan(MAX_UPLOAD_BYTES);
+    // 12 Mbps x 1.4 = 16.8 Mbps -> 2.90e9 bytes.
+    expect(exportSizeEstimate(1920, 1080, 60, twenty)).toBeGreaterThan(MAX_UPLOAD_BYTES);
   });
 
   it("cancels media readiness and removes its callbacks", async () => {

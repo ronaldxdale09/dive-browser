@@ -6,7 +6,7 @@ import { showInFileManagerLabel } from "../lib/commands";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import type { RecordingResult } from "../lib/ipc";
 import { recordingBytes, recordingClock } from "../lib/recordingFormat";
-import { exportProject } from "./export";
+import { exportProject, exportSizeEstimate, MAX_UPLOAD_BYTES } from "./export";
 import type { ExportProgress } from "./export";
 import { outputSize } from "./math";
 import { useEditor } from "./store";
@@ -53,6 +53,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const ex = project.editor.export;
   const gif = ex.format === "gif";
   const size = outputSize(project.editor.aspectRatio, gif ? "720p" : ex.resolution, project.media);
+  const tooLarge = exportSizeEstimate(size.width, size.height, gif ? ex.gifFps : ex.fps, duration) > MAX_UPLOAD_BYTES;
   const set = (p: Partial<typeof ex>) => update((e) => ({ ...e, export: { ...e.export, ...p } }));
 
   const run = async () => {
@@ -128,6 +129,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <Row label="Resolution">
                   <Seg value={ex.resolution} options={[{ value: "720p", label: "720p" }, { value: "1080p", label: "1080p" }, { value: "source", label: "Source" }]} onChange={(resolution) => set({ resolution })} />
                 </Row>
+                {tooLarge && <p role="status" className="text-ink-2">Too long for this resolution — choose 1080p or trim.</p>}
                 <Row label="Frame rate">
                   <Seg value={ex.fps} options={[{ value: 30, label: "30 fps" }, { value: 60, label: "60 fps" }]} onChange={(fps) => set({ fps })} />
                 </Row>

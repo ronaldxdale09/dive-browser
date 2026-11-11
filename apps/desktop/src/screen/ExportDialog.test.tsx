@@ -5,7 +5,7 @@ import { exportProject } from "./export";
 import { newProject } from "./model";
 import { useEditor } from "./store";
 
-vi.mock("./export", () => ({ exportProject: vi.fn() }));
+vi.mock("./export", async (importOriginal) => ({ ...(await importOriginal<typeof import("./export")>()), exportProject: vi.fn() }));
 const media = { source: "/tmp/audio.mp4", playable: "/tmp/audio.webm", events: null, durationMs: 3000, width: 640, height: 360 };
 
 beforeEach(() => {
