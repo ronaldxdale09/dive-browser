@@ -22,6 +22,7 @@ use specta::Type;
 use std::sync::Mutex;
 use tauri::State;
 use tauri::ipc::Channel;
+use tracing::Instrument as _;
 
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
@@ -884,7 +885,13 @@ pub(crate) async fn agent_send(
             }
         }
     }
-    let outcome = drive(&browser, &state, &run, fitted, tab_id, options, &on_delta).await;
+    // Everything the run logs, including each step's span and the MCP and CDP
+    // lines under it, carries the run id. The provider is filled in by `drive`
+    // once the preferences are read.
+    let span = tracing::info_span!("agent.run", run = %run_id, provider = tracing::field::Empty);
+    let outcome = drive(&browser, &state, &run, fitted, tab_id, options, &on_delta)
+        .instrument(span)
+        .await;
     if let Some(tab) = claimed {
         dive_mcp::lease::shared().release(tab, dive_mcp::lease::DIVE_AGENT);
     }
@@ -1044,6 +1051,7 @@ async fn drive(
         let _ = on_delta.send(ChatDelta::Done("stopped".into()));
     };
     let prefs = state.prefs.get(state);
+    tracing::Span::current().record("provider", prefs.agent_provider.as_str());
     let provider = parse_provider(&prefs.agent_provider)?;
     let client = client_for(state, provider, None);
     if fitted.trimmed {
@@ -1453,99 +1461,109 @@ async fn run_calls(
 ) -> Vec<dive_agent::ToolResult> {
     let mut results = Vec::with_capacity(calls.len());
     for call in calls {
-        // A click at a coordinate or a key pressed into whatever has focus
-        // names nothing the risk check can read. Ask the engine what it is
-        // aimed at first, so "Delete account" is judged as that and not as
-        // (412, 230).
-        let target = match crate::agent_tools::call_tab(tab_id, &call.input) {
-            Some(tab) if !run.is_cancelled() => tokio::select! {
-                () = run.halted() => None,
-                target = resolve_target(browser, tab, call) => target,
-            },
-            _ => None,
-        };
-        let step = step_for(state, run, tab_id, call, target.as_deref());
-        let denied = |why: &str| dive_agent::ToolResult {
-            tool_use_id: call.id.clone(),
-            content: serde_json::Value::String(why.into()),
-            is_error: true,
-        };
-        let approval = if run.is_cancelled() {
-            Approval::Denied
-        } else if approvals.asks_about(&step) {
-            // The row was drawn when the call streamed in, before the target
-            // was known; the question carries what it is actually about.
-            approved(state, run, on_delta, &step).await
-        } else {
-            Approval::Allowed
-        };
-        // Whether the browser produced this result, rather than the host
-        // refusing to run the call. Only the first can carry page content.
-        let mut ran = false;
-        let result = if let Some(why) = refusal(approval, run.is_cancelled()) {
-            denied(why)
-        } else {
-            // A tool can wait a long while -- for a page to load, for a
-            // selector to appear -- and Stop has to end that wait rather than
-            // queue behind it. Dropping the call abandons its reply; nothing
-            // it holds outlives the await.
-            tokio::select! {
-                () = run.halted() => denied(STOPPED_BEFORE_RUN),
-                result = crate::agent_tools::run(browser, tab_id, &run.scope, call) => {
-                    ran = true;
-                    result
+        // One span per step: the MCP call and CDP lines it causes nest under
+        // it, so a step can be followed through the log. Names only, never
+        // the arguments.
+        let span =
+            tracing::debug_span!("agent.step", step = %run.step_id(&call.id), tool = %call.name);
+        let result = async {
+            // A click at a coordinate or a key pressed into whatever has focus
+            // names nothing the risk check can read. Ask the engine what it is
+            // aimed at first, so "Delete account" is judged as that and not as
+            // (412, 230).
+            let target = match crate::agent_tools::call_tab(tab_id, &call.input) {
+                Some(tab) if !run.is_cancelled() => tokio::select! {
+                    () = run.halted() => None,
+                    target = resolve_target(browser, tab, call) => target,
+                },
+                _ => None,
+            };
+            let step = step_for(state, run, tab_id, call, target.as_deref());
+            let denied = |why: &str| dive_agent::ToolResult {
+                tool_use_id: call.id.clone(),
+                content: serde_json::Value::String(why.into()),
+                is_error: true,
+            };
+            let approval = if run.is_cancelled() {
+                Approval::Denied
+            } else if approvals.asks_about(&step) {
+                // The row was drawn when the call streamed in, before the target
+                // was known; the question carries what it is actually about.
+                approved(state, run, on_delta, &step).await
+            } else {
+                Approval::Allowed
+            };
+            // Whether the browser produced this result, rather than the host
+            // refusing to run the call. Only the first can carry page content.
+            let mut ran = false;
+            let result = if let Some(why) = refusal(approval, run.is_cancelled()) {
+                denied(why)
+            } else {
+                // A tool can wait a long while -- for a page to load, for a
+                // selector to appear -- and Stop has to end that wait rather than
+                // queue behind it. Dropping the call abandons its reply; nothing
+                // it holds outlives the await.
+                tokio::select! {
+                    () = run.halted() => denied(STOPPED_BEFORE_RUN),
+                    result = crate::agent_tools::run(browser, tab_id, &run.scope, call) => {
+                        ran = true;
+                        result
+                    }
                 }
+            };
+            // A read of cookies, a response or the console leaves the run holding
+            // that site's private data, whether or not it found any.
+            if leaves_taint(ran, &result, &call.name)
+                && let Some(site) = crate::agent_tools::call_tab(tab_id, &call.input)
+                    .and_then(|tab| lock(&state.store).tab(tab).ok())
+                    .and_then(|tab| crate::site::of(&tab.url))
+            {
+                run.taint(site);
             }
-        };
-        // A read of cookies, a response or the console leaves the run holding
-        // that site's private data, whether or not it found any.
-        if leaves_taint(ran, &result, &call.name)
-            && let Some(site) = crate::agent_tools::call_tab(tab_id, &call.input)
-                .and_then(|tab| lock(&state.store).tab(tab).ok())
-                .and_then(|tab| crate::site::of(&tab.url))
-        {
-            run.taint(site);
-        }
-        // Reading a page of the person's own leaves a softer mark. Pages the
-        // run opened itself, and everything in a clean session, are ones it
-        // chose or that hold nothing of the person's.
-        if leaves_sight(ran, &result, &call.name)
-            && run.scope.context().is_none()
-            && let Some(tab) = crate::agent_tools::call_tab(tab_id, &call.input)
-            && !run.scope.opened().contains(&tab)
-            && let Some(site) = lock(&state.store)
-                .tab(tab)
-                .ok()
-                .and_then(|row| crate::site::of(&row.url))
-        {
-            run.saw(site);
-        }
-        // The row's summary is the tool's own first line, taken before the
-        // fence goes round it.
-        let summary = match &result.content {
-            serde_json::Value::String(s) => s
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .chars()
-                .take(160)
-                .collect(),
-            _ => "image".to_owned(),
-        };
-        // Everything the browser hands back passed through a page on its
-        // way, errors and action results included. Fence it, and if the page
-        // was addressing the agent rather than the reader, say so to both
-        // the model and the person.
-        let result = if ran {
-            guard(state, run, on_delta, tab_id, call, result)
-        } else {
+            // Reading a page of the person's own leaves a softer mark. Pages the
+            // run opened itself, and everything in a clean session, are ones it
+            // chose or that hold nothing of the person's.
+            if leaves_sight(ran, &result, &call.name)
+                && run.scope.context().is_none()
+                && let Some(tab) = crate::agent_tools::call_tab(tab_id, &call.input)
+                && !run.scope.opened().contains(&tab)
+                && let Some(site) = lock(&state.store)
+                    .tab(tab)
+                    .ok()
+                    .and_then(|row| crate::site::of(&row.url))
+            {
+                run.saw(site);
+            }
+            // The row's summary is the tool's own first line, taken before the
+            // fence goes round it.
+            let summary = match &result.content {
+                serde_json::Value::String(s) => s
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(160)
+                    .collect(),
+                _ => "image".to_owned(),
+            };
+            // Everything the browser hands back passed through a page on its
+            // way, errors and action results included. Fence it, and if the page
+            // was addressing the agent rather than the reader, say so to both
+            // the model and the person.
+            let result = if ran {
+                guard(state, run, on_delta, tab_id, call, result)
+            } else {
+                result
+            };
+            let _ = on_delta.send(ChatDelta::ToolDone {
+                id: run.step_id(&call.id),
+                summary,
+                error: result.is_error,
+            });
             result
-        };
-        let _ = on_delta.send(ChatDelta::ToolDone {
-            id: run.step_id(&call.id),
-            summary,
-            error: result.is_error,
-        });
+        }
+        .instrument(span)
+        .await;
         results.push(result);
     }
     results

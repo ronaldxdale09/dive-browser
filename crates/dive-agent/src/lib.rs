@@ -494,7 +494,11 @@ impl Client {
         let again = request.try_clone();
         let first = Self::send_once(request).await;
         let outcome = match (first, again) {
-            (Err(Some(error)), Some(again)) if error.is_connect() => Self::send_once(again).await,
+            (Err(Some(error)), Some(again)) if error.is_connect() => {
+                // The error's text can carry the request URL; the kind is enough.
+                tracing::debug!("connection failed before anything was sent, trying once more");
+                Self::send_once(again).await
+            }
             (first, _) => first,
         };
         outcome.map_err(|error| match error {
@@ -566,6 +570,13 @@ impl Client {
             let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
                 .await
                 .unwrap_or_else(|_| "error response timed out".to_owned());
+            // Status and wait only: the body is the provider's words and may
+            // quote what was sent.
+            tracing::debug!(
+                status = status.as_u16(),
+                retry_after_s = retry_after.map(|wait| wait.as_secs()),
+                "provider refused the request"
+            );
             return Err(AgentError::Api {
                 status: status.as_u16(),
                 message: tidy_error(&message),
@@ -585,6 +596,11 @@ impl Client {
                         }
                         Ok(_) => {
                             *finished = true;
+                            tracing::debug!(
+                                received = *seen,
+                                limit = MAX_STREAM_BYTES,
+                                "reply stream cut off at the size limit"
+                            );
                             Err(StreamTransportError::TooLarge)
                         }
                         Err(error) => {
@@ -643,6 +659,13 @@ impl Client {
             let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
                 .await
                 .unwrap_or_else(|_| "error response timed out".to_owned());
+            // Status and wait only: the body is the provider's words and may
+            // quote what was sent.
+            tracing::debug!(
+                status = status.as_u16(),
+                retry_after_s = retry_after.map(|wait| wait.as_secs()),
+                "provider refused the request"
+            );
             return Err(AgentError::Api {
                 status: status.as_u16(),
                 message: tidy_error(&message),

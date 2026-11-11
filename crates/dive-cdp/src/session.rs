@@ -346,6 +346,9 @@ impl CdpSession {
             return Err(CdpError::Closed);
         }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        // Trace, not debug: this is the per-request path, and the default
+        // filter keeps `dive` at debug. Method only; params can hold page text.
+        tracing::trace!(id, method, "cdp call");
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self.pending();

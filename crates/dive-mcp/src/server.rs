@@ -13,6 +13,7 @@ use rmcp::model::{
 };
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
+use tracing::Instrument;
 
 use crate::browser::{Browser, Sensitive};
 use crate::error::BrowserError;
@@ -1526,6 +1527,17 @@ fn reject_reserved_holder(holder: Option<&str>) -> Result<(), ErrorData> {
     Ok(())
 }
 
+/// A process-wide number for each MCP call, to tell two calls to the same
+/// tool apart in the log.
+fn next_call_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 #[tool_handler(router = self.tool_router)]
 impl<B: Browser> ServerHandler for DiveServer<B> {
     async fn call_tool(
@@ -1536,10 +1548,38 @@ impl<B: Browser> ServerHandler for DiveServer<B> {
         // A batch is the one call the router does not run: its steps go back
         // through `dispatch`, which needs the context this method has.
         let holder = string_argument(request.arguments.as_ref(), "holder");
-        if request.name == "page_batch" {
-            return self.run_batch(request, context, holder.as_deref()).await;
+        // One span for the whole call, so every line the dispatch, the lease
+        // check, the host and the CDP session write while serving it carries
+        // the tool and a call number to follow. A batch's steps run inside it.
+        let span = tracing::info_span!(
+            "mcp.call",
+            tool = %request.name,
+            holder = holder.as_deref().unwrap_or("-"),
+            call = next_call_id(),
+        );
+        let started = Instant::now();
+        let result = async {
+            if request.name == "page_batch" {
+                self.run_batch(request, context, holder.as_deref()).await
+            } else {
+                self.dispatch(request, context).await
+            }
         }
-        self.dispatch(request, context).await
+        .instrument(span.clone())
+        .await;
+        // Rare enough for debug (one line per tool call, none per step), and
+        // never the arguments: they can hold a page's text or a credential.
+        let _entered = span.enter();
+        match &result {
+            Ok(_) => tracing::debug!(elapsed_ms = elapsed_ms(started), ok = true, "mcp call done"),
+            Err(error) => tracing::debug!(
+                elapsed_ms = elapsed_ms(started),
+                ok = false,
+                error = %error.message,
+                "mcp call done"
+            ),
+        }
+        result
     }
 
     // The result structs are non-exhaustive, so a struct literal is not an
