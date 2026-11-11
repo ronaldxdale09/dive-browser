@@ -128,16 +128,7 @@ fn navigation_ready(
     }
     match reply {
         Ok(reply) => Ok(reply["result"]["value"] == true),
-        Err(dive_cdp::CdpError::Protocol {
-            code: -32000,
-            message,
-        }) if matches!(
-            message.as_str(),
-            "Inspected target navigated or closed" | "Not attached to an active page"
-        ) =>
-        {
-            Ok(false)
-        }
+        Err(error) if error.is_navigation_race() => Ok(false),
         Err(error) => Err(AppError::new(error)),
     }
 }

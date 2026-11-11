@@ -35,15 +35,7 @@ pub(crate) async fn verify(
                 .await
             {
                 Ok(value) => value,
-                Err(dive_cdp::CdpError::Protocol {
-                    code: -32000,
-                    message,
-                }) if !session.is_closed()
-                    && matches!(
-                        message.as_str(),
-                        "Inspected target navigated or closed" | "Not attached to an active page"
-                    ) =>
-                {
+                Err(error) if !session.is_closed() && error.is_navigation_race() => {
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     continue;
                 }

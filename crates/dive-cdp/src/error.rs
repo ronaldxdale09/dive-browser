@@ -2,6 +2,15 @@
 
 use thiserror::Error;
 
+/// What Chromium answers (code -32000) when a call lands while the page's
+/// document is being replaced. The one list every caller shares: it used to be
+/// copied into five places, and only one of them knew the third entry.
+pub const NAVIGATION_RACE_MESSAGES: [&str; 3] = [
+    "Inspected target navigated or closed",
+    "Not attached to an active page",
+    "Execution context was destroyed.",
+];
+
 /// Failure modes of a CDP call.
 #[derive(Debug, Error)]
 pub enum CdpError {
@@ -65,6 +74,22 @@ impl CdpError {
             _ => false,
         }
     }
+
+    /// Whether the call failed only because the page's document went away while
+    /// it was in flight: a navigation, a reload, a frame swap. Worth one retry;
+    /// never a reason to tell the person something broke.
+    pub fn is_navigation_race(&self) -> bool {
+        matches!(self, Self::Protocol { code: -32000, message }
+            if NAVIGATION_RACE_MESSAGES.contains(&message.as_str()))
+    }
+
+    /// [`Self::is_navigation_race`] for an error that has already been
+    /// flattened to its `Display` text (`cdp error -32000: ...`), as
+    /// `locator::Failure::Engine` and `BrowserError::Other` carry it.
+    pub fn is_navigation_race_text(text: &str) -> bool {
+        text.strip_prefix("cdp error -32000: ")
+            .is_some_and(|message| NAVIGATION_RACE_MESSAGES.contains(&message))
+    }
 }
 
 #[cfg(test)]
@@ -90,5 +115,37 @@ mod tests {
             "a refusal is a real problem and must stay visible"
         );
         assert!(!CdpError::MissingField("frameId").is_gone());
+    }
+
+    #[test]
+    fn is_navigation_race_is_the_listed_messages_under_code_32000_only() {
+        for message in NAVIGATION_RACE_MESSAGES {
+            let race = CdpError::Protocol {
+                code: -32000,
+                message: message.into(),
+            };
+            assert!(race.is_navigation_race(), "{message}");
+            assert!(CdpError::is_navigation_race_text(&race.to_string()));
+            assert!(
+                !CdpError::Protocol {
+                    code: -32601,
+                    message: message.into()
+                }
+                .is_navigation_race(),
+                "{message} under another code is a different failure"
+            );
+        }
+        assert!(!CdpError::Closed.is_navigation_race());
+        assert!(
+            !CdpError::Protocol {
+                code: -32000,
+                message: "Not allowed".into()
+            }
+            .is_navigation_race()
+        );
+        assert!(!CdpError::is_navigation_race_text("session closed"));
+        assert!(!CdpError::is_navigation_race_text(
+            "cdp error -32601: Not attached to an active page"
+        ));
     }
 }

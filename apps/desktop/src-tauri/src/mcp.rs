@@ -514,18 +514,12 @@ impl From<locator::Failure> for BrowserError {
 }
 
 /// A wait may cross a document replacement; retry only known transient CDP
-/// readiness failures, and never retry a confirmed closed session.
+/// readiness failures, and never retry a confirmed closed session. The failure
+/// carries the CDP error as text, so this asks the one list in dive-cdp.
 fn retry_wait_during_navigation(error: &locator::Failure, closed: bool) -> bool {
     !closed
-        && matches!(error, locator::Failure::Engine(message) if NAVIGATION_RACES.contains(&message.as_str()))
+        && matches!(error, locator::Failure::Engine(message) if dive_cdp::CdpError::is_navigation_race_text(message))
 }
-
-/// CDP's answers when a call lands while the document is being replaced.
-const NAVIGATION_RACES: [&str; 3] = [
-    "cdp error -32000: Inspected target navigated or closed",
-    "cdp error -32000: Not attached to an active page",
-    "cdp error -32000: Execution context was destroyed.",
-];
 
 /// Whether a check that errored should count as "not yet" and be tried
 /// again: the element is not there yet, or the document was being replaced.
@@ -533,7 +527,7 @@ const NAVIGATION_RACES: [&str; 3] = [
 fn expect_retryable(error: &BrowserError, closed: bool) -> bool {
     !closed
         && (matches!(error, BrowserError::TargetNotFound { .. })
-            || matches!(error, BrowserError::Other(m) if NAVIGATION_RACES.contains(&m.as_str())))
+            || matches!(error, BrowserError::Other(m) if dive_cdp::CdpError::is_navigation_race_text(m)))
 }
 
 /// Ends an action on the timeline and the tab's "an agent is driving" glow
@@ -4144,8 +4138,8 @@ mod tool_session_tests {
         };
         assert!(expect_retryable(&missing, false));
         assert!(!expect_retryable(&missing, true));
-        for message in NAVIGATION_RACES {
-            let raced = BrowserError::Other(message.into());
+        for message in dive_cdp::error::NAVIGATION_RACE_MESSAGES {
+            let raced = BrowserError::Other(format!("cdp error -32000: {message}"));
             assert!(expect_retryable(&raced, false));
             assert!(!expect_retryable(&raced, true));
         }
@@ -4566,12 +4560,8 @@ mod tool_session_tests {
 
     #[test]
     fn waits_retry_only_known_navigation_errors_on_live_sessions() {
-        for message in [
-            "cdp error -32000: Inspected target navigated or closed",
-            "cdp error -32000: Not attached to an active page",
-            "cdp error -32000: Execution context was destroyed.",
-        ] {
-            let error = locator::Failure::Engine(message.into());
+        for message in dive_cdp::error::NAVIGATION_RACE_MESSAGES {
+            let error = locator::Failure::Engine(format!("cdp error -32000: {message}"));
             assert!(retry_wait_during_navigation(&error, false));
             assert!(!retry_wait_during_navigation(&error, true));
         }

@@ -194,14 +194,7 @@ pub(crate) async fn read_probe_value(
                     }
                     return Ok(value["result"]["value"].clone());
                 }
-                Err(dive_cdp::CdpError::Protocol {
-                    code: -32000,
-                    message,
-                }) if !session.is_closed()
-                    && matches!(
-                        message.as_str(),
-                        "Inspected target navigated or closed" | "Not attached to an active page"
-                    ) => {}
+                Err(error) if !session.is_closed() && error.is_navigation_race() => {}
                 Err(error) => return Err(AppError::new(error)),
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -452,24 +445,14 @@ async fn wait_history_index(
                             return Ok::<_, AppError>(());
                         }
                         Ok(_) => {}
-                        Err(dive_cdp::CdpError::Protocol {
-                            code: -32000,
-                            message,
-                        }) if matches!(
-                            message.as_str(),
-                            "Not attached to an active page"
-                                | "Inspected target navigated or closed"
-                        ) => {}
+                        Err(error) if error.is_navigation_race() => {}
                         Err(error) => return Err(AppError::new(error)),
                     }
                 }
                 Ok(_) => {}
-                Err(error)
-                    if matches!(
-                        error.message.as_str(),
-                        "cdp error -32000: Not attached to an active page"
-                            | "cdp error -32000: Inspected target navigated or closed"
-                    ) => {}
+                // `tab_history` flattens its `CdpError` to text; the shared
+                // predicate reads that text, so the list stays in dive-cdp.
+                Err(error) if dive_cdp::CdpError::is_navigation_race_text(&error.message) => {}
                 Err(error) => return Err(error),
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
