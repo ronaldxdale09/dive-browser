@@ -453,8 +453,10 @@ impl Bounds {
 pub struct MainThread(std::marker::PhantomData<*const ()>);
 
 impl MainThread {
-    /// Claim the token, if this is the main thread. Tauri's sync commands and
-    /// `run_on_main_thread` closures qualify; a tokio task never does.
+    /// Claim the token, if this is the main thread. Only `run_on_main_thread`
+    /// closures and the setup code in `run()` qualify: under CEF every Tauri
+    /// IPC command, sync or async, arrives on a worker thread (see
+    /// CONTRIBUTING.md, "Threading"), and a tokio task never does.
     pub fn here() -> Option<Self> {
         is_main_thread().then_some(Self(std::marker::PhantomData))
     }
