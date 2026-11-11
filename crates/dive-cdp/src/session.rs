@@ -169,6 +169,42 @@ impl CdpSession {
     }
 }
 
+/// The id of a protocol reply, read from its first bytes without parsing
+/// the rest. Chromium serializes `{"id":N,` first; anything else is not a reply.
+fn reply_id(raw: &[u8]) -> Option<u64> {
+    let rest = raw.strip_prefix(b"{\"id\":")?;
+    let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+    if digits == 0 || digits > 20 || rest.get(digits) != Some(&b',') {
+        return None;
+    }
+    std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()
+}
+
+impl CdpSession {
+    /// Refuse a reply too large to accept: answer its waiting call with
+    /// `ResponseTooLarge` and drop it. Returns false when `raw` is not a
+    /// reply (an event), which the caller must handle as before.
+    pub fn fail_oversized_reply(&self, raw: &[u8], limit: usize) -> bool {
+        let Some(id) = reply_id(raw) else {
+            return false;
+        };
+        let waiting = self.pending().remove(&id);
+        tracing::warn!(
+            id,
+            bytes = raw.len(),
+            limit,
+            "refusing an oversized cdp reply"
+        );
+        if let Some(tx) = waiting {
+            let _ = tx.send(Err(CdpError::ResponseTooLarge {
+                bytes: raw.len(),
+                limit,
+            }));
+        }
+        true
+    }
+}
+
 /// The value of the first `"key":"..."` in `raw`, unescaped only as far as
 /// a request id needs (they are plain ASCII).
 fn extract_string_field<'a>(raw: &'a str, key: &str) -> Option<&'a str> {
@@ -954,6 +990,54 @@ mod tests {
         session.close();
         assert!(session.pending().is_empty());
         assert!(matches!(pending.await.unwrap(), Err(CdpError::Closed)));
+    }
+
+    #[test]
+    fn reply_id_reads_only_a_leading_id() {
+        assert_eq!(reply_id(br#"{"id":42,"result":{}}"#), Some(42));
+        assert_eq!(reply_id(br#"{"method":"X","params":{"id":1}}"#), None);
+        assert_eq!(reply_id(br#"{"id":"x"}"#), None);
+        assert_eq!(reply_id(br#"{"id":12"#), None);
+        assert_eq!(reply_id(b""), None);
+        assert_eq!(reply_id(br#"{"id":,"#), None);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_reply_fails_only_its_call() {
+        let transport = FakeTransport::default();
+        let session = CdpSession::new(transport.clone());
+        let pending = tokio::spawn({
+            let session = session.clone();
+            async move { session.call("Page.printToPDF", json!({})).await }
+        });
+        tokio::task::yield_now().await;
+        let id = sent_id(&transport, 0);
+        let raw = format!("{{\"id\":{id},\"result\":{{\"data\":\"AAAA\"}}}}");
+        assert!(session.fail_oversized_reply(raw.as_bytes(), 1));
+        assert!(matches!(
+            pending.await.unwrap(),
+            Err(CdpError::ResponseTooLarge { limit: 1, .. })
+        ));
+        assert!(!session.is_closed());
+
+        let next = tokio::spawn({
+            let session = session.clone();
+            async move { session.call("Page.enable", json!({})).await }
+        });
+        tokio::task::yield_now().await;
+        let id = sent_id(&transport, 1);
+        session
+            .handle_incoming(&json!({"id": id, "result": {"ok": true}}).to_string())
+            .unwrap();
+        assert_eq!(next.await.unwrap().unwrap()["ok"], true);
+    }
+
+    #[test]
+    fn an_oversized_event_is_left_to_the_caller() {
+        let session = CdpSession::new(FakeTransport::default());
+        assert!(
+            !session.fail_oversized_reply(br#"{"method":"Network.dataReceived","params":{}}"#, 1)
+        );
     }
 
     #[test]

@@ -34,6 +34,15 @@ pub enum CdpError {
     /// The result did not contain the field the caller expected.
     #[error("missing field in result: {0}")]
     MissingField(&'static str),
+    /// The browser's reply was too large to accept; the call is failed and
+    /// the session kept.
+    #[error("the browser's reply was {bytes} bytes, over the {limit}-byte limit")]
+    ResponseTooLarge {
+        /// Size of the refused reply.
+        bytes: usize,
+        /// The limit it exceeded.
+        limit: usize,
+    },
 }
 
 impl CdpError {

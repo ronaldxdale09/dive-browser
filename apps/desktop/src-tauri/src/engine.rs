@@ -2126,6 +2126,15 @@ fn cover_focus_change(previous: bool, covered: bool, passive: bool) -> Option<bo
     }
 }
 
+/// Bytes of protocol messages that may wait for the session's worker.
+#[cfg(feature = "cef")]
+const INGRESS_BUDGET: usize = 64 * 1024 * 1024;
+/// A single protocol reply larger than this is refused on its own (its call
+/// fails) rather than counted against the session's ingress budget. Half the
+/// budget, so an admitted message always leaves room for the rest.
+#[cfg(feature = "cef")]
+const MAX_PROTOCOL_REPLY: usize = INGRESS_BUDGET / 2;
+
 /// Bridge a CEF webview's `DevTools` channel into a [`CdpSession`].
 #[cfg(feature = "cef")]
 fn attach_cdp(
@@ -2150,7 +2159,7 @@ fn attach_cdp(
     // scanning and parsing them there is what dropped frames during a page
     // load. The callback only hands the bytes over; one worker per session
     // does the JSON work, in arrival order, and exits when the view goes.
-    let (tx, mut rx) = dive_cdp::queue::bounded(4096, 64 * 1024 * 1024);
+    let (tx, mut rx) = dive_cdp::queue::bounded(4096, INGRESS_BUDGET);
     let (overflow, mut overloaded) = tokio::sync::watch::channel(false);
     let failed_view = view.clone();
     let sink = session.clone();
@@ -2225,12 +2234,20 @@ fn attach_cdp(
         }
         // `Message` carries the raw JSON for both results and events; the
         // runtime no longer dispatches the pre-parsed variants.
+        // A too-large reply is refused here, on the main thread, before it is
+        // queued: it costs a 20-byte prefix check, no parsing.
         if let tauri::CefDevToolsProtocol::Message(bytes) = protocol
             && !callback_session.is_closed()
-            && tx.try_send(bytes).is_err()
         {
-            callback_session.close();
-            overflow.send_replace(true);
+            if bytes.len() > MAX_PROTOCOL_REPLY
+                && callback_session.fail_oversized_reply(&bytes, MAX_PROTOCOL_REPLY)
+            {
+                return;
+            }
+            if tx.try_send(bytes).is_err() {
+                callback_session.close();
+                overflow.send_replace(true);
+            }
         }
     })?;
     Ok(session)
