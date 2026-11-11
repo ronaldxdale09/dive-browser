@@ -895,6 +895,7 @@ impl Store {
         if orphaned > 0 {
             store.ensure_default_profile()?;
         }
+        store.adopt_ownerless_history()?;
         Ok(store)
     }
 
@@ -1235,6 +1236,104 @@ impl Store {
             [profile.id.to_string()],
         )?;
         Ok(profile)
+    }
+
+    /// v12 gave history and bookmarks to the first profile, but a database
+    /// upgraded from before profiles had none yet at that point, so its rows
+    /// were given to no one (`''`) and every list, which reads one profile,
+    /// left them out. Hand them to the first profile -- the rule v12 meant --
+    /// merging into rows that profile has gathered since. Idempotent, and
+    /// cheap when there is nothing to do: each check is an indexed lookup.
+    fn adopt_ownerless_history(&self) -> Result<()> {
+        let ownerless: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history WHERE profile_id = '')
+                 OR EXISTS(SELECT 1 FROM urls WHERE profile_id = '')
+                 OR EXISTS(SELECT 1 FROM bookmarks WHERE profile_id = '')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !ownerless {
+            return Ok(());
+        }
+        let Some(target) = self
+            .conn
+            .query_row(
+                "SELECT id FROM profiles ORDER BY position, created_at LIMIT 1",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(());
+        };
+        self.forget_scope();
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE history SET profile_id = ?1 WHERE profile_id = ''",
+            [&target],
+        )?;
+        // The profile's own bookmark wins over an ownerless one for the same
+        // address; what could not move is a duplicate.
+        tx.execute(
+            "UPDATE OR IGNORE bookmarks SET profile_id = ?1 WHERE profile_id = ''",
+            [&target],
+        )?;
+        tx.execute("DELETE FROM bookmarks WHERE profile_id = ''", [])?;
+        let rows: Vec<(i64, String, i64, String, String, i64)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, url, url_hash, title, last_visit, visit_count
+                 FROM urls WHERE profile_id = ''",
+            )?;
+            let mapped = stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })?;
+            mapped.collect::<std::result::Result<_, _>>()?
+        };
+        for (id, url, hash, title, last_visit, visit_count) in rows {
+            let existing: Option<(i64, String, String)> = tx
+                .query_row(
+                    "SELECT id, title, last_visit FROM urls
+                     WHERE profile_id = ?1 AND url_hash = ?2 AND url = ?3",
+                    params![target, hash, url],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            match existing {
+                Some((keep, kept_title, kept_last)) => {
+                    let (newest, newest_title, other_title) = if last_visit > kept_last {
+                        (last_visit, title, kept_title)
+                    } else {
+                        (kept_last, kept_title, title)
+                    };
+                    let merged_title = if newest_title.is_empty() {
+                        other_title
+                    } else {
+                        newest_title
+                    };
+                    tx.execute(
+                        "UPDATE urls SET visit_count = visit_count + ?2, last_visit = ?3, title = ?4
+                         WHERE id = ?1",
+                        params![keep, visit_count, newest, merged_title],
+                    )?;
+                    tx.execute("DELETE FROM urls WHERE id = ?1", [id])?;
+                }
+                None => {
+                    tx.execute(
+                        "UPDATE urls SET profile_id = ?1 WHERE id = ?2",
+                        params![target, id],
+                    )?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Remove a workspace and, by cascade, its tabs.
@@ -4395,6 +4494,280 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dive-store-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_database_from_before_profiles_keeps_its_history_and_bookmarks() {
+        let dir = tempfile_dir();
+        let path = dir.join("dive.db");
+        let old = Store {
+            conn: Connection::open(&path).unwrap(),
+            scope: std::cell::RefCell::new(None),
+        };
+        old.migrate_to(7).unwrap();
+        let container = ContainerId::new().to_string();
+        let workspace = WorkspaceId::new().to_string();
+        old.conn
+            .execute(
+                "INSERT INTO containers (id, name, cache_dir) VALUES (?1, 'Personal', ?2)",
+                params![container, format!("cache-{container}")],
+            )
+            .unwrap();
+        old.conn
+            .execute(
+                "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at)
+                 VALUES (?1, 'Old', '#000', 'x', ?2, 0, '2026-08-01T10:00:00Z')",
+                params![workspace, container],
+            )
+            .unwrap();
+        for (url, at) in [
+            ("https://old.example/", "2026-08-02T10:00:00Z"),
+            ("https://both.example/", "2026-08-03T10:00:00Z"),
+        ] {
+            old.conn
+                .execute(
+                    "INSERT INTO history (url, title, visited_at) VALUES (?1, 'T', ?2)",
+                    params![url, at],
+                )
+                .unwrap();
+            old.conn
+                .execute(
+                    "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, 'T', ?2)",
+                    params![url, at],
+                )
+                .unwrap();
+        }
+        drop(old);
+
+        let store = Store::open(&path).unwrap();
+        store
+            .set_setting(ACTIVE_WORKSPACE_SETTING, &workspace)
+            .unwrap();
+        let expected = vec![
+            "https://both.example/".to_string(),
+            "https://old.example/".to_string(),
+        ];
+        let mut history: Vec<String> = store
+            .all_history(100)
+            .unwrap()
+            .into_iter()
+            .map(|h| h.url)
+            .collect();
+        history.sort();
+        assert_eq!(history, expected);
+        let mut bookmarks: Vec<String> = store
+            .all_bookmarks()
+            .unwrap()
+            .into_iter()
+            .map(|b| b.url)
+            .collect();
+        bookmarks.sort();
+        assert_eq!(bookmarks, expected);
+        for table in ["history", "urls", "bookmarks"] {
+            assert_eq!(
+                count(
+                    &store,
+                    &format!("SELECT COUNT(*) FROM {table} WHERE profile_id = ''")
+                ),
+                0,
+                "{table} still has rows owned by no profile"
+            );
+        }
+        drop(store);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A store with a profile, a `''`-owned and a profile-owned row for the
+    /// same address (and bookmark), and one address only the ownerless has.
+    fn store_with_ownerless_rows() -> (Store, String) {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap().id.to_string();
+        let both = "https://both.example/";
+        let only = "https://only.example/";
+        for (owner, url, title, last, visits) in [
+            ("", both, "Old", "2026-08-01T10:00:00Z", 3),
+            (profile.as_str(), both, "New", "2026-09-01T10:00:00Z", 2),
+            ("", only, "Only", "2026-08-05T10:00:00Z", 1),
+        ] {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO urls (profile_id, url, url_hash, key_hash, title, last_visit, visit_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        owner,
+                        url,
+                        url_hash(url),
+                        url_hash(url_key(url)),
+                        title,
+                        last,
+                        visits
+                    ],
+                )
+                .unwrap();
+        }
+        for (owner, url) in [("", both), (profile.as_str(), both), ("", only)] {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO bookmarks (profile_id, url, title, created_at)
+                     VALUES (?1, ?2, 'B', '2026-08-01T10:00:00Z')",
+                    params![owner, url],
+                )
+                .unwrap();
+        }
+        (store, profile)
+    }
+
+    fn url_rows(store: &Store) -> Vec<(String, String, String, String, i64)> {
+        let mut stmt = store
+            .conn
+            .prepare(
+                "SELECT profile_id, url, title, last_visit, visit_count FROM urls ORDER BY url",
+            )
+            .unwrap();
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn ownerless_rows_merge_into_what_the_profile_gathered_since() {
+        let (store, profile) = store_with_ownerless_rows();
+        store.adopt_ownerless_history().unwrap();
+        let both = "https://both.example/";
+        let rows = url_rows(&store);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0],
+            (
+                profile.clone(),
+                both.to_string(),
+                "New".to_string(),
+                "2026-09-01T10:00:00Z".to_string(),
+                5
+            )
+        );
+        assert_eq!(rows[1].0, profile);
+        assert_eq!(rows[1].1, "https://only.example/");
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM bookmarks"), 2);
+        assert_eq!(
+            count(
+                &store,
+                "SELECT COUNT(*) FROM bookmarks WHERE profile_id = ''"
+            ),
+            0
+        );
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM urls WHERE profile_id = ''"),
+            0
+        );
+    }
+
+    #[test]
+    fn adopting_ownerless_rows_twice_changes_nothing() {
+        let (store, _) = store_with_ownerless_rows();
+        store.adopt_ownerless_history().unwrap();
+        let first = url_rows(&store);
+        let bookmarks = count(&store, "SELECT COUNT(*) FROM bookmarks");
+        store.adopt_ownerless_history().unwrap();
+        assert_eq!(url_rows(&store), first);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM bookmarks"), bookmarks);
+    }
+
+    #[test]
+    fn a_store_with_no_profile_leaves_ownerless_rows_alone() {
+        let store = Store::in_memory().unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO history (url, title, visited_at, profile_id)
+                 VALUES ('https://x.example/', '', '2026-08-01T10:00:00Z', '')",
+                [],
+            )
+            .unwrap();
+        store.adopt_ownerless_history().unwrap();
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM history WHERE profile_id = ''"),
+            1
+        );
+    }
+
+    #[test]
+    fn every_migration_applies_to_a_database_holding_data() {
+        let store = Store {
+            conn: Connection::open_in_memory().unwrap(),
+            scope: std::cell::RefCell::new(None),
+        };
+        store.migrate_to(1).unwrap();
+        let container = ContainerId::new().to_string();
+        let workspace = WorkspaceId::new().to_string();
+        store
+            .conn
+            .execute(
+                "INSERT INTO containers (id, name, cache_dir) VALUES (?1, 'Personal', 'c')",
+                [&container],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at)
+                 VALUES (?1, 'W', '#000', 'x', ?2, 0, '2026-08-01T10:00:00Z')",
+                params![workspace, container],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO tabs (id, workspace_id, tier, url, position, state, last_active_at)
+                 VALUES (?1, ?2, 'regular', 'https://a.example/', 0, 'live', '2026-08-01T10:00:00Z')",
+                params![TabId::new().to_string(), workspace],
+            )
+            .unwrap();
+        for n in 2..=MIGRATIONS.len() {
+            store.migrate_to(n).unwrap();
+            match n {
+                5 => {
+                    store
+                        .conn
+                        .execute(
+                            "INSERT INTO history (url, title, visited_at)
+                             VALUES ('https://a.example/', 'A', '2026-08-02T10:00:00Z')",
+                            [],
+                        )
+                        .unwrap();
+                }
+                6 => {
+                    store
+                        .conn
+                        .execute(
+                            "INSERT INTO bookmarks (url, title, created_at)
+                             VALUES ('https://a.example/', 'A', '2026-08-02T10:00:00Z')",
+                            [],
+                        )
+                        .unwrap();
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            count(&store, "PRAGMA user_version"),
+            i64::try_from(MIGRATIONS.len()).unwrap()
+        );
+        let violations = store
+            .conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .count();
+        assert_eq!(violations, 0);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM tabs"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM urls"), 1);
     }
 
     #[test]
