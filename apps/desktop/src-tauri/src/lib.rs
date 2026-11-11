@@ -54,6 +54,7 @@ mod js_dialog;
 mod lifecycle_probe;
 mod loading;
 mod locator;
+mod main_hop;
 mod main_window;
 mod mcp;
 mod memory_pressure;

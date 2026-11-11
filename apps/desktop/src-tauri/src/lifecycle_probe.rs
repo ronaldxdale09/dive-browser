@@ -16,12 +16,20 @@ pub(crate) async fn on_main<T: Send + 'static>(
     app: &tauri::AppHandle<Runtime>,
     run: impl FnOnce(&tauri::AppHandle<Runtime>) -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, AppError> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        let _ = tx.send(run(&handle));
-    })?;
-    rx.await.map_err(AppError::new)?
+    flatten(crate::main_hop::run(app, crate::main_hop::BUDGET, run).await)
+}
+
+fn flatten<T>(hop: Result<Result<T, AppError>, crate::main_hop::HopError>) -> Result<T, AppError> {
+    use crate::main_hop::HopError;
+    match hop {
+        Ok(result) => result,
+        Err(HopError::Queue(e)) => Err(AppError::new(e)),
+        Err(HopError::TimedOut(budget)) => Err(AppError::new(format!(
+            "the main thread did not answer within {}s",
+            budget.as_secs()
+        ))),
+        Err(HopError::Dropped) => Err(AppError::new("the main thread dropped the request")),
+    }
 }
 
 fn popout(app: &tauri::AppHandle<Runtime>, id: TabId) -> Option<tauri::Window<Runtime>> {

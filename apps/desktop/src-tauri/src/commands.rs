@@ -2294,41 +2294,26 @@ pub(crate) fn on_main<T: Send + 'static>(
         let state = app.state::<AppState>();
         return f(&main, app, &state);
     }
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = app.clone();
-    let deadline = std::time::Instant::now() + MAIN_HOP_BUDGET;
-    app.run_on_main_thread(move || {
-        // A timed-out queued mutation must not run minutes later when a busy
-        // native thread recovers. Work already executing cannot be cancelled.
-        if std::time::Instant::now() >= deadline {
-            return;
-        }
-        let result = match MainThread::here() {
+    match crate::main_hop::blocking(app, crate::main_hop::BUDGET, move |handle| {
+        match MainThread::here() {
             Some(main) => {
                 let state = handle.state::<AppState>();
-                f(&main, &handle, &state)
+                f(&main, handle, &state)
             }
             None => Err(AppError::new("main-thread hop landed on another thread")),
-        };
-        let _ = tx.send(result);
-    })?;
-    // A budget, not a wait-forever: with the main thread stuck the pool of
-    // workers parked here is what used to turn one stall into a dead app.
-    // Creating a view can take a couple of seconds on a cold profile, so
-    // this is generous; anything past it is a bug worth a clear error.
-    match rx.recv_timeout(MAIN_HOP_BUDGET) {
+        }
+    }) {
         Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(AppError::new(format!(
+        Err(crate::main_hop::HopError::Queue(e)) => Err(AppError::new(e)),
+        Err(crate::main_hop::HopError::TimedOut(budget)) => Err(AppError::new(format!(
             "the main thread did not answer within {}s",
-            MAIN_HOP_BUDGET.as_secs()
+            budget.as_secs()
         ))),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+        Err(crate::main_hop::HopError::Dropped) => {
             Err(AppError::new("the main thread dropped the command"))
         }
     }
 }
-
-const MAIN_HOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Put `id` on screen and give its page the keyboard, then say so.
 ///

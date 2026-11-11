@@ -173,9 +173,6 @@ const SCROLL_SETTLE_MS: u64 = 50;
 const SCREENSHOT_TOOL_CAP: usize = 16 * 1024 * 1024;
 /// How often `page_wait_for` re-checks its conditions.
 const WAIT_POLL_MS: u64 = 100;
-/// Longest a hop to the main thread may wait for its answer.
-const MAIN_THREAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
 pub struct AppBrowser {
     app: AppHandle<Runtime>,
 }
@@ -284,19 +281,14 @@ impl AppBrowser {
         &self,
         f: impl FnOnce(&AppHandle<Runtime>) -> T + Send + 'static,
     ) -> Result<T, BrowserError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let app = self.app.clone();
-        self.app
-            .run_on_main_thread(move || {
-                let _ = tx.send(f(&app));
-            })
-            .map_err(other)?;
-        match tokio::time::timeout(MAIN_THREAD_TIMEOUT, rx).await {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(_)) => Err(other("the main thread dropped the request")),
-            Err(_) => Err(other(format!(
+        use crate::main_hop::HopError;
+        match crate::main_hop::run(&self.app, crate::main_hop::BUDGET, f).await {
+            Ok(value) => Ok(value),
+            Err(HopError::Queue(e)) => Err(other(e)),
+            Err(HopError::Dropped) => Err(other("the main thread dropped the request")),
+            Err(HopError::TimedOut(budget)) => Err(other(format!(
                 "the browser's main thread did not answer within {}s; it may be blocked by a dialog",
-                MAIN_THREAD_TIMEOUT.as_secs()
+                budget.as_secs()
             ))),
         }
     }

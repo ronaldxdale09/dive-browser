@@ -291,24 +291,27 @@ async fn on_main<T: Send + 'static>(
     app: &AppHandle<Runtime>,
     f: impl FnOnce(&AppState) -> dive_core::Result<T> + Send + 'static,
 ) -> dive_core::Result<T> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        if tx.is_closed() {
-            return;
-        }
-        let result = if crate::engine::MainThread::here().is_some() {
+    use crate::main_hop::HopError;
+    let invalid = |m: String| dive_core::CoreError::Invalid(m);
+    match crate::main_hop::run(app, crate::main_hop::BUDGET, move |handle| {
+        if crate::engine::MainThread::here().is_some() {
             f(&handle.state::<AppState>())
         } else {
             Err(dive_core::CoreError::Invalid(
                 "discard reached wrong thread".into(),
             ))
-        };
-        let _ = tx.send(result);
+        }
     })
-    .map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?;
-    rx.await
-        .map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?
+    .await
+    {
+        Ok(result) => result,
+        Err(HopError::Queue(e)) => Err(invalid(e)),
+        Err(HopError::TimedOut(budget)) => Err(invalid(format!(
+            "the main thread did not answer within {}s",
+            budget.as_secs()
+        ))),
+        Err(HopError::Dropped) => Err(invalid("the main thread dropped the request".into())),
+    }
 }
 
 #[cfg(feature = "cef")]
