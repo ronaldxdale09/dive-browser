@@ -46,8 +46,39 @@ describe("recorded steps", () => {
       { kind: "navigate", role: "", name: "", value: "https://www.iana.org/help/example-domains", at: 2 },
       { kind: "navigate", role: "", name: "", value: "https://b.dev/typed", at: 3 },
     ]);
-    expect(steps.map((s) => s.name)).toEqual(["page_click", "tab_navigate"]);
-    expect(steps[1]?.input).toContain("b.dev/typed");
+    expect(steps.map((s) => s.name)).toEqual(["page_click", "page_navigated", "tab_navigate"]);
+    expect(steps[2]?.input).toContain("b.dev/typed");
+  });
+
+  it("exports a select record as selectOption by label", () => {
+    const one = recordedToSteps([{ kind: "select", role: "combobox", name: "Country", value: "Canada", at: 1 }]);
+    expect(one.map((s) => s.name)).toEqual(["page_select"]);
+    expect(toPlaywrightSpec(one, undefined)).toContain(".selectOption({ label: \"Canada\" });");
+    const many = recordedToSteps([{ kind: "select", role: "listbox", name: "Letters", value: "A\nB", at: 1 }]);
+    expect(toPlaywrightSpec(many, undefined)).toContain('.selectOption([{ label: "A" }, { label: "B" }]);');
+  });
+
+  it("ends on the address a click caused without replaying it", () => {
+    const steps = recordedToSteps([
+      { kind: "click", role: "link", name: "Done", value: "", at: 1 },
+      { kind: "navigate", role: "", name: "", value: "https://a.dev/done", at: 2 },
+    ]);
+    const spec = toPlaywrightSpec(steps, "https://a.dev/", "flow");
+    expect(spec).toContain('await expect(page).toHaveURL("https://a.dev/done");');
+    expect(spec).not.toContain('goto("https://a.dev/done")');
+  });
+
+  it("checks any address when an agent action may have navigated", () => {
+    const steps = [
+      { id: "1", name: "tab_navigate", input: '{"url":"https://a.dev/x"}', action: true },
+      { id: "2", name: "page_click", input: "{}", action: true, locator: "getByRole('link')" },
+    ];
+    expect(toPlaywrightSpec(steps, undefined)).toContain("toHaveURL(/./)");
+  });
+
+  it("still exports an agent select by label", () => {
+    const steps = [{ id: "1", name: "page_select", input: '{"label":"x"}', action: true, locator: "getByRole('combobox')" }];
+    expect(toPlaywrightSpec(steps, undefined)).toContain('selectOption({ label: "x" })');
   });
 
   it("folds a navigation the engine reported twice, and ends by checking the last address", () => {
@@ -58,7 +89,7 @@ describe("recorded steps", () => {
       { kind: "navigate", role: "", name: "", value: "https://example.com/", at: 4 },
       { kind: "navigate", role: "", name: "", value: "https://example.com/", at: 5 },
     ]);
-    expect(steps.map((s) => s.name)).toEqual(["page_click", "tab_navigate"]);
+    expect(steps.map((s) => s.name)).toEqual(["page_click", "page_navigated", "tab_navigate"]);
     const spec = toPlaywrightSpec(steps, "https://a.dev/", "flow");
     expect(spec).not.toContain("docs/HTML");
     expect(spec.split("example.com").length - 1).toBe(2);

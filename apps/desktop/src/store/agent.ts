@@ -44,6 +44,8 @@ export interface Message {
   stopped?: boolean;
   /** Pages that tried to give the agent instructions during this reply. */
   flagged?: string[];
+  /** The address of the run's tab when the run began; where an exported test starts. */
+  startUrl?: string;
 }
 
 interface AgentState {
@@ -426,7 +428,9 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (tabId !== get().tabId) await switchTo(tabId);
     const history = get().messages.filter((m) => !m.error || m.role === "user");
     const user: Message = { id: nextId(), role: "user", content: prompt };
-    const reply: Message = { id: nextId(), role: "assistant", content: "", pending: true };
+    // A clean run starts in a fresh context, not on the person's page.
+    const startUrl = get().cleanSession ? undefined : useBrowser.getState().tabs.find((t) => t.id === tabId)?.url;
+    const reply: Message = { id: nextId(), role: "assistant", content: "", pending: true, ...(startUrl ? { startUrl } : {}) };
     const runId = newRunId();
     set({ messages: [...history, user, reply], busy: true, runId, tabId });
     // Saved before the reply starts, and again after each step, so a crash

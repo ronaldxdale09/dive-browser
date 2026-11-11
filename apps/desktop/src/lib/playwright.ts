@@ -111,6 +111,9 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+/** Actions after which the page may be somewhere else (typing and form fills only when they submit). */
+const MAY_NAVIGATE = new Set(["page_click", "page_press", "page_select", "page_type", "page_fill_form"]);
+
 /**
  * Turn the agent's executed steps into a Playwright test. Pure for tests.
  *
@@ -130,6 +133,7 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
     } catch {
       // A call we cannot read the arguments of is one we cannot replay.
     }
+    const before = body.length;
     const at = locatorOf(s, input);
     const on = at ? `page.${at}` : null;
     switch (s.name) {
@@ -159,7 +163,13 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
       }
       case "page_select": {
         if (!on) break;
-        const by = str(input["label"]) ? `{ label: ${JSON.stringify(str(input["label"]))} }` : JSON.stringify(str(input["value"]));
+        const labels = Array.isArray(input["labels"]) ? (input["labels"] as unknown[]).filter((l): l is string => typeof l === "string") : [];
+        const one = (l: string) => `{ label: ${JSON.stringify(l)} }`;
+        let by: string;
+        if (labels.length === 1) by = one(labels[0]!);
+        else if (labels.length > 1) by = `[${labels.map(one).join(", ")}]`;
+        else if (str(input["label"])) by = one(str(input["label"]));
+        else by = JSON.stringify(str(input["value"]));
         body.push(`await ${on}.selectOption(${by});`);
         break;
       }
@@ -212,9 +222,19 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
         lastUrl = url;
         break;
       }
+      case "page_navigated":
+        // What an earlier click caused: that click already replays it, so no
+        // line of its own, but it is where the flow ended.
+        lastUrl = str(input["url"]) || lastUrl;
+        break;
       default:
         break;
     }
+    // These actions can navigate, so the final URL is unknown until a later
+    // `tab_navigate` or `page_navigated` sets it. Asserting a stale URL makes
+    // the test fail; `/./` (any URL) is the honest assertion.
+    const submits = s.name === "page_type" || s.name === "page_fill_form" ? input["submit"] === true : true;
+    if (body.length > before && MAY_NAVIGATE.has(s.name) && submits) lastUrl = undefined;
   }
   const lines = ['import { test, expect } from "@playwright/test";', "", `test(${JSON.stringify(title)}, async ({ page }) => {`];
   if (startUrl) lines.push(`  await page.goto(${JSON.stringify(startUrl)});`);
@@ -251,16 +271,18 @@ export function playwrightLocator(role: string, name: string): string {
 /**
  * Recorded interactions in the same shape as agent steps. A navigation that
  * directly follows a click or typing is what that action caused (a link, a
- * submitted form), so it is not replayed as a `goto` of its own; a typed
- * address or the first step still is.
+ * submitted form), so it becomes a `page_navigated` observation (not
+ * replayed, but the URL the flow ended on); a typed address or the first
+ * step is still a `tab_navigate`.
  */
 export function recordedToSteps(recorded: RecordedStep[]): Step[] {
   // The engine reports one navigation more than once (the address change,
   // then the commit); a repeat of the same address right after is one step.
   const distinct = recorded.filter((r, i) => !(r.kind === "navigate" && i > 0 && recorded[i - 1]!.kind === "navigate" && recorded[i - 1]!.value === r.value));
-  const own = distinct.filter((r, i) => !(r.kind === "navigate" && i > 0 && distinct[i - 1]!.kind !== "navigate"));
-  return own.map((r, i) => {
+  return distinct.map((r, i) => {
     const locator = r.role ? playwrightLocator(r.role, r.name) : null;
+    if (r.kind === "navigate" && i > 0 && distinct[i - 1]!.kind !== "navigate") return { id: `r${i}`, name: "page_navigated", input: JSON.stringify({ url: r.value }), action: true, locator: null };
+    if (r.kind === "select") return { id: `r${i}`, name: "page_select", input: JSON.stringify({ labels: r.value.split("\n").filter(Boolean) }), action: true, locator };
     if (r.kind === "navigate") return { id: `r${i}`, name: "tab_navigate", input: JSON.stringify({ url: r.value }), action: true, locator: null };
     if (r.kind === "type") return { id: `r${i}`, name: "page_type", input: JSON.stringify({ text: r.value }), action: true, locator };
     return { id: `r${i}`, name: "page_click", input: "{}", action: true, locator };

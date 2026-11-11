@@ -345,11 +345,16 @@ const AssistantMessage = memo(function AssistantMessage({
   // agent already addressed every element by locator, so the test writes
   // itself -- no recording pass, no selectors invented after the fact.
   const replayable = replayableSteps(m.steps ?? []);
-  // Where the tab is when the test is written is where a replay of it would
-  // start. Read then rather than passed in: a prop that changed on every
-  // navigation re-rendered every reply in the conversation.
+  // A replay starts where the run started, which the reply recorded. Replies
+  // saved before that field existed fall back to where the tab is when the
+  // test is written. Read then rather than passed in: a prop that changed on
+  // every navigation re-rendered every reply in the conversation.
   const [exporting, setExporting] = useState<{ startUrl: string | undefined } | null>(null);
   const exportTest = () => {
+    if (m.startUrl) {
+      setExporting({ startUrl: m.startUrl });
+      return;
+    }
     const s = useBrowser.getState();
     const id = tabInThisWindow(s.activeTab, s.detached);
     setExporting({ startUrl: id ? s.tabs.find((t) => t.id === id)?.url : undefined });

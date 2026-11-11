@@ -22,11 +22,13 @@ export function RecorderModal() {
   const pageName = startedOn || currentTab?.title;
   const title = pageName ? `flow on ${pageName}` : "recorded flow";
   const kept = recordedToSteps(steps);
+  // A caused navigation is an observation, not something the person did.
+  const done = kept.filter((s) => s.name !== "page_navigated").length;
 
   return (
     <SpecModal
       title="Recorded Playwright Test"
-      subtitle={`${kept.length} step${kept.length === 1 ? "" : "s"} captured`}
+      subtitle={`${done} step${done === 1 ? "" : "s"} captured`}
       spec={toPlaywrightSpec(kept, startUrl, title)}
       filename="recorded.spec.ts"
       onClose={() => setOpen(false)}

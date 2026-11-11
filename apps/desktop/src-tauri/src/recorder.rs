@@ -48,13 +48,13 @@ const MAX_BINDING_PAYLOAD: usize = 1024 * 1024;
 /// One recorded interaction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct RecordedStep {
-    /// `click` | `type` | `navigate`.
+    /// `click` | `type` | `select` | `navigate`.
     pub kind: String,
     /// ARIA role of the target.
     pub role: String,
     /// Accessible name of the target.
     pub name: String,
-    /// Typed text for `type`; URL for `navigate`.
+    /// Typed text for `type`; selected option labels, one per line, for `select`; URL for `navigate`.
     pub value: String,
     /// Milliseconds since the epoch.
     pub at: f64,
@@ -199,7 +199,7 @@ pub fn map_event(event: &CdpEvent, nonce: &str) -> Option<RecordedStep> {
                 return None;
             }
             let kind = payload["kind"].as_str()?;
-            if !matches!(kind, "click" | "type") {
+            if !matches!(kind, "click" | "type" | "select") {
                 return None;
             }
             let role = payload["role"].as_str().unwrap_or_default();
@@ -310,6 +310,21 @@ mod tests {
             params: json!({"name": BINDING, "payload": "x".repeat(MAX_BINDING_PAYLOAD + 1)}),
         };
         assert!(map_event(&oversized, "n1").is_none());
+    }
+
+    #[test]
+    fn maps_a_select_step() {
+        let event = |kind: &str| CdpEvent {
+            navigation_epoch: 0,
+            method: "Runtime.bindingCalled".into(),
+            params: json!({"name": BINDING, "payload": json!({
+                "kind": kind, "role": "combobox", "name": "Country", "value": "Canada", "at": 1, "nonce": "n1"
+            }).to_string()}),
+        };
+        let step = map_event(&event("select"), "n1").unwrap();
+        assert_eq!(step.kind, "select");
+        assert_eq!(step.value, "Canada");
+        assert!(map_event(&event("drag"), "n1").is_none());
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { applyDelta, coalesceDeltas, isReady, NOT_RUN, parseThread, settledForSt
 import type { Message } from "./agent";
 import type { ChatDeltaOut, ProviderInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
+import { useBrowser } from "./browser";
 
 const base: Message[] = [
   { id: "1", role: "user", content: "hi" },
@@ -284,6 +285,25 @@ describe("a conversation that belongs to a tab", () => {
     await sending;
     await vi.waitFor(() => expect(useAgent.getState().tabId).toBe("tab-2"));
     expect(load).toHaveBeenCalledWith("tab-2");
+  });
+
+  it("records where the run started, except in a clean session", async () => {
+    vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    vi.spyOn(ipc, "agentSend").mockResolvedValue(undefined);
+    const initialBrowser = useBrowser.getState();
+    useBrowser.setState({
+      tabs: [{ id: "tab-1", workspace_id: "w", tier: "today", url: "https://start.dev/", title: "Start", favicon: null, position: 0, state: "active", last_active_at: "2026-09-03T00:00:00Z" }],
+    });
+    try {
+      useAgent.setState({ tabId: "tab-1", messages: [], cleanSession: false });
+      await useAgent.getState().send("go", "tab-1");
+      expect(useAgent.getState().messages.at(-1)?.startUrl).toBe("https://start.dev/");
+      useAgent.setState({ tabId: "tab-1", messages: [], cleanSession: true });
+      await useAgent.getState().send("go", "tab-1");
+      expect(useAgent.getState().messages.at(-1)?.startUrl).toBeUndefined();
+    } finally {
+      useBrowser.setState({ tabs: initialBrowser.tabs });
+    }
   });
 
   it("asks in the conversation of the tab it was asked for, not the one on screen", async () => {

@@ -2927,13 +2927,13 @@ export type RecordOptions = {
 
 /**  One recorded interaction. */
 export type RecordedStep = {
-	/**  `click` | `type` | `navigate`. */
+	/**  `click` | `type` | `select` | `navigate`. */
 	kind: string,
 	/**  ARIA role of the target. */
 	role: string,
 	/**  Accessible name of the target. */
 	name: string,
-	/**  Typed text for `type`; URL for `navigate`. */
+	/**  Typed text for `type`; selected option labels, one per line, for `select`; URL for `navigate`. */
 	value: string,
 	/**  Milliseconds since the epoch. */
 	at: number | null,

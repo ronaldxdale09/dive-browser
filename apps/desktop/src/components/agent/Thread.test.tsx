@@ -273,6 +273,25 @@ describe("Thread", () => {
     expect(dialog.textContent).toContain("getByText('Sign in').click()");
     expect(dialog.textContent).not.toContain("page_text");
   });
+  it("starts an exported test where the run started, not where the tab is now", () => {
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "Sign me in" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "Done.",
+          startUrl: "https://start.dev/",
+          steps: [{ id: "s2", name: "page_click", input: '{"locator":"text=Sign in"}', action: true, summary: "clicked" }],
+        },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Export as test/ }));
+    const dialog = screen.getByRole("dialog", { name: /Playwright Test From This Run/ });
+    expect(dialog.textContent).toContain('page.goto("https://start.dev/")');
+    expect(dialog.textContent).not.toContain("example.com/docs");
+  });
   it("runs signed out when clean session is on, and hides the page it would have sent", () => {
     render(<Thread onAddProvider={() => {}} />);
     // The tab chip is there while the run works in the person's session.

@@ -74,6 +74,9 @@
       const role = roleOf(el);
       // Focusing a field is not a step; the committed value is, via `change`.
       if (role === "textbox" || role === "searchbox" || role === "combobox") return;
+      // A dropdown's choice is one `select` step, from `change`; a multi-select
+      // is a listbox and its options are not clickable steps of their own.
+      if (el.tagName === "SELECT" || el.closest?.("select")) return;
       send({ kind: "click", role, name: nameOf(el), value: "", at: Date.now() });
     },
     true,
@@ -85,8 +88,13 @@
       const el = e.target;
       const role = roleOf(el);
       if (!INTERACTIVE.has(role)) return;
-      if (role === "checkbox" || role === "radio" || role === "switch") {
-        send({ kind: "click", role, name: nameOf(el), value: "", at: Date.now() });
+      // A toggle is already one step: the `click` that flipped it (a label
+      // click and keyboard Space both dispatch one on the input).
+      if (role === "checkbox" || role === "radio" || role === "switch") return;
+      if (el.tagName === "SELECT") {
+        // The option text is what Playwright's `selectOption({ label })` matches.
+        const value = [...el.selectedOptions].map((o) => o.text.trim()).join("\n");
+        send({ kind: "select", role, name: nameOf(el), value: value.slice(0, __MAX_FIELD__), at: Date.now() });
         return;
       }
       send({
