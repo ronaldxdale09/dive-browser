@@ -11,6 +11,48 @@ use dive_mcp::{
 use serde_json::{Value, json};
 
 const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
+/// Longest side of a screenshot the agent sends. High-resolution models
+/// accept up to 2576 px and scale anything larger down themselves; 1568 px
+/// keeps UI text legible at roughly a third of the image tokens.
+const AGENT_IMAGE_LONG_EDGE: u32 = 1568;
+/// JPEG quality for agent screenshots: UI text stays crisp, size drops ~5-10x vs PNG.
+const AGENT_IMAGE_QUALITY: u8 = 80;
+
+/// PNG from the browser -> RGB JPEG no longer than `AGENT_IMAGE_LONG_EDGE` on either side.
+fn agent_image(png: &[u8]) -> Result<Vec<u8>, String> {
+    let mut image = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .map_err(|e| format!("could not read the screenshot: {e}"))?;
+    if image.width().max(image.height()) > AGENT_IMAGE_LONG_EDGE {
+        image = image.resize(
+            AGENT_IMAGE_LONG_EDGE,
+            AGENT_IMAGE_LONG_EDGE,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    let rgb = image.to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, AGENT_IMAGE_QUALITY)
+        .encode_image(&rgb)
+        .map_err(|e| format!("could not encode the screenshot: {e}"))?;
+    Ok(out)
+}
+
+/// Bound a text result to the window the model asked for, as the MCP server
+/// does for external clients. Images and other values pass through.
+fn windowed(content: Value, input: &Value) -> Value {
+    let Value::String(text) = content else {
+        return content;
+    };
+    let cursor = input["cursor"]
+        .as_u64()
+        .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
+    let max_chars = input["max_chars"]
+        .as_u64()
+        .map_or(dive_mcp::DEFAULT_MAX_CHARS, |n| {
+            usize::try_from(n).unwrap_or(dive_mcp::DEFAULT_MAX_CHARS)
+        });
+    Value::String(dive_mcp::window(&text, cursor, max_chars).text)
+}
 
 /// Tools offered to the model. Kept small and described for a developer's
 /// page: read cheaply first, act only when asked.
@@ -26,6 +68,9 @@ pub fn specs() -> Vec<ToolSpec> {
         "type": "string",
         "description": format!("Element locator. {}", dive_mcp::LOCATOR_GRAMMAR),
     });
+    let cursor = json!({"type": "integer", "minimum": 0, "description": "Character offset to continue from, as the previous result's note says."});
+    let max_chars = json!({"type": "integer", "minimum": 1, "description": "Most characters to return (default 25000)."});
+    let read = json!({"tab_id": tab, "cursor": cursor, "max_chars": max_chars});
     let obj = |props: Value, required: &[&str]| json!({"type": "object", "properties": props, "required": required, "additionalProperties": false});
     let spec = |name: &str, description: String, schema: Value| ToolSpec {
         name: name.to_owned(),
@@ -37,10 +82,10 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "page_inspect",
             "Everything about the page in one call: URL, title, loading state, visible text, every interactive element with the locator that addresses it, recent console warnings and errors, failed requests, and what you have already done to this tab. Start here.".into(),
-            obj(json!({"tab_id": tab}), &[]),
+            obj(read.clone(), &[]),
         ),
-        spec("page_text", "Visible text of the page. Cheapest way to read it.".into(), obj(json!({"tab_id": tab}), &[])),
-        spec("page_markdown", "The page as Markdown: headings, absolute link targets, lists, tables and form state. Costs about what page_text costs but keeps the structure, so prefer it when deciding where to click or navigate next.".into(), obj(json!({"tab_id": tab}), &[])),
+        spec("page_text", "Visible text of the page. Cheapest way to read it.".into(), obj(read.clone(), &[])),
+        spec("page_markdown", "The page as Markdown: headings, absolute link targets, lists, tables and form state. Costs about what page_text costs but keeps the structure, so prefer it when deciding where to click or navigate next.".into(), obj(read.clone(), &[])),
         spec(
             "page_state",
             "Accessibility tree as indented text. page_inspect is usually the better read; use this when you need the full tree.".into(),
@@ -48,7 +93,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "page_screenshot",
-            "Screenshot of the viewport, or of the whole page with full_page. Use only when layout matters.".into(),
+            "Screenshot of the viewport, or of the whole page with full_page. Use only when layout matters. Images are scaled to fit 1568 px on the long side, so for a tall page prefer page_text or a viewport screenshot after scrolling.".into(),
             obj(json!({"tab_id": tab, "full_page": {"type": "boolean", "description": "Capture the entire scrollable page instead of the viewport."}}), &[]),
         ),
         spec(
@@ -353,7 +398,7 @@ pub async fn run<B: Browser>(
     match outcome {
         Ok(content) => ToolResult {
             tool_use_id: call.id.clone(),
-            content,
+            content: windowed(content, &call.input),
             is_error: false,
         },
         Err(message) => ToolResult {
@@ -498,13 +543,16 @@ async fn execute<B: Browser>(
                 .screenshot(tab().await?, full_page)
                 .await
                 .map_err(err)?;
-            if png.len() > MAX_AGENT_SCREENSHOT_BYTES {
+            let jpeg = tokio::task::spawn_blocking(move || agent_image(&png))
+                .await
+                .map_err(|e| e.to_string())??;
+            if jpeg.len() > MAX_AGENT_SCREENSHOT_BYTES {
                 return Err(format!(
                     "screenshot is over the {MAX_AGENT_SCREENSHOT_BYTES} byte agent limit; resize the page and try again"
                 ));
             }
             Ok(
-                json!([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}]),
+                json!([{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64::engine::general_purpose::STANDARD.encode(jpeg)}}]),
             )
         }
         "page_click" => text(
@@ -910,6 +958,56 @@ async fn execute<B: Browser>(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn long_page_text_is_windowed_with_a_cursor_note() {
+        let out = super::windowed(json!("a".repeat(60_000)), &json!({}));
+        let out = out.as_str().unwrap();
+        assert!(out.starts_with(&"a".repeat(25_000)));
+        assert!(out.contains("cursor=25000"), "{}", &out[25_000..]);
+        assert!(out.chars().count() < 25_200);
+    }
+
+    #[test]
+    fn the_cursor_continues_where_the_note_said() {
+        let text: String = (0..60_000_u32)
+            .map(|i| char::from_u32(u32::from(b'a') + i % 26).unwrap())
+            .collect();
+        let out = super::windowed(json!(text), &json!({"cursor": 25_000}));
+        assert!(out.as_str().unwrap().starts_with(&text[25_000..25_100]));
+    }
+
+    #[test]
+    fn images_are_not_windowed() {
+        let image = json!([{"type": "image", "source": {"data": "x".repeat(90_000)}}]);
+        assert_eq!(super::windowed(image.clone(), &json!({})), image);
+    }
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::new(width, height)
+            .write_to(&mut out, image::ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn a_retina_screenshot_is_scaled_and_sent_as_jpeg() {
+        let jpeg = super::agent_image(&png(2880, 1800)).unwrap();
+        assert_eq!(
+            image::guess_format(&jpeg).unwrap(),
+            image::ImageFormat::Jpeg
+        );
+        let decoded = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (1568, 980));
+    }
+
+    #[test]
+    fn a_small_screenshot_keeps_its_size() {
+        let jpeg = super::agent_image(&png(800, 600)).unwrap();
+        let decoded = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (800, 600));
+    }
+
+    #[test]
     fn the_agent_waits_its_turn_on_a_claimed_tab() {
         use std::time::{Duration, Instant};
         let tab = dive_core::TabId::new();
@@ -1019,7 +1117,10 @@ mod tests {
                     spec.name
                 )
             });
-            let (agent, mut server) = (props(&spec.input_schema), props(&entry.input_schema));
+            let (mut agent, mut server) = (props(&spec.input_schema), props(&entry.input_schema));
+            // The MCP server accepts these on every tool without declaring
+            // them; the agent declares them where windowing matters.
+            agent.retain(|p| !dive_mcp::UNIVERSAL_ARGUMENTS.contains(&p.as_str()));
             for (tool, argument, why) in WITHHELD_ARGUMENTS {
                 if *tool == spec.name {
                     assert!(!why.is_empty());

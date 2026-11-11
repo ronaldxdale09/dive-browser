@@ -183,6 +183,10 @@ pub struct Request {
     pub model: String,
     /// System prompt (stable prefix; cached where the wire allows).
     pub system: String,
+    /// Per-send context that follows `system` (the page the person is on).
+    /// Kept apart so the stable part can be cached across sends; wires that
+    /// have one system string join them.
+    pub context: String,
     /// Prior turns plus the new user turn, oldest first.
     pub turns: Vec<Turn>,
     /// Tools offered to the model.
@@ -199,6 +203,7 @@ impl Request {
         Self {
             model: DEFAULT_MODEL.into(),
             system: system.into(),
+            context: String::new(),
             turns,
             tools: Vec::new(),
             max_tokens: 16_000,
@@ -1363,7 +1368,7 @@ data: {\"type\":\"message_stop\"}\n\n";
                 usage[0].cache_read_tokens,
                 usage[0].output_tokens
             ),
-            (120, 100, 9)
+            (220, 100, 9)
         );
         assert_eq!(
             out.iter()

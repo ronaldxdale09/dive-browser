@@ -1083,7 +1083,7 @@ async fn drive(
         crate::agent_guard::envelope(&run.tag, &source, &context, attempt.as_ref())
     };
     let mut request = Request::new(
-        system_prompt(&context, options.clean_session),
+        stable_prompt(options.clean_session),
         fitted
             .turns
             .into_iter()
@@ -1099,6 +1099,7 @@ async fn drive(
             })
             .collect(),
     );
+    request.context = context_block(&context);
     request.tools = crate::agent_tools::specs();
     request.model = prefs.agent_model.clone();
     request.effort = Effort::parse(&prefs.agent_reasoning);
@@ -1188,6 +1189,15 @@ impl RoundTools for AppTools<'_> {
     }
 }
 
+/// Largest conversation a round will send. Anthropic refuses requests over
+/// 32 MB; staying well under leaves room for tools, system and encoding.
+const REQUEST_SOFT_CAP: usize = 24 * 1024 * 1024;
+
+/// Bytes one turn adds to a request.
+fn turn_bytes(turn: &Turn) -> usize {
+    serde_json::to_vec(&turn.content).map_or(0, |v| v.len())
+}
+
 /// Run rounds until the reply ends, fails, is stopped or hits the step limit.
 #[allow(clippy::too_many_lines)] // Keep the streamed tool-loop state machine in execution order.
 async fn rounds(
@@ -1203,9 +1213,22 @@ async fn rounds(
     };
     let mut total = Usage::default();
     let mut steps_used = 0usize;
+    let mut sent_bytes = request.system.len()
+        + request.context.len()
+        + request.turns.iter().map(turn_bytes).sum::<usize>();
     loop {
         if run.is_cancelled() {
             stopped(on_delta);
+            return Ok(());
+        }
+        // Earlier turns are never edited to make room (that would miss the
+        // cache); a run that outgrows the provider's limit stops instead.
+        if sent_bytes > REQUEST_SOFT_CAP {
+            fail(
+                on_delta,
+                "This run has gathered more than the provider accepts in one request (mostly screenshots). Start a new message to continue; earlier results won't be re-sent.",
+                FailureKind::Other,
+            );
             return Ok(());
         }
         let Ok(stream) = start_stream(opener, request, run, on_delta).await else {
@@ -1252,6 +1275,11 @@ async fn rounds(
                     calls.push(call);
                 }
                 Delta::Usage(u) => {
+                    tracing::debug!(
+                        input = u.input_tokens,
+                        cache_read = u.cache_read_tokens,
+                        "agent round usage"
+                    );
                     total.add(u);
                     let _ = on_delta.send(ChatDelta::Usage(total));
                 }
@@ -1313,8 +1341,10 @@ async fn rounds(
             stopped(on_delta);
             return Ok(());
         }
+        let results_turn = Turn::tool_results(results);
+        sent_bytes += turn_bytes(&assistant_turn) + turn_bytes(&results_turn);
         request.turns.push(assistant_turn);
-        request.turns.push(Turn::tool_results(results));
+        request.turns.push(results_turn);
     }
 }
 
@@ -1736,8 +1766,22 @@ pub fn playwright_locator(role: &str, name: &str) -> String {
     }
 }
 
-/// Stable instructions first (cached), page context last.
+/// Stable instructions first (cached), page context last: the single string
+/// the `OpenAI` wire sends. The request itself keeps the two apart.
+#[cfg(test)]
 pub fn system_prompt(context: &str, clean: bool) -> String {
+    let mut s = stable_prompt(clean);
+    let block = context_block(context);
+    if !block.is_empty() {
+        s.push_str("\n\n");
+        s.push_str(&block);
+    }
+    s
+}
+
+/// The instructions that do not change from send to send, so they can be
+/// cached. Anything that varies per send belongs in [`context_block`].
+pub fn stable_prompt(clean: bool) -> String {
     let mut s = String::from(
         "You are the agent built into Dive, a browser for developers. You work on the pages the \
          user has open: read them, explain them, debug them, and drive them -- click, type, \
@@ -1786,12 +1830,16 @@ pub fn system_prompt(context: &str, clean: bool) -> String {
              the task needs the user to be signed in, say so instead of trying to sign in.",
         );
     }
-    if !context.is_empty() {
-        s.push_str("\n\n<page_context>\n");
-        s.push_str(context);
-        s.push_str("\n</page_context>");
-    }
     s
+}
+
+/// The page the person is on, fenced; empty when there is none.
+pub fn context_block(context: &str) -> String {
+    if context.is_empty() {
+        String::new()
+    } else {
+        format!("<page_context>\n{context}\n</page_context>")
+    }
 }
 
 /// Title, URL, recent console lines, failed requests and a text excerpt.
@@ -1916,6 +1964,11 @@ mod tests {
         assert!(p.starts_with("You are the agent built into Dive"));
         assert!(p.ends_with("</page_context>"));
         assert!(!system_prompt("", false).contains("page_context"));
+        assert_eq!(
+            system_prompt("x", false),
+            format!("{}\n\n{}", stable_prompt(false), context_block("x"))
+        );
+        assert_eq!(system_prompt("", false), stable_prompt(false));
         // A clean run is told it has no tab, because it starts without one.
         let clean = system_prompt("", true);
         assert!(clean.contains("clean session"), "{clean}");
@@ -2372,6 +2425,8 @@ mod tests {
     #[derive(Default)]
     struct StubTools {
         rounds: Mutex<Vec<Vec<String>>>,
+        /// Answer every call with this instead of "ok" when set.
+        payload: Option<String>,
     }
 
     impl RoundTools for StubTools {
@@ -2394,12 +2449,13 @@ mod tests {
             calls: &'a [ToolUse],
         ) -> futures_util::future::BoxFuture<'a, Vec<ToolResult>> {
             lock(&self.rounds).push(calls.iter().map(|c| c.id.clone()).collect());
+            let answer = self.payload.clone().unwrap_or_else(|| "ok".into());
             Box::pin(async move {
                 calls
                     .iter()
                     .map(|c| ToolResult {
                         tool_use_id: c.id.clone(),
-                        content: json!("ok"),
+                        content: json!(answer),
                         is_error: false,
                     })
                     .collect()
@@ -2517,6 +2573,39 @@ mod tests {
         let (channel, seen) = collecting();
         channel.send(ChatDelta::Done("end_turn".into())).unwrap();
         assert!(matches!(&lock(&seen)[..], [ChatDelta::Done(r)] if r == "end_turn"));
+    }
+
+    #[test]
+    fn a_turn_holding_an_image_counts_its_bytes() {
+        let data = "A".repeat(1024 * 1024);
+        let turn = Turn::tool_results(vec![ToolResult {
+            tool_use_id: "a".into(),
+            content: json!([{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}]),
+            is_error: false,
+        }]);
+        assert!(turn_bytes(&turn) >= 1024 * 1024);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_run_that_outgrows_the_request_limit_stops_cleanly() {
+        let opener = ScriptedOpener::new(vec![Script::Reply(reply(
+            "",
+            &[("a", "page_text")],
+            "tool_use",
+        ))]);
+        let tools = StubTools {
+            payload: Some("x".repeat(25 * 1024 * 1024)),
+            ..StubTools::default()
+        };
+        let mut request = fresh_request();
+        let out = run_rounds(&opener, &tools, &mut request, 25).await;
+        let (message, kind) = last_error(&out);
+        assert!(
+            message.contains("more than the provider accepts"),
+            "{message}"
+        );
+        assert_eq!(kind, FailureKind::Other);
+        assert_eq!(opener.opens(), 1, "no second request is sent");
     }
 
     #[tokio::test(start_paused = true)]

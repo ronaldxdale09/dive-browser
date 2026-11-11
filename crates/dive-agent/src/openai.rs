@@ -17,7 +17,7 @@ use crate::{Delta, Effort, ModelInfo, Provider, Request, Role, ToolUse, Turn, Us
 
 /// JSON body for `POST /chat/completions`.
 pub fn body(request: &Request, provider: Provider) -> Value {
-    let mut messages = vec![json!({"role": "system", "content": request.system})];
+    let mut messages = vec![system_message(request, provider)];
     messages.extend(to_messages(&request.turns, provider));
     let mut body = json!({
         "model": request.model,
@@ -73,6 +73,27 @@ pub fn body(request: &Request, provider: Provider) -> Value {
         }
     }
     body
+}
+
+/// The system message. Claude models on `OpenRouter` get the stable prompt as
+/// a part marked for caching, with the per-send context after it unmarked;
+/// everyone else gets one string (system, a blank line, context).
+fn system_message(request: &Request, provider: Provider) -> Value {
+    if provider == Provider::Openrouter && request.model.starts_with("anthropic/") {
+        let mut parts = vec![
+            json!({"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}),
+        ];
+        if !request.context.is_empty() {
+            parts.push(json!({"type": "text", "text": request.context}));
+        }
+        return json!({"role": "system", "content": parts});
+    }
+    let text = if request.context.is_empty() {
+        request.system.clone()
+    } else {
+        format!("{}\n\n{}", request.system, request.context)
+    };
+    json!({"role": "system", "content": text})
 }
 
 /// Translate Anthropic-shaped turns into chat-completions messages.
@@ -569,6 +590,31 @@ mod tests {
         assert_eq!(b["max_completion_tokens"], 16_000);
         assert!(b.get("max_tokens").is_none());
         assert!(b.get("usage").is_none());
+    }
+
+    #[test]
+    fn openrouter_marks_the_stable_system_part_for_claude_models() {
+        let mut r = request();
+        r.model = "anthropic/claude-sonnet-5.5".into();
+        r.context = "<page_context>\nx\n</page_context>".into();
+        let b = body(&r, Provider::Openrouter);
+        let parts = b["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "sys");
+        assert_eq!(parts[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(parts[1]["text"], r.context);
+        assert!(parts[1].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn other_models_get_one_system_string() {
+        let mut r = request();
+        r.context = "ctx".into();
+        let joined = json!({"role": "system", "content": "sys\n\nctx"});
+        assert_eq!(body(&r, Provider::Openrouter)["messages"][0], joined);
+        assert_eq!(body(&r, Provider::Custom)["messages"][0], joined);
+        r.model = "anthropic/claude-sonnet-5.5".into();
+        assert_eq!(body(&r, Provider::Custom)["messages"][0], joined);
     }
 
     #[test]

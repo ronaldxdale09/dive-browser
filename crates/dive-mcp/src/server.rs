@@ -1124,7 +1124,7 @@ impl<B: Browser> DiveServer<B> {
 /// `holder` is who is driving (see [`crate::lease`]). `max_chars` and
 /// `cursor` bound what a reader returns, which is the difference between a
 /// long page costing a page of context and costing all of it.
-pub(crate) const UNIVERSAL_ARGUMENTS: &[&str] = &["holder", "max_chars", "cursor"];
+pub const UNIVERSAL_ARGUMENTS: &[&str] = &["holder", "max_chars", "cursor"];
 
 /// Argument names a tool does not declare. A client that misspells one
 /// (`id` for `tab_id`) must hear about it: serde would drop the key, the call

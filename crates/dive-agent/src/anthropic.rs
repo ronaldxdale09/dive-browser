@@ -19,6 +19,14 @@ pub const BETAS: &str = "server-side-fallback-2026-07-01";
 
 /// JSON body for `POST /v1/messages`.
 pub fn body(request: &Request) -> Value {
+    // The stable prompt carries an explicit breakpoint; the per-send page
+    // context follows it unmarked so a changed page never rewrites the cache.
+    let mut system = vec![
+        json!({"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}),
+    ];
+    if !request.context.is_empty() {
+        system.push(json!({"type": "text", "text": request.context}));
+    }
     let mut body = json!({
         "model": request.model,
         "max_tokens": request.max_tokens,
@@ -27,7 +35,10 @@ pub fn body(request: &Request) -> Value {
         // default hides them and a long silence reads as a hang.
         "thinking": {"type": "adaptive", "display": "summarized"},
         "fallbacks": "default",
-        "system": [{"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}],
+        // Automatic caching: the API moves a second breakpoint to the last
+        // cacheable block as the conversation grows (2 of the 4 slots).
+        "cache_control": {"type": "ephemeral"},
+        "system": system,
         // A turn with nothing in it -- a reply stopped before its first
         // word -- is refused with a 400 that fails the whole request, so it
         // is left out; the API joins the turns either side of it.
@@ -109,8 +120,15 @@ impl StreamState {
         match event_name {
             "message_start" => {
                 let u = &v["message"]["usage"];
-                self.usage.input_tokens = u32_of(&u["input_tokens"]).unwrap_or(0);
-                self.usage.cache_read_tokens = u32_of(&u["cache_read_input_tokens"]).unwrap_or(0);
+                let read = u32_of(&u["cache_read_input_tokens"]).unwrap_or(0);
+                let write = u32_of(&u["cache_creation_input_tokens"]).unwrap_or(0);
+                // The API reports only the uncached remainder as
+                // `input_tokens`; the prompt total includes both cache kinds.
+                self.usage.input_tokens = u32_of(&u["input_tokens"])
+                    .unwrap_or(0)
+                    .saturating_add(read)
+                    .saturating_add(write);
+                self.usage.cache_read_tokens = read;
                 Vec::new()
             }
             "content_block_start" => {
@@ -326,6 +344,8 @@ mod tests {
         // Default effort sends nothing and lets the API choose.
         assert!(b.get("output_config").is_none());
         assert_eq!(b["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(b["cache_control"]["type"], "ephemeral");
+        assert_eq!(b["system"].as_array().unwrap().len(), 1);
         assert_eq!(b["messages"][0]["role"], "user");
         r.tools.push(ToolSpec {
             name: "t".into(),
@@ -336,6 +356,32 @@ mod tests {
         let b = body(&r);
         assert_eq!(b["tools"][0]["name"], "t");
         assert_eq!(b["output_config"]["effort"], "max");
+    }
+
+    #[test]
+    fn the_page_context_follows_the_cached_system_block_unmarked() {
+        let mut r = Request::new("be brief", vec![Turn::text(Role::User, "hi")]);
+        r.context = "<page_context>\nx\n</page_context>".into();
+        let b = body(&r);
+        let system = b["system"].as_array().unwrap();
+        assert_eq!(system.len(), 2);
+        assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(system[1]["text"], r.context);
+        assert!(system[1].get("cache_control").is_none());
+        // Exactly the two documented breakpoints, nothing on messages.
+        let n = b.to_string().matches("cache_control").count();
+        assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn prompt_tokens_count_cache_reads_and_writes() {
+        let mut st = StreamState::default();
+        st.parse_event(
+            "message_start",
+            r#"{"message":{"usage":{"input_tokens":20,"cache_read_input_tokens":100,"cache_creation_input_tokens":30}}}"#,
+        );
+        assert_eq!(st.usage.input_tokens, 150);
+        assert_eq!(st.usage.cache_read_tokens, 100);
     }
 
     #[test]
@@ -434,7 +480,7 @@ mod tests {
         assert_eq!(
             tail[0],
             Delta::Usage(Usage {
-                input_tokens: 120,
+                input_tokens: 220,
                 output_tokens: 42,
                 cache_read_tokens: 100,
                 cost_usd: None

@@ -30,4 +30,6 @@ pub use params::{
     SelectParams, StorageClearParams, StorageGetParams, StorageKind, StorageSetParams, TabRef,
     TailParams, Target, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
-pub use server::{Config, DiveServer};
+pub use server::{
+    Config, DEFAULT_MAX_CHARS, DiveServer, MAX_MAX_CHARS, UNIVERSAL_ARGUMENTS, Window, window,
+};
