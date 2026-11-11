@@ -99,6 +99,41 @@ mod mac {
     }
 }
 
+/// The shell's open command for links: everything after the marker is one
+/// argument, verbatim, so nothing inside a link can become a switch.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn open_command(exe: &str) -> String {
+    format!("\"{exe}\" --single-argument %1")
+}
+
+/// Bring an existing registration's open command up to date. A machine
+/// registered by an older build keeps the old command otherwise. Does nothing
+/// when Dive never registered: it must not register itself unasked.
+#[cfg(target_os = "windows")]
+pub fn refresh_registration() {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let wanted = open_command(&exe.display().to_string());
+    let path = format!("Software\\Classes\\{}\\shell\\open\\command", win::PROG_ID);
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(existing) = hkcu.open_subkey_with_flags(&path, KEY_READ) else {
+        return;
+    };
+    if existing.get_value::<String, _>("").ok().as_deref() == Some(wanted.as_str()) {
+        return;
+    }
+    let written = hkcu
+        .open_subkey_with_flags(&path, KEY_WRITE)
+        .and_then(|key| key.set_value("", &wanted));
+    if let Err(error) = written {
+        tracing::warn!("could not refresh Dive's link handler registration: {error}");
+    }
+}
+
 /// Registering as a browser, and sending the person to the one place Windows
 /// lets the default be chosen.
 #[cfg(target_os = "windows")]
@@ -151,7 +186,7 @@ mod win {
             .set_value("", &format!("{exe},0"))
             .map_err(|e| e.to_string())?;
         write(format!("{classes}\\shell\\open\\command"))?
-            .set_value("", &format!("\"{exe}\" \"%1\""))
+            .set_value("", &super::open_command(&exe))
             .map_err(|e| e.to_string())?;
 
         let caps = "Software\\Dive\\Capabilities";
@@ -179,15 +214,11 @@ mod win {
 
     /// Open the defaults page. Windows allows nothing more direct than this.
     pub fn open_settings() -> Result<(), String> {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", "ms-settings:defaultapps"])
-            .status()
-            .map_err(|e| format!("could not open Windows Settings: {e}"))
-            .and_then(|s| {
-                s.success()
-                    .then_some(())
-                    .ok_or_else(|| format!("Windows Settings would not open ({s})"))
-            })
+        crate::os_open::open(
+            std::ffi::OsStr::new("ms-settings:defaultapps"),
+            "Windows Settings",
+        )
+        .map_err(|e| e.message)
     }
 }
 
@@ -294,6 +325,14 @@ mod tests {
         assert!(handler.contains('.'), "{handler}");
         assert_eq!(handler, handler.to_ascii_lowercase());
         assert_eq!(status().is_default, handler == BUNDLE_ID);
+    }
+
+    #[test]
+    fn open_command_marks_the_link_as_one_argument() {
+        assert_eq!(
+            open_command(r"C:\Dive\dive.exe"),
+            "\"C:\\Dive\\dive.exe\" --single-argument %1"
+        );
     }
 
     #[test]

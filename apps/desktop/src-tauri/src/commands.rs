@@ -593,7 +593,7 @@ pub(crate) fn downloads_reveal(state: State<'_, AppState>, path: Option<String>)
     if !target.exists() {
         return Err(AppError::new("that file is no longer there"));
     }
-    reveal(&target)
+    crate::os_open::reveal(&target)
 }
 
 #[tauri::command]
@@ -629,64 +629,7 @@ pub(crate) fn downloads_open(path: String) -> AppResult<()> {
     if path.is_empty() || !target.is_file() {
         return Err(AppError::new("that file is no longer there"));
     }
-    #[cfg(target_os = "macos")]
-    let status = std::process::Command::new("open").arg(&target).status();
-    #[cfg(target_os = "linux")]
-    let status = std::process::Command::new("xdg-open").arg(&target).status();
-    // Windows goes through the shell API, not `cmd /C start`. A download's
-    // name comes from the server, `&` is legal in a Windows filename, and Rust
-    // quotes an argument only when it holds a space -- so `report&calc.csv`
-    // reached cmd unquoted and cmd split on it. ShellExecuteW takes the path
-    // as one wide string and parses nothing.
-    #[cfg(target_os = "windows")]
-    return open_with_shell(target.as_os_str(), "the file");
-    #[cfg(not(target_os = "windows"))]
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(AppError::new(format!("could not open the file ({s})"))),
-        Err(e) => Err(AppError::new(e)),
-    }
-}
-
-/// Hand a path or URL to the Windows shell to open with its default
-/// application; `what` names it in the error ("the file", "the link").
-#[cfg(target_os = "windows")]
-#[allow(unsafe_code)] // ShellExecuteW is reachable only through the Win32 API.
-pub(crate) fn open_with_shell(target: &std::ffi::OsStr, what: &str) -> AppResult<()> {
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    use windows::core::PCWSTR;
-
-    let wide = |s: &std::ffi::OsStr| {
-        s.encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<u16>>()
-    };
-    let verb = wide(std::ffi::OsStr::new("open"));
-    let path = wide(target);
-    // SAFETY: both strings are NUL-terminated and outlive the call, and a null
-    // HWND is documented as "no parent window".
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            PCWSTR(verb.as_ptr()),
-            PCWSTR(path.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    // Success is documented as a value greater than 32; anything else is an
-    // error code in disguise.
-    if result.0 as usize > 32 {
-        Ok(())
-    } else {
-        Err(AppError::new(format!(
-            "Windows could not open {what} (code {})",
-            result.0 as usize
-        )))
-    }
+    crate::os_open::open(target.as_os_str(), "the file")
 }
 
 /// Stop a download that is still going.
@@ -797,39 +740,6 @@ pub(crate) fn download_start(app: AppHandle<Runtime>, id: TabId, url: String) ->
         })?;
         Ok(())
     })
-}
-
-/// Open `path` in the platform file manager, selecting it when it is a file.
-pub(crate) fn reveal(path: &std::path::Path) -> AppResult<()> {
-    #[cfg(target_os = "macos")]
-    let status = {
-        let mut cmd = std::process::Command::new("open");
-        if path.is_file() {
-            cmd.arg("-R");
-        }
-        cmd.arg(path).status()
-    };
-    #[cfg(target_os = "linux")]
-    let status = std::process::Command::new("xdg-open")
-        .arg(if path.is_file() {
-            path.parent().unwrap_or(path)
-        } else {
-            path
-        })
-        .status();
-    #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("explorer")
-        .arg(if path.is_file() {
-            format!("/select,{}", path.display())
-        } else {
-            path.display().to_string()
-        })
-        .status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(AppError::new(format!("file manager exited with {s}"))),
-        Err(e) => Err(AppError::new(e)),
-    }
 }
 
 /// Build the specta command/event collection.
@@ -2907,20 +2817,7 @@ pub(crate) async fn recording_read(path: String) -> Result<String, AppError> {
 #[specta::specta]
 pub(crate) fn recording_open(path: String) -> AppResult<()> {
     let file = recording_file(&path)?;
-    #[cfg(target_os = "macos")]
-    let status = std::process::Command::new("open").arg(&file).status();
-    #[cfg(target_os = "linux")]
-    let status = std::process::Command::new("xdg-open").arg(&file).status();
-    #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(&file)
-        .status();
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(AppError::new(format!("could not open the file ({s})"))),
-        Err(e) => Err(AppError::new(e)),
-    }
+    crate::os_open::open(file.as_os_str(), "the recording")
 }
 
 /// Delete a recording.

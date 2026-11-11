@@ -310,22 +310,14 @@ fn remember(app: &AppHandle<Runtime>, origin: &str, scheme: &str) -> AppResult<(
 /// claims is reported rather than silently dropped; keep it off the main
 /// thread.
 fn open(url: &str) -> AppResult<()> {
-    #[cfg(target_os = "windows")]
-    return crate::commands::open_with_shell(std::ffi::OsStr::new(url), "the link");
-    #[cfg(not(target_os = "windows"))]
-    {
-        #[cfg(target_os = "macos")]
-        let status = std::process::Command::new("/usr/bin/open")
-            .arg(url)
-            .status();
-        #[cfg(not(target_os = "macos"))]
-        let status = std::process::Command::new("xdg-open").arg(url).status();
-        match status {
-            Ok(status) if status.success() => Ok(()),
-            Ok(_) => Err(AppError::new("no app on this computer opens that link")),
-            Err(error) => Err(AppError::new(format!("could not open the link: {error}"))),
+    crate::os_open::open(std::ffi::OsStr::new(url), "the link").map_err(|error| {
+        // Keep the chrome's wording for a link no app claims.
+        if cfg!(target_os = "windows") || !error.message.starts_with("could not open the link (") {
+            error
+        } else {
+            AppError::new("no app on this computer opens that link")
         }
-    }
+    })
 }
 
 /// The name of the app the system would open, for the card to say.

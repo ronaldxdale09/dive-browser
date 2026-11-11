@@ -69,6 +69,7 @@ mod network_probe;
 mod normal_window;
 mod omnibox;
 mod openapi;
+mod os_open;
 mod page_menu;
 mod page_world;
 mod pagescript;
@@ -500,6 +501,8 @@ pub fn run() {
                 restore_session(app);
                 open_startup_urls(app);
             }
+            #[cfg(target_os = "windows")]
+            tauri::async_runtime::spawn_blocking(default_browser::refresh_registration);
             if let Some(broker) = setup_broker.as_ref() { broker.start(app.handle().clone())?; }
             open_startup_panels(app.handle().clone());
             if !private_session::is_private() { mcp::start(app.handle().clone()); }
@@ -741,10 +744,7 @@ fn claim_normal_profile(root: &std::path::Path) -> Option<normal_window::Broker>
             }
         }
     }
-    let urls = startup_urls(
-        std::env::args().skip(1),
-        &std::env::var("DIVE_OPEN_URL").unwrap_or_default(),
-    );
+    let urls = launch_urls(&std::env::var("DIVE_OPEN_URL").unwrap_or_default());
     // One id for every attempt: the running Dive opens a request once, so a
     // retry after a lost reply cannot open the links twice.
     let id = dive_core::TabId::new().to_string();
@@ -765,6 +765,46 @@ fn claim_normal_profile(root: &std::path::Path) -> Option<normal_window::Broker>
             }
         }
     }
+}
+
+/// Chromium's `--single-argument`: everything after the marker (and the one
+/// space that follows it) is a single argument, taken verbatim.
+fn single_argument_tail(raw_command_line: &str) -> Option<&str> {
+    const MARKER: &str = " --single-argument ";
+    let (_, tail) = raw_command_line.split_once(MARKER)?;
+    (!tail.trim().is_empty()).then_some(tail)
+}
+
+/// The process's command line as the OS holds it, before any splitting.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // GetCommandLineW is reachable only through the Win32 API.
+fn raw_command_line() -> Option<String> {
+    // SAFETY: the returned pointer is the process's own NUL-terminated command
+    // line, valid for the life of the process.
+    unsafe {
+        windows::Win32::System::Environment::GetCommandLineW()
+            .to_string()
+            .ok()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn raw_command_line() -> Option<String> {
+    None
+}
+
+/// The URLs this launch was asked to open. A link handed over with the
+/// `--single-argument` marker is exactly one URL and `std::env::args()` is
+/// ignored, since its splitting is what an injected quote would exploit.
+fn launch_urls(from_env: &str) -> Vec<String> {
+    if let Some(raw) = raw_command_line()
+        && let Some(tail) = single_argument_tail(&raw)
+    {
+        let mut urls = vec![tail.to_owned()];
+        urls.extend(from_env.split_whitespace().map(str::to_owned));
+        return urls;
+    }
+    startup_urls(std::env::args().skip(1), from_env)
 }
 
 fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
@@ -798,7 +838,7 @@ fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<S
 fn open_startup_urls(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let from_env = std::env::var("DIVE_OPEN_URL").unwrap_or_default();
-    let urls = startup_urls(std::env::args().skip(1), &from_env);
+    let urls = launch_urls(&from_env);
     if urls.is_empty() {
         return;
     }
@@ -1330,6 +1370,48 @@ mod tests {
         assert_eq!(window_for_dock_click(["pop-1-abc"]), Some("pop-1-abc"));
         // Nothing left to raise: the caller opens a fresh window.
         assert_eq!(window_for_dock_click([]), None);
+    }
+
+    #[test]
+    fn single_argument_tail_is_everything_after_the_marker() {
+        assert_eq!(
+            super::single_argument_tail(
+                r#""C:\Dive\dive.exe" --single-argument https://a.test/x?q=1"#
+            ),
+            Some("https://a.test/x?q=1")
+        );
+    }
+
+    #[test]
+    fn single_argument_tail_keeps_spaces_and_quotes_verbatim() {
+        assert_eq!(
+            super::single_argument_tail(r#"dive.exe --single-argument https://a.test/ "--flag" b"#),
+            Some(r#"https://a.test/ "--flag" b"#)
+        );
+    }
+
+    #[test]
+    fn single_argument_tail_needs_the_marker_and_a_value() {
+        assert_eq!(
+            super::single_argument_tail("dive.exe https://a.test/"),
+            None
+        );
+        assert_eq!(
+            super::single_argument_tail("dive.exe --single-argument "),
+            None
+        );
+        assert_eq!(
+            super::single_argument_tail("dive.exe --single-argument"),
+            None
+        );
+    }
+
+    #[test]
+    fn startup_urls_keep_ordinary_argument_lists() {
+        assert_eq!(
+            super::startup_urls(["https://a.test/"].into_iter().map(str::to_owned), ""),
+            ["https://a.test/"]
+        );
     }
 
     #[test]

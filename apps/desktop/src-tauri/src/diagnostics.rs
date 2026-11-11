@@ -219,7 +219,7 @@ pub(crate) async fn diagnostics_export(state: State<'_, AppState>) -> AppResult<
         .await
         .map_err(AppError::new)?
         .map_err(|e| AppError::new(format!("could not gather the diagnostics: {e}")))?;
-    crate::commands::reveal(&out)?;
+    crate::os_open::reveal(&out)?;
     Ok(out.to_string_lossy().into_owned())
 }
 
@@ -229,7 +229,7 @@ pub(crate) async fn diagnostics_export(state: State<'_, AppState>) -> AppResult<
 pub(crate) fn diagnostics_reveal_logs() -> AppResult<()> {
     let logs = crate::state::data_root().join("logs");
     std::fs::create_dir_all(&logs).map_err(AppError::new)?;
-    crate::commands::reveal(&logs)
+    crate::os_open::reveal(&logs)
 }
 
 #[cfg(test)]
