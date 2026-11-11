@@ -77,7 +77,7 @@ pub fn specs() -> Vec<ToolSpec> {
         description,
         input_schema: schema,
     };
-    vec![
+    let mut specs = vec![
         spec("tabs_list", "List open tabs in the active workspace with ids, URLs and titles. Sleeping tabs are omitted.".into(), obj(json!({}), &[])),
         spec(
             "page_inspect",
@@ -184,7 +184,7 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "page_mouse",
             "Play a pointer gesture at viewport coordinates: steps is a list of {action, x, y} where action is move, down, up, click or wheel. The whole gesture is one call. Use page_click for anything a locator can name; this is for what it cannot -- canvases, maps, drawings, sliders with no accessible value.".into(),
-            obj(json!({"tab_id": tab, "steps": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["move", "down", "up", "click", "wheel"]}, "x": {"type": "number"}, "y": {"type": "number"}, "button": {"type": "string", "enum": ["left", "right", "middle"]}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}, "delay_ms": {"type": "integer"}}, "required": ["action"], "additionalProperties": false}}}), &["steps"]),
+            obj(json!({"tab_id": tab, "steps": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["move", "down", "up", "click", "wheel"]}, "x": {"type": "number"}, "y": {"type": "number"}, "button": {"type": "string", "description": "left (default), right or middle."}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}, "delay_ms": {"type": "integer"}}, "required": ["action"], "additionalProperties": false}}}), &["steps"]),
         ),
         spec(
             "page_storage",
@@ -266,7 +266,53 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "request_id": {"type": "string"}}), &["request_id"]),
         ),
         spec("dev_servers", "Dev servers listening on this machine, with port, framework, page title, process and PID when the OS reports them.".into(), obj(json!({}), &[])),
-    ]
+    ];
+    for spec in &mut specs {
+        inherit_descriptions(spec);
+    }
+    specs
+}
+
+/// The MCP server's parameter schemas by tool name, built once: `specs()` runs
+/// on every agent request and building the router is not free.
+static MCP_SCHEMAS: std::sync::LazyLock<std::collections::HashMap<String, Value>> =
+    std::sync::LazyLock::new(|| {
+        dive_mcp::tool_catalog()
+            .into_iter()
+            .map(|e| (e.name, e.input_schema))
+            .collect()
+    });
+
+/// Give every top-level property the agent left undescribed the server's
+/// description for it. An agent's own wording is never overwritten.
+fn inherit_descriptions(spec: &mut ToolSpec) {
+    let Some(server) = MCP_SCHEMAS.get(&spec.name) else {
+        return;
+    };
+    let Some(props) = spec
+        .input_schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    for (name, schema) in props {
+        if schema.get("description").is_some() {
+            continue;
+        }
+        let mut theirs = &server["properties"][name.as_str()];
+        // schemars puts the doc comment on the property; a `$ref`'d type keeps
+        // its own on the definition.
+        if theirs.get("description").is_none()
+            && let Some(target) = theirs["$ref"].as_str()
+            && let Some(def) = server["$defs"].get(target.rsplit('/').next().unwrap_or_default())
+        {
+            theirs = def;
+        }
+        if let Some(text) = theirs["description"].as_str().filter(|t| !t.is_empty()) {
+            schema["description"] = Value::String(text.to_owned());
+        }
+    }
 }
 
 /// MCP tools the sidecar agent is deliberately not offered, with the reason.
@@ -316,6 +362,43 @@ pub const WITHHELD_ARGUMENTS: &[(&str, &str, &str)] = &[(
     "which context a run's tabs go into is the run's, not the model's: a clean session would \
      be undone by one tab opened in the person's",
 )];
+
+/// Differences from the MCP schema the agent keeps on purpose, as
+/// `(tool, property or "required", why)`. The parity test skips exactly these
+/// and fails when one stops differing.
+#[cfg(test)]
+pub const SCHEMA_EXCEPTIONS: &[(&str, &str, &str)] = &[
+    (
+        "page_drag",
+        "required",
+        "the server types from/to as optional but answers BadRequest without them; the agent says so up front",
+    ),
+    (
+        "context_close",
+        "required",
+        "the server types context_id as optional but cannot close anything without it; the agent says so up front",
+    ),
+    (
+        "tab_history",
+        "action",
+        "the server types action as free text and validates it against a fixed list (back/forward/reload plus aliases); the agent lists the canonical names",
+    ),
+    (
+        "page_resize",
+        "orientation",
+        "the server types orientation as free text and rejects all but portrait/landscape; the agent lists them",
+    ),
+    (
+        "page_resize",
+        "ui",
+        "the server types ui as free text and validates it against a fixed list (browser/standalone/none plus aliases); the agent lists the canonical names",
+    ),
+    (
+        "rules_set",
+        "rules",
+        "the server leaves rule items unconstrained; the agent says each is an object",
+    ),
+];
 
 /// Tools that change the page or leave it; the UI labels these as actions.
 pub fn is_action(name: &str) -> bool {
@@ -957,6 +1040,8 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+
     #[test]
     fn long_page_text_is_windowed_with_a_cursor_note() {
         let out = super::windowed(json!("a".repeat(60_000)), &json!({}));
@@ -1095,21 +1180,131 @@ mod tests {
         }
     }
 
+    /// The model-visible shape of one schema, with everything that is only
+    /// wording or a serialiser's detail left out: `$ref`s resolved, `null`
+    /// removed from types, enum values collected and sorted.
+    fn shape(schema: &Value, root: &Value) -> Value {
+        use serde_json::Map;
+        if let Some(target) = schema["$ref"].as_str() {
+            let name = target.rsplit('/').next().unwrap_or_default();
+            let defs = root["$defs"]
+                .get(name)
+                .or_else(|| root["definitions"].get(name));
+            return shape(defs.unwrap_or_else(|| panic!("unresolved {target}")), root);
+        }
+        let is_null = |v: &Value| v["type"] == "null";
+        if let Some(any) = schema["anyOf"].as_array() {
+            let rest: Vec<&Value> = any.iter().filter(|v| !is_null(v)).collect();
+            if rest.len() == 1 && any.len() == 2 {
+                return shape(rest[0], root);
+            }
+        }
+        let mut out = Map::new();
+        match &schema["type"] {
+            Value::String(t) => {
+                out.insert("type".into(), json!(t));
+            }
+            Value::Array(types) => {
+                let kept: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
+                match kept.as_slice() {
+                    [one] => out.insert("type".into(), (*one).clone()),
+                    many => out.insert("type".into(), json!(many)),
+                };
+            }
+            _ => {}
+        }
+        let mut values: Vec<String> = Vec::new();
+        for key in ["enum", "oneOf", "anyOf"] {
+            for entry in schema[key].as_array().into_iter().flatten() {
+                let single = entry["enum"].as_array().and_then(|e| e.first());
+                let value = if key == "enum" {
+                    Some(entry)
+                } else {
+                    entry.get("const").or(single)
+                };
+                if let Some(v) = value.and_then(Value::as_str) {
+                    values.push(v.to_owned());
+                }
+            }
+        }
+        if !values.is_empty() {
+            values.sort();
+            out.insert("enum".into(), json!(values));
+            out.entry("type").or_insert(json!("string"));
+        }
+        if schema.get("items").is_some() {
+            out.insert("items".into(), shape(&schema["items"], root));
+        }
+        if let Some(props) = schema["properties"].as_object() {
+            let props: Map<String, Value> = props
+                .iter()
+                .map(|(k, v)| (k.clone(), shape(v, root)))
+                .collect();
+            out.insert("properties".into(), Value::Object(props));
+            let mut required: Vec<&str> = schema["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            required.sort_unstable();
+            out.insert("required".into(), json!(required));
+        }
+        if let Some(extra) = schema["additionalProperties"].as_object() {
+            let extra = Value::Object(extra.clone());
+            out.insert("values".into(), shape(&extra, root));
+        }
+        Value::Object(out)
+    }
+
+    /// Property shapes and the required set of one whole tool schema.
+    fn tool_shape(schema: &Value) -> (BTreeMap<String, Value>, BTreeSet<String>) {
+        let props = schema["properties"]
+            .as_object()
+            .map(|o| {
+                o.iter()
+                    .map(|(k, v)| (k.clone(), shape(v, schema)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let required = schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        (props, required)
+    }
+
+    #[test]
+    fn normaliser_reads_options_refs_and_doc_enums() {
+        let mouse = dive_mcp::tool_catalog()
+            .into_iter()
+            .find(|e| e.name == "page_mouse")
+            .expect("page_mouse");
+        let (props, required) = tool_shape(&mouse.input_schema);
+        assert_eq!(
+            props["steps"]["items"]["properties"]["action"],
+            json!({"type": "string", "enum": ["click", "down", "move", "up", "wheel"]})
+        );
+        assert_eq!(props["steps"]["type"], "array");
+        // An `Option<f64>` is a plain number, and optional.
+        assert_eq!(
+            props["steps"]["items"]["properties"]["x"],
+            json!({"type": "number"})
+        );
+        assert!(required.contains("steps"));
+    }
+
     #[test]
     fn the_agent_catalog_is_the_mcp_catalog_minus_documented_exceptions() {
-        use std::collections::{BTreeSet, HashMap};
         let mcp: HashMap<String, dive_mcp::CatalogEntry> = dive_mcp::tool_catalog()
             .into_iter()
             .map(|e| (e.name.clone(), e))
             .collect();
-        let props = |schema: &Value| -> BTreeSet<String> {
-            schema["properties"]
-                .as_object()
-                .map(|o| o.keys().cloned().collect())
-                .unwrap_or_default()
-        };
         let offered: BTreeSet<String> = specs().into_iter().map(|s| s.name).collect();
         let mut drift = Vec::new();
+        let mut excepted = BTreeSet::new();
         for spec in specs() {
             let entry = mcp.get(&spec.name).unwrap_or_else(|| {
                 panic!(
@@ -1117,29 +1312,70 @@ mod tests {
                     spec.name
                 )
             });
-            let (mut agent, mut server) = (props(&spec.input_schema), props(&entry.input_schema));
+            let (mut agent, agent_required) = tool_shape(&spec.input_schema);
+            let (mut server, mut server_required) = tool_shape(&entry.input_schema);
             // The MCP server accepts these on every tool without declaring
             // them; the agent declares them where windowing matters.
-            agent.retain(|p| !dive_mcp::UNIVERSAL_ARGUMENTS.contains(&p.as_str()));
+            for universal in dive_mcp::UNIVERSAL_ARGUMENTS {
+                agent.remove(*universal);
+                server.remove(*universal);
+            }
             for (tool, argument, why) in WITHHELD_ARGUMENTS {
                 if *tool == spec.name {
                     assert!(!why.is_empty());
                     assert!(
-                        server.remove(*argument),
+                        server.remove(*argument).is_some(),
                         "{tool} no longer takes {argument}; drop the exception"
                     );
+                    server_required.remove(*argument);
                     assert!(
-                        !agent.contains(*argument),
+                        !agent.contains_key(*argument),
                         "{tool} withholds {argument} but offers it anyway"
                     );
                 }
             }
-            if agent != server {
-                drift.push(format!(
-                    "{}: agent {agent:?} vs server {server:?}",
-                    spec.name
+            let mut found = Vec::new();
+            let names: BTreeSet<&String> = agent.keys().chain(server.keys()).collect();
+            for name in names {
+                if agent.get(name) != server.get(name) {
+                    found.push((
+                        name.clone(),
+                        format!(
+                            "{}.{name}: agent {} vs server {}",
+                            spec.name,
+                            agent.get(name).map_or("(absent)".into(), Value::to_string),
+                            server.get(name).map_or("(absent)".into(), Value::to_string),
+                        ),
+                    ));
+                }
+            }
+            if agent_required != server_required {
+                found.push((
+                    "required".to_owned(),
+                    format!(
+                        "{} required: agent {agent_required:?} vs server {server_required:?}",
+                        spec.name
+                    ),
                 ));
             }
+            for (property, line) in found {
+                if let Some((_, _, why)) = SCHEMA_EXCEPTIONS
+                    .iter()
+                    .find(|(t, p, _)| *t == spec.name && *p == property)
+                {
+                    assert!(!why.is_empty());
+                    excepted.insert((spec.name.clone(), property));
+                } else {
+                    drift.push(line);
+                }
+            }
+        }
+        for (tool, property, why) in SCHEMA_EXCEPTIONS {
+            assert!(!why.is_empty(), "{tool}.{property} has no reason");
+            assert!(
+                excepted.contains(&((*tool).to_owned(), (*property).to_owned())),
+                "{tool}.{property} no longer differs; drop the exception"
+            );
         }
         assert!(
             drift.is_empty(),
@@ -1166,6 +1402,19 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn every_agent_property_is_described() {
+        let mut missing = Vec::new();
+        for spec in specs() {
+            for (name, schema) in spec.input_schema["properties"].as_object().unwrap() {
+                if schema["description"].as_str().is_none_or(str::is_empty) {
+                    missing.push(format!("{}.{name}", spec.name));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "undescribed: {missing:?}");
+    }
 
     #[test]
     fn specs_are_well_formed() {
