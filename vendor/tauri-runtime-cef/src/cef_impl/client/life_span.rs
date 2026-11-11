@@ -6,9 +6,9 @@ use std::sync::{Arc, mpsc::Sender};
 
 use cef::*;
 use tauri_runtime::{
-    UserEvent,
-    dpi::{LogicalPosition, LogicalSize},
-    window::WindowId,
+  UserEvent,
+  dpi::{LogicalPosition, LogicalSize},
+  window::WindowId,
 };
 use winit::event_loop::EventLoopProxy as WinitEventLoopProxy;
 

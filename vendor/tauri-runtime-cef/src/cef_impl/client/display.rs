@@ -73,15 +73,15 @@ wrap_display_handler! {
 }
 
 impl TauriCefDisplayHandler {
-    /// Whether a callback is about the browser this handler was made for.
-    /// A popup opened from this webview shares the client, so it reports here
-    /// too; until a browser is claimed nothing can be attributed, and the
-    /// callback counts as this webview's own.
-    fn is_own_browser(&self, browser: Option<&Browser>) -> bool {
-        use cef::ImplBrowser;
-        if !self.creation_delivered.claimed() {
-            return true;
-        }
-        browser.is_some_and(|browser| self.creation_delivered.matches(browser.identifier()))
+  /// Whether a callback is about the browser this handler was made for.
+  /// A popup opened from this webview shares the client, so it reports here
+  /// too; until a browser is claimed nothing can be attributed, and the
+  /// callback counts as this webview's own.
+  fn is_own_browser(&self, browser: Option<&Browser>) -> bool {
+    use cef::ImplBrowser;
+    if !self.creation_delivered.claimed() {
+      return true;
     }
+    browser.is_some_and(|browser| self.creation_delivered.matches(browser.identifier()))
+  }
 }

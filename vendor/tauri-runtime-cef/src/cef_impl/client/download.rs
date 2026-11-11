@@ -187,11 +187,12 @@ wrap_download_handler! {
 
 /// Chromium's name for why `item` was interrupted, without its prefix.
 fn interrupt_reason(item: &DownloadItem) -> String {
-    let reason = item.interrupt_reason();
-    let reason: &cef::sys::cef_download_interrupt_reason_t = reason.as_ref();
-    // The generated enum's debug form is the C name; the prefix says nothing.
-    let name = format!("{reason:?}");
-    name.strip_prefix("CEF_DOWNLOAD_INTERRUPT_REASON_")
-        .unwrap_or(&name)
-        .to_owned()
+  let reason = item.interrupt_reason();
+  let reason: &cef::sys::cef_download_interrupt_reason_t = reason.as_ref();
+  // The generated enum's debug form is the C name; the prefix says nothing.
+  let name = format!("{reason:?}");
+  name
+    .strip_prefix("CEF_DOWNLOAD_INTERRUPT_REASON_")
+    .unwrap_or(&name)
+    .to_owned()
 }

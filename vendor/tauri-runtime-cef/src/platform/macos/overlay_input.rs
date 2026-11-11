@@ -37,8 +37,8 @@ use objc2_foundation::NSPoint;
 /// What a chrome view lets through: presses inside a page rectangle, minus the
 /// overlay surfaces painted back over it.
 struct Passthrough {
-    holes: Vec<[f64; 4]>,
-    overlays: Vec<[f64; 5]>,
+  holes: Vec<[f64; 4]>,
+  overlays: Vec<[f64; 5]>,
 }
 
 /// Chrome views that currently pass presses through, by view pointer. A view is
@@ -53,132 +53,133 @@ static ORIGINALS: Mutex<Option<HashMap<usize, usize>>> = Mutex::new(None);
 type HitTest = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, NSPoint) -> *mut AnyObject;
 
 fn with_views<T>(f: impl FnOnce(&mut HashMap<usize, Passthrough>) -> T) -> T {
-    let mut guard = VIEWS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    f(guard.get_or_insert_with(HashMap::new))
+  let mut guard = VIEWS
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner);
+  f(guard.get_or_insert_with(HashMap::new))
 }
 
 fn with_originals<T>(f: impl FnOnce(&mut HashMap<usize, usize>) -> T) -> T {
-    let mut guard = ORIGINALS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    f(guard.get_or_insert_with(HashMap::new))
+  let mut guard = ORIGINALS
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner);
+  f(guard.get_or_insert_with(HashMap::new))
 }
 
 fn contains(x: f64, y: f64, rect: [f64; 4]) -> bool {
-    let [rx, ry, width, height] = rect;
-    x >= rx && y >= ry && x < rx + width && y < ry + height
+  let [rx, ry, width, height] = rect;
+  x >= rx && y >= ry && x < rx + width && y < ry + height
 }
 
 /// Presses over `holes`, outside every overlay surface, belong to the page.
 /// `holes` and `overlays` are the chrome's own logical, top-left coordinates,
 /// the same ones the mask is built from.
 pub(crate) fn set_passthrough(view: &NSView, holes: &[[f64; 4]], overlays: &[[f64; 5]]) {
-    patch(view.class());
-    let key = std::ptr::from_ref(view) as usize;
-    with_views(|views| {
-        views.insert(
-            key,
-            Passthrough {
-                holes: holes.to_vec(),
-                overlays: overlays.to_vec(),
-            },
-        );
-    });
+  patch(view.class());
+  let key = std::ptr::from_ref(view) as usize;
+  with_views(|views| {
+    views.insert(
+      key,
+      Passthrough {
+        holes: holes.to_vec(),
+        overlays: overlays.to_vec(),
+      },
+    );
+  });
 }
 
 /// Chrome owns every press over this view again.
 pub(crate) fn clear_passthrough(view: &NSView) {
-    let key = std::ptr::from_ref(view) as usize;
-    with_views(|views| views.remove(&key));
+  let key = std::ptr::from_ref(view) as usize;
+  with_views(|views| views.remove(&key));
 }
 
 /// The replacement `hitTest:`: nil inside a page hole, the original everywhere
 /// else. `point` is in the *superview's* coordinates, as `AppKit` defines it.
 extern "C-unwind" fn hit_test(this: *mut AnyObject, cmd: Sel, point: NSPoint) -> *mut AnyObject {
-    let key = this as usize;
-    let inside = with_views(|views| {
-        views.get(&key).map(|state| {
-            // SAFETY: the registry only ever holds `NSView`s, and `hitTest:` is
-            // called on the main thread with the receiver alive.
-            let view: &NSView = unsafe { &*this.cast::<NSView>() };
-            // SAFETY: reading the superview during hit testing is a main-thread
-            // AppKit call on a live view.
-            let superview = unsafe { view.superview() };
-            let local = view.convertPoint_fromView(point, superview.as_deref());
-            let bounds = view.bounds();
-            let x = local.x - bounds.origin.x;
-            // The rectangles are top-left, like the chrome's own layout.
-            let y = if view.isFlipped() {
-                local.y - bounds.origin.y
-            } else {
-                bounds.origin.y + bounds.size.height - local.y
-            };
-            state.holes.iter().any(|hole| contains(x, y, *hole))
-                && !state.overlays.iter().any(|[ox, oy, width, height, _]| {
-                    contains(x, y, [*ox, *oy, *width, *height])
-                })
-        })
-    });
-    if inside == Some(true) {
-        return std::ptr::null_mut();
-    }
-    original_for(this).map_or(std::ptr::null_mut(), |original| {
-        // SAFETY: the stored implementation is the `hitTest:` we replaced, so
-        // it has this signature and this receiver.
-        unsafe { original(this, cmd, point) }
+  let key = this as usize;
+  let inside = with_views(|views| {
+    views.get(&key).map(|state| {
+      // SAFETY: the registry only ever holds `NSView`s, and `hitTest:` is
+      // called on the main thread with the receiver alive.
+      let view: &NSView = unsafe { &*this.cast::<NSView>() };
+      // SAFETY: reading the superview during hit testing is a main-thread
+      // AppKit call on a live view.
+      let superview = unsafe { view.superview() };
+      let local = view.convertPoint_fromView(point, superview.as_deref());
+      let bounds = view.bounds();
+      let x = local.x - bounds.origin.x;
+      // The rectangles are top-left, like the chrome's own layout.
+      let y = if view.isFlipped() {
+        local.y - bounds.origin.y
+      } else {
+        bounds.origin.y + bounds.size.height - local.y
+      };
+      state.holes.iter().any(|hole| contains(x, y, *hole))
+        && !state
+          .overlays
+          .iter()
+          .any(|[ox, oy, width, height, _]| contains(x, y, [*ox, *oy, *width, *height]))
     })
+  });
+  if inside == Some(true) {
+    return std::ptr::null_mut();
+  }
+  original_for(this).map_or(std::ptr::null_mut(), |original| {
+    // SAFETY: the stored implementation is the `hitTest:` we replaced, so
+    // it has this signature and this receiver.
+    unsafe { original(this, cmd, point) }
+  })
 }
 
 /// The `hitTest:` that was in place before the receiver's class was patched.
 fn original_for(this: *mut AnyObject) -> Option<HitTest> {
-    // SAFETY: `hitTest:` is only ever dispatched to a live object.
-    let object = unsafe { this.as_ref() }?;
-    let mut class = Some(object.class());
-    while let Some(current) = class {
-        let key = std::ptr::from_ref::<AnyClass>(current) as usize;
-        if let Some(imp) = with_originals(|originals| originals.get(&key).copied()) {
-            // SAFETY: the value was stored as the `Imp` of `hitTest:`, whose
-            // signature is `HitTest`.
-            return Some(unsafe { std::mem::transmute::<usize, HitTest>(imp) });
-        }
-        class = current.superclass();
+  // SAFETY: `hitTest:` is only ever dispatched to a live object.
+  let object = unsafe { this.as_ref() }?;
+  let mut class = Some(object.class());
+  while let Some(current) = class {
+    let key = std::ptr::from_ref::<AnyClass>(current) as usize;
+    if let Some(imp) = with_originals(|originals| originals.get(&key).copied()) {
+      // SAFETY: the value was stored as the `Imp` of `hitTest:`, whose
+      // signature is `HitTest`.
+      return Some(unsafe { std::mem::transmute::<usize, HitTest>(imp) });
     }
-    None
+    class = current.superclass();
+  }
+  None
 }
 
 fn patch(class: &AnyClass) {
-    let key = std::ptr::from_ref::<AnyClass>(class) as usize;
-    let fresh = with_originals(|originals| {
-        if originals.contains_key(&key) {
-            return false;
-        }
-        // `instance_method` walks the superclasses, so this is the
-        // implementation that would have run -- ours goes on `class` alone.
-        let Some(method) = class.instance_method(sel!(hitTest:)) else {
-            return false;
-        };
-        originals.insert(key, method.implementation() as usize);
-        true
-    });
-    if !fresh {
-        return;
+  let key = std::ptr::from_ref::<AnyClass>(class) as usize;
+  let fresh = with_originals(|originals| {
+    if originals.contains_key(&key) {
+      return false;
     }
-    // SAFETY: an `extern "C-unwind"` function with the `self, _cmd` prologue is
-    // what an `Imp` is; this one has `hitTest:`'s own signature.
-    let imp: Imp = unsafe { std::mem::transmute::<HitTest, Imp>(hit_test) };
-    // SAFETY: replacing a method on a live class with one of the same signature.
-    unsafe {
-        objc2::ffi::class_replaceMethod(
-            std::ptr::from_ref::<AnyClass>(class).cast_mut(),
-            sel!(hitTest:),
-            imp,
-            c"@@:{CGPoint=dd}".as_ptr(),
-        );
-    }
-    log::info!(
-        "overlay hit testing patched for view class {}",
-        class.name().to_string_lossy()
+    // `instance_method` walks the superclasses, so this is the
+    // implementation that would have run -- ours goes on `class` alone.
+    let Some(method) = class.instance_method(sel!(hitTest:)) else {
+      return false;
+    };
+    originals.insert(key, method.implementation() as usize);
+    true
+  });
+  if !fresh {
+    return;
+  }
+  // SAFETY: an `extern "C-unwind"` function with the `self, _cmd` prologue is
+  // what an `Imp` is; this one has `hitTest:`'s own signature.
+  let imp: Imp = unsafe { std::mem::transmute::<HitTest, Imp>(hit_test) };
+  // SAFETY: replacing a method on a live class with one of the same signature.
+  unsafe {
+    objc2::ffi::class_replaceMethod(
+      std::ptr::from_ref::<AnyClass>(class).cast_mut(),
+      sel!(hitTest:),
+      imp,
+      c"@@:{CGPoint=dd}".as_ptr(),
     );
+  }
+  log::info!(
+    "overlay hit testing patched for view class {}",
+    class.name().to_string_lossy()
+  );
 }

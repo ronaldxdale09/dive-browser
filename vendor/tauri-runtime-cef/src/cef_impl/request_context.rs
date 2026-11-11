@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-    fs::create_dir_all,
-    path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration,
+  fs::create_dir_all,
+  path::{Component, Path, PathBuf},
+  sync::{Arc, Mutex},
+  time::Duration,
 };
 
 use base64::Engine;
@@ -19,17 +19,17 @@ use crate::cef_impl::request_handler;
 
 #[inline]
 fn theme_to_color_variant(theme: Option<Theme>) -> ColorVariant {
-    match theme {
-        Some(Theme::Dark) => ColorVariant::DARK,
-        Some(Theme::Light) => ColorVariant::LIGHT,
-        _ => ColorVariant::SYSTEM,
-    }
+  match theme {
+    Some(Theme::Dark) => ColorVariant::DARK,
+    Some(Theme::Light) => ColorVariant::LIGHT,
+    _ => ColorVariant::SYSTEM,
+  }
 }
 
 pub(crate) fn apply_theme_scheme(request_context: Option<&RequestContext>, theme: Option<Theme>) {
-    if let Some(request_context) = request_context {
-        request_context.set_chrome_color_scheme(theme_to_color_variant(theme), 0);
-    }
+  if let Some(request_context) = request_context {
+    request_context.set_chrome_color_scheme(theme_to_color_variant(theme), 0);
+  }
 }
 
 /// Resolves a CEF-compatible cache path for a per-webview request context.
@@ -54,35 +54,35 @@ pub(crate) fn apply_theme_scheme(request_context: Option<&RequestContext>, theme
 ///   `data_directory` values produce distinct profiles, and the same value
 ///   maps to the same on-disk profile across runs.
 fn resolve_request_context_cache_path(global_cache_path: &Path, data_directory: &Path) -> PathBuf {
-    if data_directory.is_absolute() {
-        if data_directory.starts_with(global_cache_path) {
-            return data_directory.to_path_buf();
-        } else {
-            log::warn!(
-                "data directory is not a child of the global cache path, we will derive a profile hash from it"
-            );
-        }
-    } else if !data_directory
-        .components()
-        .any(|component| matches!(component, Component::ParentDir))
-    {
-        return global_cache_path.join(data_directory);
+  if data_directory.is_absolute() {
+    if data_directory.starts_with(global_cache_path) {
+      return data_directory.to_path_buf();
     } else {
-        log::warn!(
-            "data directory is a relative path with parent components, we will derive a profile hash from it"
-        );
+      log::warn!(
+        "data directory is not a child of the global cache path, we will derive a profile hash from it"
+      );
     }
-
-    let mut hasher = Sha256::new();
-    hasher.update(data_directory.as_os_str().as_encoded_bytes());
-    let hash = hasher.finalize();
-    let suffix = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16]);
-    let path = global_cache_path.join(format!("Profile-{suffix}"));
-    log::info!(
-        "derived profile hash from data directory: {suffix}, cache path: {}",
-        path.display()
+  } else if !data_directory
+    .components()
+    .any(|component| matches!(component, Component::ParentDir))
+  {
+    return global_cache_path.join(data_directory);
+  } else {
+    log::warn!(
+      "data directory is a relative path with parent components, we will derive a profile hash from it"
     );
-    path
+  }
+
+  let mut hasher = Sha256::new();
+  hasher.update(data_directory.as_os_str().as_encoded_bytes());
+  let hash = hasher.finalize();
+  let suffix = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16]);
+  let path = global_cache_path.join(format!("Profile-{suffix}"));
+  log::info!(
+    "derived profile hash from data directory: {suffix}, cache path: {}",
+    path.display()
+  );
+  path
 }
 
 /// Continuation invoked on the CEF UI thread once the request context's
@@ -141,51 +141,51 @@ wrap_request_context_handler! {
 /// Applies a fixed-server proxy to a request context via the Chromium `proxy`
 /// preference. Must be called after the request context has initialized.
 fn apply_proxy(request_context: &RequestContext, proxy_url: &url::Url) {
-    use cef::{ImplDictionaryValue, ImplValue};
+  use cef::{ImplDictionaryValue, ImplValue};
 
-    let scheme = match proxy_url.scheme() {
-        "socks5" | "socks5h" => "socks5",
-        "socks4" | "socks4a" => "socks4",
-        "https" => "https",
-        _ => "http",
-    };
-    let Some(host) = proxy_url.host_str() else {
-        log::warn!("ignoring proxy URL without a host: {proxy_url}");
-        return;
-    };
-    let server = match proxy_url.port_or_known_default() {
-        Some(port) => format!("{scheme}://{host}:{port}"),
-        None => format!("{scheme}://{host}"),
-    };
+  let scheme = match proxy_url.scheme() {
+    "socks5" | "socks5h" => "socks5",
+    "socks4" | "socks4a" => "socks4",
+    "https" => "https",
+    _ => "http",
+  };
+  let Some(host) = proxy_url.host_str() else {
+    log::warn!("ignoring proxy URL without a host: {proxy_url}");
+    return;
+  };
+  let server = match proxy_url.port_or_known_default() {
+    Some(port) => format!("{scheme}://{host}:{port}"),
+    None => format!("{scheme}://{host}"),
+  };
 
-    let pref_name = "proxy";
-    if request_context.can_set_preference(Some(&pref_name.into())) != 1 {
-        log::warn!("the CEF request context does not allow setting the proxy preference");
-        return;
-    }
+  let pref_name = "proxy";
+  if request_context.can_set_preference(Some(&pref_name.into())) != 1 {
+    log::warn!("the CEF request context does not allow setting the proxy preference");
+    return;
+  }
 
-    // Build `{ "mode": "fixed_servers", "server": "<scheme>://<host>:<port>" }`.
-    let Some(dict) = cef::dictionary_value_create() else {
-        return;
-    };
-    dict.set_string(Some(&"mode".into()), Some(&"fixed_servers".into()));
-    dict.set_string(Some(&"server".into()), Some(&server.as_str().into()));
+  // Build `{ "mode": "fixed_servers", "server": "<scheme>://<host>:<port>" }`.
+  let Some(dict) = cef::dictionary_value_create() else {
+    return;
+  };
+  dict.set_string(Some(&"mode".into()), Some(&"fixed_servers".into()));
+  dict.set_string(Some(&"server".into()), Some(&server.as_str().into()));
 
-    let Some(value) = cef::value_create() else {
-        return;
-    };
-    let mut dict = dict;
-    value.set_dictionary(Some(&mut dict));
+  let Some(value) = cef::value_create() else {
+    return;
+  };
+  let mut dict = dict;
+  value.set_dictionary(Some(&mut dict));
 
-    let mut value = value;
-    // A null error pointer makes CEF refuse the write; see
-    // `disable_builtin_autofill`.
-    let mut error = CefString::from("");
-    if request_context.set_preference(Some(&pref_name.into()), Some(&mut value), Some(&mut error))
-        != 1
-    {
-        log::error!("failed to apply the proxy preference to the CEF request context: {error}");
-    }
+  let mut value = value;
+  // A null error pointer makes CEF refuse the write; see
+  // `disable_builtin_autofill`.
+  let mut error = CefString::from("");
+  if request_context.set_preference(Some(&pref_name.into()), Some(&mut value), Some(&mut error))
+    != 1
+  {
+    log::error!("failed to apply the proxy preference to the CEF request context: {error}");
+  }
 }
 
 /// Turns off Chromium's own form autocomplete and address/card autofill for a
@@ -194,100 +194,97 @@ fn apply_proxy(request_context: &RequestContext, proxy_url: &url::Url) {
 /// cannot be styled, and does not take clicks reliably while the embedder's
 /// overlays are up. (CEF registers no password-manager preferences.)
 fn disable_builtin_autofill(request_context: &RequestContext) {
-    use cef::ImplValue;
+  use cef::ImplValue;
 
-    for name in ["autofill.profile_enabled", "autofill.credit_card_enabled"] {
-        if request_context.can_set_preference(Some(&name.into())) != 1 {
-            continue;
-        }
-        let Some(mut value) = cef::value_create() else {
-            return;
-        };
-        value.set_bool(0);
-        // The error is a required out-parameter: a null string pointer makes
-        // CEF refuse the write outright.
-        let mut error = CefString::from("");
-        if request_context.set_preference(Some(&name.into()), Some(&mut value), Some(&mut error))
-            != 1
-        {
-            log::warn!("could not turn off the {name} preference: {error}");
-        }
+  for name in ["autofill.profile_enabled", "autofill.credit_card_enabled"] {
+    if request_context.can_set_preference(Some(&name.into())) != 1 {
+      continue;
     }
+    let Some(mut value) = cef::value_create() else {
+      return;
+    };
+    value.set_bool(0);
+    // The error is a required out-parameter: a null string pointer makes
+    // CEF refuse the write outright.
+    let mut error = CefString::from("");
+    if request_context.set_preference(Some(&name.into()), Some(&mut value), Some(&mut error)) != 1 {
+      log::warn!("could not turn off the {name} preference: {error}");
+    }
+  }
 }
 
 pub(crate) fn request_context_from_webview_attributes<'a>(
-    global_cache_path: &Path,
-    webview_attributes: &WebviewAttributes,
-    custom_schemes: impl IntoIterator<Item = &'a String>,
-    custom_protocol_scheme: &str,
-    scheme_registry: request_handler::SchemeRegistry,
-    on_initialized: RequestContextInitContinuation,
-    mut shared_incognito: Option<RequestContext>,
+  global_cache_path: &Path,
+  webview_attributes: &WebviewAttributes,
+  custom_schemes: impl IntoIterator<Item = &'a String>,
+  custom_protocol_scheme: &str,
+  scheme_registry: request_handler::SchemeRegistry,
+  on_initialized: RequestContextInitContinuation,
+  mut shared_incognito: Option<RequestContext>,
 ) -> Option<RequestContext> {
-    let cache_path = if webview_attributes.incognito {
-        CefStringUtf16::from("")
-    } else if let Some(data_directory) = &webview_attributes.data_directory {
-        let cache_path = resolve_request_context_cache_path(global_cache_path, data_directory);
-        if let Err(error) = create_dir_all(&cache_path) {
-            log::error!(
-                "failed to create request context cache directory {}: {error}",
-                cache_path.display()
-            );
-        }
-        CefStringUtf16::from(cache_path.to_string_lossy().as_ref())
-    } else {
-        let global_context =
-            request_context_get_global_context().expect("Failed to get global request context");
-        // global_cache_path does not work here - global_context.cache_path() returns the proper profile path.
-        (&global_context.cache_path()).into()
-    };
-
-    let settings = RequestContextSettings {
-        cache_path,
-        ..Default::default()
-    };
-
-    // Runtime pending ownership retains the context. The handler must not own a
-    // context holder: context -> handler -> holder -> context is a cycle when
-    // initialization is canceled or never arrives.
-    let proxy_url = webview_attributes.proxy_url.clone();
-    let wrapped_callback: RequestContextInitContinuation = Box::new({
-        move |rc| {
-            // The proxy preference can only be set once the request context's
-            // underlying profile has finished initializing, which is exactly what
-            // this continuation signals.
-            if let (Some(rc), Some(proxy_url)) = (rc.as_ref(), proxy_url.as_ref()) {
-                apply_proxy(rc, proxy_url);
-            }
-            if let Some(rc) = rc.as_ref() {
-                disable_builtin_autofill(rc);
-            }
-            on_initialized(rc);
-        }
-    });
-
-    let mut handler =
-        WebviewRequestContextHandler::new(Arc::new(Mutex::new(Some(wrapped_callback))));
-    let request_context = if let Some(other) = shared_incognito.as_mut() {
-        // CEF shares the underlying in-memory storage while each view retains its
-        // own handler and asynchronous initialization continuation.
-        request_context_cef_create_context_shared(Some(other), Some(&mut handler))
-    } else {
-        request_context_create_context(Some(&settings), Some(&mut handler))
-    };
-
-    if let Some(request_context) = request_context.as_ref() {
-        for scheme in custom_schemes {
-            request_context.register_scheme_handler_factory(
-                Some(&custom_protocol_scheme.into()),
-                Some(&format!("{scheme}.localhost").as_str().into()),
-                Some(&mut request_handler::UriSchemeHandlerFactory::new(
-                    scheme_registry.clone(),
-                    scheme.clone(),
-                )),
-            );
-        }
+  let cache_path = if webview_attributes.incognito {
+    CefStringUtf16::from("")
+  } else if let Some(data_directory) = &webview_attributes.data_directory {
+    let cache_path = resolve_request_context_cache_path(global_cache_path, data_directory);
+    if let Err(error) = create_dir_all(&cache_path) {
+      log::error!(
+        "failed to create request context cache directory {}: {error}",
+        cache_path.display()
+      );
     }
+    CefStringUtf16::from(cache_path.to_string_lossy().as_ref())
+  } else {
+    let global_context =
+      request_context_get_global_context().expect("Failed to get global request context");
+    // global_cache_path does not work here - global_context.cache_path() returns the proper profile path.
+    (&global_context.cache_path()).into()
+  };
 
-    request_context
+  let settings = RequestContextSettings {
+    cache_path,
+    ..Default::default()
+  };
+
+  // Runtime pending ownership retains the context. The handler must not own a
+  // context holder: context -> handler -> holder -> context is a cycle when
+  // initialization is canceled or never arrives.
+  let proxy_url = webview_attributes.proxy_url.clone();
+  let wrapped_callback: RequestContextInitContinuation = Box::new({
+    move |rc| {
+      // The proxy preference can only be set once the request context's
+      // underlying profile has finished initializing, which is exactly what
+      // this continuation signals.
+      if let (Some(rc), Some(proxy_url)) = (rc.as_ref(), proxy_url.as_ref()) {
+        apply_proxy(rc, proxy_url);
+      }
+      if let Some(rc) = rc.as_ref() {
+        disable_builtin_autofill(rc);
+      }
+      on_initialized(rc);
+    }
+  });
+
+  let mut handler = WebviewRequestContextHandler::new(Arc::new(Mutex::new(Some(wrapped_callback))));
+  let request_context = if let Some(other) = shared_incognito.as_mut() {
+    // CEF shares the underlying in-memory storage while each view retains its
+    // own handler and asynchronous initialization continuation.
+    request_context_cef_create_context_shared(Some(other), Some(&mut handler))
+  } else {
+    request_context_create_context(Some(&settings), Some(&mut handler))
+  };
+
+  if let Some(request_context) = request_context.as_ref() {
+    for scheme in custom_schemes {
+      request_context.register_scheme_handler_factory(
+        Some(&custom_protocol_scheme.into()),
+        Some(&format!("{scheme}.localhost").as_str().into()),
+        Some(&mut request_handler::UriSchemeHandlerFactory::new(
+          scheme_registry.clone(),
+          scheme.clone(),
+        )),
+      );
+    }
+  }
+
+  request_context
 }

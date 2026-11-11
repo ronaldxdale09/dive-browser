@@ -14,64 +14,64 @@ use cef::*;
 /// What the person chose, with the page state the choice was made on.
 #[derive(Debug, Clone)]
 pub struct ContextMenuCommand {
-    pub action: ContextMenuAction,
-    pub page_url: String,
-    pub link_url: String,
-    pub source_url: String,
-    pub selection: String,
+  pub action: ContextMenuAction,
+  pub page_url: String,
+  pub link_url: String,
+  pub source_url: String,
+  pub selection: String,
 }
 
 /// Items the application carries out; CEF handles navigation, print, view
 /// source and the editing commands on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuAction {
-    OpenLinkInNewTab,
-    CopyLink,
-    OpenImageInNewTab,
-    SaveImage,
-    CopyImageAddress,
-    SearchSelection,
-    SavePage,
-    CaptureFullPage,
-    QrCode,
-    AskAgent,
-    DeviceSimulator,
-    ViewSource,
-    Inspect,
-    /// Not a menu item: a middle click or a modifier click on a link, which
-    /// Chromium reports as a request to open the address in a background tab.
-    OpenLinkInBackgroundTab,
+  OpenLinkInNewTab,
+  CopyLink,
+  OpenImageInNewTab,
+  SaveImage,
+  CopyImageAddress,
+  SearchSelection,
+  SavePage,
+  CaptureFullPage,
+  QrCode,
+  AskAgent,
+  DeviceSimulator,
+  ViewSource,
+  Inspect,
+  /// Not a menu item: a middle click or a modifier click on a link, which
+  /// Chromium reports as a request to open the address in a background tab.
+  OpenLinkInBackgroundTab,
 }
 
 impl ContextMenuAction {
-    const ALL: [Self; 13] = [
-        Self::OpenLinkInNewTab,
-        Self::CopyLink,
-        Self::OpenImageInNewTab,
-        Self::SaveImage,
-        Self::CopyImageAddress,
-        Self::SearchSelection,
-        Self::SavePage,
-        Self::CaptureFullPage,
-        Self::QrCode,
-        Self::AskAgent,
-        Self::DeviceSimulator,
-        Self::ViewSource,
-        Self::Inspect,
-    ];
+  const ALL: [Self; 13] = [
+    Self::OpenLinkInNewTab,
+    Self::CopyLink,
+    Self::OpenImageInNewTab,
+    Self::SaveImage,
+    Self::CopyImageAddress,
+    Self::SearchSelection,
+    Self::SavePage,
+    Self::CaptureFullPage,
+    Self::QrCode,
+    Self::AskAgent,
+    Self::DeviceSimulator,
+    Self::ViewSource,
+    Self::Inspect,
+  ];
 
-    fn id(self) -> i32 {
-        // MENU_ID_USER_FIRST: ids below it belong to CEF's own commands.
-        let first = cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32;
-        first + Self::ALL.iter().position(|a| *a == self).unwrap_or(0) as i32
-    }
+  fn id(self) -> i32 {
+    // MENU_ID_USER_FIRST: ids below it belong to CEF's own commands.
+    let first = cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32;
+    first + Self::ALL.iter().position(|a| *a == self).unwrap_or(0) as i32
+  }
 
-    fn from_id(id: i32) -> Option<Self> {
-        let first = cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32;
-        usize::try_from(id - first)
-            .ok()
-            .and_then(|i| Self::ALL.get(i).copied())
-    }
+  fn from_id(id: i32) -> Option<Self> {
+    let first = cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32;
+    usize::try_from(id - first)
+      .ok()
+      .and_then(|i| Self::ALL.get(i).copied())
+  }
 }
 
 type Handler = Arc<dyn Fn(ContextMenuCommand) + Send + Sync>;
@@ -80,36 +80,34 @@ type Handler = Arc<dyn Fn(ContextMenuCommand) + Send + Sync>;
 /// should handle it: a middle click wants a background tab, a shift click a
 /// new window (a tab that takes focus here), and a plain click nothing.
 pub fn action_for(disposition: WindowOpenDisposition) -> Option<ContextMenuAction> {
-    match disposition {
-        WindowOpenDisposition::NEW_BACKGROUND_TAB => {
-            Some(ContextMenuAction::OpenLinkInBackgroundTab)
-        }
-        WindowOpenDisposition::NEW_FOREGROUND_TAB
-        | WindowOpenDisposition::NEW_WINDOW
-        | WindowOpenDisposition::NEW_POPUP => Some(ContextMenuAction::OpenLinkInNewTab),
-        _ => None,
-    }
+  match disposition {
+    WindowOpenDisposition::NEW_BACKGROUND_TAB => Some(ContextMenuAction::OpenLinkInBackgroundTab),
+    WindowOpenDisposition::NEW_FOREGROUND_TAB
+    | WindowOpenDisposition::NEW_WINDOW
+    | WindowOpenDisposition::NEW_POPUP => Some(ContextMenuAction::OpenLinkInNewTab),
+    _ => None,
+  }
 }
 
 /// What the application can offer from the menu right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextMenuOptions {
-    /// Whether "Ask the Agent" applies; a private window has no agent.
-    pub agent: bool,
-    /// Whether the page is in the window whose chrome carries out Capture
-    /// Full Page, the QR code and the Device Simulator. A page in a window
-    /// of its own has no such chrome, and offering them there acted on
-    /// whatever page the main window showed instead.
-    pub main_window: bool,
+  /// Whether "Ask the Agent" applies; a private window has no agent.
+  pub agent: bool,
+  /// Whether the page is in the window whose chrome carries out Capture
+  /// Full Page, the QR code and the Device Simulator. A page in a window
+  /// of its own has no such chrome, and offering them there acted on
+  /// whatever page the main window showed instead.
+  pub main_window: bool,
 }
 
 impl Default for ContextMenuOptions {
-    fn default() -> Self {
-        Self {
-            agent: true,
-            main_window: true,
-        }
+  fn default() -> Self {
+    Self {
+      agent: true,
+      main_window: true,
     }
+  }
 }
 
 /// Where the application's handler for a webview's menu choices lives.
@@ -120,86 +118,86 @@ impl Default for ContextMenuOptions {
 /// that waits on the application's event loop (opening a tab does) never
 /// returns. Dismissal comes once that loop has unwound.
 pub struct ContextMenuBridge {
-    handler: Mutex<Option<Handler>>,
-    pending: Mutex<Option<ContextMenuCommand>>,
-    options: Mutex<ContextMenuOptions>,
+  handler: Mutex<Option<Handler>>,
+  pending: Mutex<Option<ContextMenuCommand>>,
+  options: Mutex<ContextMenuOptions>,
 }
 
 impl ContextMenuBridge {
-    pub fn install(&self, handler: Handler) {
-        *self.handler.lock().unwrap() = Some(handler);
-    }
+  pub fn install(&self, handler: Handler) {
+    *self.handler.lock().unwrap() = Some(handler);
+  }
 
-    /// Hand a command to the application from a CEF callback. The handler
-    /// runs on its own thread: it waits for the main thread, and this is the
-    /// main thread inside a CEF callback, so running it here would deadlock
-    /// (the menu path has the same shape and the same hand-off).
-    pub fn dispatch(&self, command: ContextMenuCommand) -> bool {
-        let handler = self.handler.lock().unwrap().clone();
-        match handler {
-            Some(handler) => {
-                std::thread::spawn(move || handler(command));
-                true
-            }
-            None => false,
-        }
+  /// Hand a command to the application from a CEF callback. The handler
+  /// runs on its own thread: it waits for the main thread, and this is the
+  /// main thread inside a CEF callback, so running it here would deadlock
+  /// (the menu path has the same shape and the same hand-off).
+  pub fn dispatch(&self, command: ContextMenuCommand) -> bool {
+    let handler = self.handler.lock().unwrap().clone();
+    match handler {
+      Some(handler) => {
+        std::thread::spawn(move || handler(command));
+        true
+      }
+      None => false,
     }
+  }
 
-    pub fn set_options(&self, options: ContextMenuOptions) {
-        *self.options.lock().unwrap() = options;
-    }
+  pub fn set_options(&self, options: ContextMenuOptions) {
+    *self.options.lock().unwrap() = options;
+  }
 
-    pub fn options(&self) -> ContextMenuOptions {
-        *self.options.lock().unwrap()
-    }
+  pub fn options(&self) -> ContextMenuOptions {
+    *self.options.lock().unwrap()
+  }
 
-    fn installed(&self) -> bool {
-        self.handler.lock().unwrap().is_some()
-    }
+  fn installed(&self) -> bool {
+    self.handler.lock().unwrap().is_some()
+  }
 
-    fn hold(&self, command: ContextMenuCommand) {
-        *self.pending.lock().unwrap() = Some(command);
-    }
+  fn hold(&self, command: ContextMenuCommand) {
+    *self.pending.lock().unwrap() = Some(command);
+  }
 
-    fn release(&self) {
-        let Some(command) = self.pending.lock().unwrap().take() else {
-            return;
-        };
-        let handler = self.handler.lock().unwrap().clone();
-        if let Some(handler) = handler {
-            // Off this thread and after a beat: the dismissal itself can
-            // still arrive on the way out of the menu's loop.
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                handler(command);
-            });
-        }
+  fn release(&self) {
+    let Some(command) = self.pending.lock().unwrap().take() else {
+      return;
+    };
+    let handler = self.handler.lock().unwrap().clone();
+    if let Some(handler) = handler {
+      // Off this thread and after a beat: the dismissal itself can
+      // still arrive on the way out of the menu's loop.
+      std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        handler(command);
+      });
     }
+  }
 }
 
 fn text(s: CefStringUserfree) -> String {
-    CefString::from(&s).to_string()
+  CefString::from(&s).to_string()
 }
 
 fn item(model: &MenuModel, action: ContextMenuAction, label: &str) {
-    model.add_item(action.id(), Some(&CefString::from(label)));
+  model.add_item(action.id(), Some(&CefString::from(label)));
 }
 
 fn native(model: &MenuModel, id: MenuId, label: &str, enabled: bool) {
-    let id = cef::sys::cef_menu_id_t::from(id) as i32;
-    model.add_item(id, Some(&CefString::from(label)));
-    model.set_enabled(id, i32::from(enabled));
+  let id = cef::sys::cef_menu_id_t::from(id) as i32;
+  model.add_item(id, Some(&CefString::from(label)));
+  model.set_enabled(id, i32::from(enabled));
 }
 
 /// Shorten a selection for a menu label.
 fn quoted(selection: &str) -> String {
-    let flat: String = selection.split_whitespace().collect::<Vec<_>>().join(" ");
-    let short: String = flat.chars().take(32).collect();
-    if short.len() < flat.len() {
-        format!("“{short}…”")
-    } else {
-        format!("“{short}”")
-    }
+  let flat: String = selection.split_whitespace().collect::<Vec<_>>().join(" ");
+  let short: String = flat.chars().take(32).collect();
+  if short.len() < flat.len() {
+    format!("“{short}…”")
+  } else {
+    format!("“{short}”")
+  }
 }
 
 wrap_context_menu_handler! {
@@ -315,63 +313,63 @@ wrap_context_menu_handler! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+  use super::*;
 
-    #[test]
-    fn options_default_to_everything_and_take_what_the_app_sets() {
-        let bridge = ContextMenuBridge::default();
-        assert!(bridge.options().agent);
-        assert!(bridge.options().main_window);
-        bridge.set_options(ContextMenuOptions {
-            agent: false,
-            main_window: false,
-        });
-        assert!(!bridge.options().agent);
-        assert!(!bridge.options().main_window);
-    }
+  #[test]
+  fn options_default_to_everything_and_take_what_the_app_sets() {
+    let bridge = ContextMenuBridge::default();
+    assert!(bridge.options().agent);
+    assert!(bridge.options().main_window);
+    bridge.set_options(ContextMenuOptions {
+      agent: false,
+      main_window: false,
+    });
+    assert!(!bridge.options().agent);
+    assert!(!bridge.options().main_window);
+  }
 
-    #[test]
-    fn every_action_the_menu_offers_has_an_id_of_its_own() {
-        // Two actions sharing an id would silently run the wrong one, and the
-        // ids are positions in ALL -- so adding an item in the middle has to
-        // keep them distinct.
-        let mut ids: Vec<i32> = ContextMenuAction::ALL.iter().map(|a| a.id()).collect();
-        let total = ids.len();
-        ids.sort_unstable();
-        ids.dedup();
-        assert_eq!(ids.len(), total, "two menu actions share an id");
-        assert!(ContextMenuAction::ALL.contains(&ContextMenuAction::CaptureFullPage));
-    }
+  #[test]
+  fn every_action_the_menu_offers_has_an_id_of_its_own() {
+    // Two actions sharing an id would silently run the wrong one, and the
+    // ids are positions in ALL -- so adding an item in the middle has to
+    // keep them distinct.
+    let mut ids: Vec<i32> = ContextMenuAction::ALL.iter().map(|a| a.id()).collect();
+    let total = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), total, "two menu actions share an id");
+    assert!(ContextMenuAction::ALL.contains(&ContextMenuAction::CaptureFullPage));
+  }
 
-    #[test]
-    fn action_ids_round_trip_above_the_user_range() {
-        for action in ContextMenuAction::ALL {
-            assert_eq!(ContextMenuAction::from_id(action.id()), Some(action));
-            assert!(action.id() >= cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32);
-        }
-        assert_eq!(ContextMenuAction::from_id(1), None);
+  #[test]
+  fn action_ids_round_trip_above_the_user_range() {
+    for action in ContextMenuAction::ALL {
+      assert_eq!(ContextMenuAction::from_id(action.id()), Some(action));
+      assert!(action.id() >= cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32);
     }
+    assert_eq!(ContextMenuAction::from_id(1), None);
+  }
 }
 
 #[cfg(test)]
 mod disposition_tests {
-    use super::*;
+  use super::*;
 
-    #[test]
-    fn dispositions_map_to_background_or_foreground_tabs() {
-        assert_eq!(
-            action_for(WindowOpenDisposition::NEW_BACKGROUND_TAB),
-            Some(ContextMenuAction::OpenLinkInBackgroundTab)
-        );
-        assert_eq!(
-            action_for(WindowOpenDisposition::NEW_FOREGROUND_TAB),
-            Some(ContextMenuAction::OpenLinkInNewTab)
-        );
-        assert_eq!(
-            action_for(WindowOpenDisposition::NEW_WINDOW),
-            Some(ContextMenuAction::OpenLinkInNewTab)
-        );
-        assert_eq!(action_for(WindowOpenDisposition::CURRENT_TAB), None);
-        assert_eq!(action_for(WindowOpenDisposition::SAVE_TO_DISK), None);
-    }
+  #[test]
+  fn dispositions_map_to_background_or_foreground_tabs() {
+    assert_eq!(
+      action_for(WindowOpenDisposition::NEW_BACKGROUND_TAB),
+      Some(ContextMenuAction::OpenLinkInBackgroundTab)
+    );
+    assert_eq!(
+      action_for(WindowOpenDisposition::NEW_FOREGROUND_TAB),
+      Some(ContextMenuAction::OpenLinkInNewTab)
+    );
+    assert_eq!(
+      action_for(WindowOpenDisposition::NEW_WINDOW),
+      Some(ContextMenuAction::OpenLinkInNewTab)
+    );
+    assert_eq!(action_for(WindowOpenDisposition::CURRENT_TAB), None);
+    assert_eq!(action_for(WindowOpenDisposition::SAVE_TO_DISK), None);
+  }
 }
