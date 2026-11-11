@@ -3,7 +3,7 @@
 //! Not sync -- there is no server here and no account -- but the thing sync
 //! is usually wanted for: getting a browser's life onto another machine, or
 //! back after a reinstall. One JSON file holds bookmarks, history, form
-//! entries, preferences and the open tabs of every workspace; restoring
+//! entries, preferences and the open tabs of every workspace in the profile; restoring
 //! merges it into the profile rather than replacing it, so importing the same
 //! file twice leaves one of everything.
 //!
@@ -108,10 +108,16 @@ pub struct RestoreSummary {
 
 /// Gather everything worth keeping from the active profile.
 pub fn export(state: &AppState) -> AppResult<Backup> {
-    let store = lock(&state.store);
-    let profile = crate::commands::active_profile(&store, *lock(&state.active_workspace))?;
+    export_from(&lock(&state.store))
+}
+
+/// Everything worth keeping from the profile the store is scoped to: the
+/// same profile its history and bookmarks are read for, so every section
+/// of the file describes one profile.
+pub(crate) fn export_from(store: &Store) -> AppResult<Backup> {
+    let profile = scoped_profile(store)?;
     let workspaces = store
-        .workspaces()?
+        .workspaces_for_profile(profile)?
         .into_iter()
         .map(|workspace| {
             let tabs = store
@@ -158,7 +164,7 @@ pub fn export(state: &AppState) -> AppResult<Backup> {
             })
             .collect(),
         form_entries: store
-            .form_entries(profile.id)?
+            .form_entries(profile)?
             .into_iter()
             .map(|entry| BackupFormEntry {
                 origin: entry.origin,
@@ -317,8 +323,8 @@ pub fn restore(
 
     // A handful of workspaces and their tabs: one hold is short enough.
     let store = lock(store);
-    let known: std::collections::HashSet<String> = store
-        .workspaces()?
+    let mut known: std::collections::HashSet<String> = store
+        .workspaces_for_profile(profile)?
         .into_iter()
         .map(|workspace| workspace.name)
         .collect();
@@ -338,6 +344,7 @@ pub fn restore(
         created.color.clone_from(&workspace.color);
         created.icon.clone_from(&workspace.icon);
         store.upsert_workspace(&created)?;
+        known.insert(workspace.name.clone());
         summary.workspaces += 1;
         for (index, tab) in workspace.tabs.iter().enumerate() {
             if !is_keepable(&tab.url) {
@@ -506,5 +513,111 @@ mod tests {
         };
         let text = serde_json::to_string(&backup).unwrap();
         assert_eq!(parse(&text).unwrap(), backup);
+    }
+
+    fn two_profiles() -> (Store, dive_core::Profile, dive_core::Profile) {
+        let store = Store::in_memory().unwrap();
+        let a = store.ensure_default_profile().unwrap();
+        let container = dive_core::Container::new("Other");
+        store.upsert_container(&container).unwrap();
+        let b = dive_core::Profile::new("Other", container.id, 1);
+        store.upsert_profile(&b).unwrap();
+        (store, a, b)
+    }
+
+    fn empty_backup(workspaces: Vec<BackupWorkspace>) -> Backup {
+        Backup {
+            version: VERSION,
+            exported_at: "2026-09-15T00:00:00Z".into(),
+            app_version: "0.1.26".into(),
+            preferences: None,
+            bookmarks: vec![],
+            history: vec![],
+            form_entries: vec![],
+            workspaces,
+        }
+    }
+
+    fn named(name: &str) -> BackupWorkspace {
+        BackupWorkspace {
+            name: name.into(),
+            color: "#fff".into(),
+            icon: "briefcase".into(),
+            tabs: vec![],
+        }
+    }
+
+    #[test]
+    fn a_backup_holds_only_the_active_profiles_workspaces() {
+        let (store, a, b) = two_profiles();
+        let home = Workspace::new("Home", a.container_id, a.id, 0);
+        let work = Workspace::new("Work", b.container_id, b.id, 0);
+        store.upsert_workspace(&home).unwrap();
+        store.upsert_workspace(&work).unwrap();
+        store
+            .upsert_tab(&Tab::new(home.id, "https://a.example/", 0))
+            .unwrap();
+        store
+            .upsert_tab(&Tab::new(work.id, "https://b.example/", 0))
+            .unwrap();
+
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &home.id.to_string())
+            .unwrap();
+        let exported = export_from(&store).unwrap();
+        assert_eq!(exported.workspaces.len(), 1);
+        assert_eq!(exported.workspaces[0].name, "Home");
+        assert_eq!(exported.workspaces[0].tabs.len(), 1);
+        assert_eq!(exported.workspaces[0].tabs[0].url, "https://a.example/");
+
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &work.id.to_string())
+            .unwrap();
+        let exported = export_from(&store).unwrap();
+        assert_eq!(exported.workspaces.len(), 1);
+        assert_eq!(exported.workspaces[0].name, "Work");
+    }
+
+    #[test]
+    fn restore_skips_only_names_the_target_profile_already_has() {
+        let (store, a, b) = two_profiles();
+        let main = Workspace::new("Main", a.container_id, a.id, 0);
+        let other_home = Workspace::new("Home", b.container_id, b.id, 0);
+        store.upsert_workspace(&main).unwrap();
+        store.upsert_workspace(&other_home).unwrap();
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &main.id.to_string())
+            .unwrap();
+        let store = Mutex::new(store);
+        let backup = empty_backup(vec![named("Home"), named("Main")]);
+        let summary = restore(&store, a.id, &backup).unwrap();
+        assert_eq!(summary.workspaces, 1);
+        let store = lock(&store);
+        let mut names: Vec<String> = store
+            .workspaces_for_profile(a.id)
+            .unwrap()
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["Home", "Main"]);
+        let theirs = store.workspaces_for_profile(b.id).unwrap();
+        assert_eq!(theirs.len(), 1);
+        assert_eq!(theirs[0].name, "Home");
+    }
+
+    #[test]
+    fn a_name_listed_twice_in_a_file_is_created_once() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let home = Workspace::new("Home", profile.container_id, profile.id, 0);
+        store.upsert_workspace(&home).unwrap();
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &home.id.to_string())
+            .unwrap();
+        let store = Mutex::new(store);
+        let backup = empty_backup(vec![named("Dup"), named("Dup")]);
+        let summary = restore(&store, profile.id, &backup).unwrap();
+        assert_eq!(summary.workspaces, 1);
     }
 }
