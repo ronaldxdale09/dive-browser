@@ -1,11 +1,14 @@
 //! Asking the OS whether the person at the keyboard is the owner, before a
-//! saved password is shown, copied or exported.
+//! saved password is shown, copied or exported, or a saved card number is
+//! filled into a page.
 //!
 //! An unlocked, unattended Mac used to hand every saved password to whoever
 //! opened Settings. On macOS the check is `LocalAuthentication`'s device-owner
 //! policy: Touch ID, or the login password when there is no sensor. Once it
 //! passes, the next minute of reveals goes through without asking again, the
 //! way Chrome and Safari do it, so showing three passwords is one prompt.
+//! Checked: reveal and copy (60 s grace), card number fill (60 s grace), and
+//! password export (always asks: one reveal is not consent to a full dump).
 //!
 //! Windows has no check here yet: Windows Hello and the credential prompt
 //! both need Windows crate features this build does not compile, so the
@@ -45,7 +48,23 @@ fn remember(now: Instant) {
 /// `Ok(false)` when the person cancelled, and an error when the check
 /// failed or could not run.
 pub fn confirm(reason: &str) -> AppResult<bool> {
-    if within_grace(Instant::now()) {
+    confirm_with(reason, true)
+}
+
+/// [`confirm`], ignoring the grace period: for an action that hands over
+/// every secret at once, one recent reveal is not consent to it.
+pub fn confirm_fresh(reason: &str) -> AppResult<bool> {
+    confirm_with(reason, false)
+}
+
+/// Whether the OS must be asked: always without grace, otherwise unless a
+/// check passed within the grace period before `now`.
+fn needs_prompt(use_grace: bool, now: Instant) -> bool {
+    !(use_grace && within_grace(now))
+}
+
+fn confirm_with(reason: &str, use_grace: bool) -> AppResult<bool> {
+    if !needs_prompt(use_grace, Instant::now()) {
         return Ok(true);
     }
     let confirmed = platform::confirm(reason)?;
@@ -58,6 +77,13 @@ pub fn confirm(reason: &str) -> AppResult<bool> {
 /// [`confirm`] off the async runtime's threads, for async commands.
 pub async fn confirm_async(reason: &'static str) -> AppResult<bool> {
     tauri::async_runtime::spawn_blocking(move || confirm(reason))
+        .await
+        .map_err(crate::error::AppError::new)?
+}
+
+/// [`confirm_fresh`] off the async runtime's threads.
+pub async fn confirm_fresh_async(reason: &'static str) -> AppResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || confirm_fresh(reason))
         .await
         .map_err(crate::error::AppError::new)?
 }
@@ -198,6 +224,15 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fresh_check_ignores_the_grace_period() {
+        let start = Instant::now();
+        remember(start);
+        assert!(!needs_prompt(true, start + Duration::from_secs(1)));
+        assert!(needs_prompt(false, start + Duration::from_secs(1)));
+        assert!(needs_prompt(false, start + GRACE));
+    }
 
     #[test]
     fn one_check_covers_the_next_minute_only() {

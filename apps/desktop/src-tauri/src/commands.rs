@@ -3169,7 +3169,7 @@ pub(crate) async fn passwords_copy(app: AppHandle<Runtime>, id: String) -> AppRe
 pub(crate) async fn passwords_export(
     app: AppHandle<Runtime>,
 ) -> AppResult<Option<crate::passwords::PasswordExport>> {
-    if !crate::user_presence::confirm_async("export your saved passwords").await? {
+    if !crate::user_presence::confirm_fresh_async("export your saved passwords").await? {
         return Ok(None);
     }
     let Some(file) = rfd::AsyncFileDialog::new()

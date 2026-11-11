@@ -298,6 +298,26 @@ pub fn fields_for_page(
     serde_json::Value::Object(out)
 }
 
+/// Whether a card may be filled into a page of `origin`: https, or http on
+/// this machine (loopback), the "potentially trustworthy" origins a browser
+/// treats as secure. On plain http anyone on the network path can read
+/// what is filled.
+fn card_origin_is_secure(origin: &str) -> bool {
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    match (url.scheme(), url.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(url::Host::Domain(name))) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost")
+        }
+        ("http", Some(url::Host::Ipv4(ip))) => ip.is_loopback(),
+        ("http", Some(url::Host::Ipv6(ip))) => ip.is_loopback(),
+        _ => false,
+    }
+}
+
 /// Put a saved address, or a card, into the tab's form. Returns how many
 /// fields were filled -- zero means nothing on the page looked like one.
 ///
@@ -314,6 +334,11 @@ pub async fn fill_into(
 ) -> AppResult<u32> {
     let origin = crate::passwords::origin_of(page_url)
         .map_err(|_| AppError::new("this page cannot be filled"))?;
+    if matches!(what, Wallet::Card(_)) && !card_origin_is_secure(&origin) {
+        return Err(AppError::new(
+            "Cards fill only on secure (https) pages. This page is not secure, so the card was not filled.",
+        ));
+    }
     let session = {
         let host = lock(&state.host);
         host.as_ref()
@@ -371,7 +396,18 @@ pub async fn fill_into(
     let full = match what {
         Wallet::Address(address) => serde_json::to_value(address).map_err(AppError::new)?,
         Wallet::Card(id) => {
-            let fill = card_fill(state, profile, id, present.iter().any(|k| k == "cc-number"))?;
+            let with_number = present.iter().any(|k| k == "cc-number");
+            // The number is a secret as sensitive as a password: the owner
+            // confirms (60 s grace) before it is read. A fill with only name
+            // and expiry reads no number and asks nothing. The prompt can
+            // outlast a navigation; the origin check in the fill expression
+            // below still guards the write.
+            if with_number && !crate::user_presence::confirm_async("fill a saved card").await? {
+                return Err(AppError::new(
+                    "The card was not filled because you did not confirm it is you.",
+                ));
+            }
+            let fill = card_fill(state, profile, id, with_number)?;
             serde_json::to_value(&fill).map_err(AppError::new)?
         }
     };
@@ -410,6 +446,28 @@ fn current_month_year(now: Timestamp) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cards_fill_only_on_secure_origins() {
+        for origin in [
+            "https://shop.example",
+            "http://localhost:5173",
+            "http://127.0.0.1:8080",
+            "http://[::1]:3000",
+            "http://app.localhost",
+        ] {
+            assert!(card_origin_is_secure(origin), "{origin}");
+        }
+        for origin in [
+            "http://shop.example",
+            "http://192.168.1.10",
+            "http://printer.local",
+            "ftp://x",
+            "",
+        ] {
+            assert!(!card_origin_is_secure(origin), "{origin}");
+        }
+    }
 
     #[test]
     fn catches_a_mistyped_card_number() {

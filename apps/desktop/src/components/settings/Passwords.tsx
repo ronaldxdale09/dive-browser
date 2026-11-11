@@ -8,7 +8,7 @@ import { useBrowser } from "../../store/browser";
 import { Icon, IconButton } from "../Icon";
 import { Button, Group } from "../SettingsFields";
 import { FormEntries } from "./FormEntries";
-import { credentialStoreName, importPasswordsHint } from "../../lib/commands";
+import { credentialStoreName, importPasswordsHint, isWindows } from "../../lib/commands";
 
 /** How long a shown password stays on screen before it hides itself. */
 export const REVEAL_MS = 30_000;
@@ -109,7 +109,7 @@ export function Passwords() {
 
   return (
     <>
-      <Group title="Saved logins" description={`Kept in this profile. Passwords live in ${credentialStoreName()}; Dive never writes them to its own files. Showing or copying one asks your computer to confirm it is you.`}>
+      <Group title="Saved logins" description={`Kept in this profile. Passwords live in ${credentialStoreName()}; Dive never writes them to its own files. ${isWindows() ? "Windows does not yet ask you to confirm it is you before showing one, so lock your computer when you step away." : "Showing or copying one asks your computer to confirm it is you."}`}>
         {error && (
           <p role="alert" className="mt-2 mb-2 text-11 text-danger">
             {error}
