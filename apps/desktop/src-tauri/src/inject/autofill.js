@@ -32,33 +32,57 @@
       .join(" ")
       .toLowerCase();
 
-  // `autocomplete` token first; the patterns are the fallback for forms that
-  // declare nothing, which is most of them.
+  // The field names the autofill standard defines. Anything else in an
+  // `autocomplete` attribute ("nope", "false", a random string) is a site
+  // trying to switch autofill off, and says nothing about what the field is.
+  const FIELD_NAMES = new Set([
+    "name", "honorific-prefix", "given-name", "additional-name", "family-name", "honorific-suffix", "nickname", "username", "new-password",
+    "current-password", "one-time-code", "organization-title", "organization", "street-address", "address-line1", "address-line2", "address-line3",
+    "address-level4", "address-level3", "address-level2", "address-level1", "country", "country-name", "postal-code", "cc-name", "cc-given-name",
+    "cc-additional-name", "cc-family-name", "cc-number", "cc-exp", "cc-exp-month", "cc-exp-year", "cc-csc", "cc-type", "transaction-currency",
+    "transaction-amount", "language", "bday", "bday-day", "bday-month", "bday-year", "sex", "url", "photo", "tel", "tel-country-code",
+    "tel-national", "tel-area-code", "tel-local", "tel-local-prefix", "tel-local-suffix", "tel-extension", "email", "impp"
+  ]);
+
+  /** The field name an `autocomplete` attribute declares, or "" for none ("on", "off", unknown words, absent). */
+  const purpose = (el) => {
+    const tokens = (el.getAttribute("autocomplete") || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const named = tokens.filter((t) => !t.startsWith("section-") && !["shipping", "billing", "home", "work", "mobile", "fax", "pager", "webauthn", "on", "off"].includes(t) && FIELD_NAMES.has(t));
+    return named[named.length - 1] || "";
+  };
+
+  // Each kind lists the exact `autocomplete` field names it takes, then a
+  // fallback pattern for forms that declare nothing, which is most of them.
+  // A declared field name is matched whole, never as a piece of another one.
   const MATCHERS = {
-    name: [/\b(name|cc-name)\b/, /(full[\s_-]?name|your[\s_-]?name|recipient)/],
-    "given-name": [/\bgiven-name\b/, /(first[\s_-]?name|forename|fname)/],
-    "family-name": [/\bfamily-name\b/, /(last[\s_-]?name|surname|lname)/],
-    organization: [/\borganization\b/, /(company|organisation|business)/],
-    "address-line1": [/\b(address-line1|street-address)\b/, /(address[\s_-]?1|street|addr1|address$)/],
-    "address-line2": [/\baddress-line2\b/, /(address[\s_-]?2|apartment|suite|unit|addr2)/],
-    "address-level2": [/\baddress-level2\b/, /\b(city|town|suburb|locality)\b/],
-    "address-level1": [/\baddress-level1\b/, /\b(state|province|region|county)\b/],
-    "postal-code": [/\bpostal-code\b/, /(post(al)?[\s_-]?code|zip)/],
-    country: [/\bcountry(-name)?\b/, /\bcountry\b/],
-    tel: [/\btel\b/, /(phone|mobile|telephone)/],
-    email: [/\bemail\b/, /e-?mail/],
-    "cc-name": [/\bcc-name\b/, /(card[\s_-]?holder|name[\s_-]?on[\s_-]?card)/],
-    "cc-number": [/\bcc-number\b/, /(card[\s_-]?number|cardnum|ccnum|creditcard)/],
-    "cc-exp-month": [/\bcc-exp-month\b/, /(exp[\s_-]?month|expiry[\s_-]?month|exp-mm|month)/],
-    "cc-exp-year": [/\bcc-exp-year\b/, /(exp[\s_-]?year|expiry[\s_-]?year|exp-yy|year)/],
-    "cc-exp": [/\bcc-exp\b/, /(expiry|expiration|exp[\s_-]?date)/],
+    name: [["name"], /(full[\s_-]?name|your[\s_-]?name|recipient)/],
+    "given-name": [["given-name"], /(first[\s_-]?name|forename|fname)/],
+    "family-name": [["family-name"], /(last[\s_-]?name|surname|lname)/],
+    organization: [["organization"], /(company|organisation|business)/],
+    "address-line1": [["address-line1", "street-address"], /(address[\s_-]?1|street|addr1|address$)/],
+    "address-line2": [["address-line2"], /(address[\s_-]?2|apartment|suite|unit|addr2)/],
+    "address-level2": [["address-level2"], /\b(city|town|suburb|locality)\b/],
+    "address-level1": [["address-level1"], /\b(state|province|region|county)\b/],
+    "postal-code": [["postal-code"], /(post(al)?[\s_-]?code|zip)/],
+    country: [["country", "country-name"], /\bcountry\b/],
+    tel: [["tel", "tel-national"], /(phone|mobile|telephone)/],
+    email: [["email"], /e-?mail/],
+    "cc-name": [["cc-name"], /(card[\s_-]?holder|name[\s_-]?on[\s_-]?card)/],
+    "cc-number": [["cc-number"], /(card[\s_-]?number|cardnum|ccnum|creditcard)/],
+    "cc-exp-month": [["cc-exp-month"], /(exp[\s_-]?month|expiry[\s_-]?month|exp-mm|month)/],
+    "cc-exp-year": [["cc-exp-year"], /(exp[\s_-]?year|expiry[\s_-]?year|exp-yy|year)/],
+    "cc-exp": [["cc-exp"], /(expiry|expiration|exp[\s_-]?date)/],
   };
 
   /** The first field that looks like `kind`, skipping ones already filled. */
   const find = (kind, used) => {
-    const [token, pattern] = MATCHERS[kind];
+    const [names, pattern] = MATCHERS[kind];
     const candidates = fields().filter((el) => !used.has(el));
-    return candidates.find((el) => token.test((el.autocomplete || "").toLowerCase())) || (pattern && candidates.find((el) => pattern.test(marks(el))));
+    const declared = candidates.find((el) => names.includes(purpose(el)));
+    if (declared) return declared;
+    // The patterns are for fields that declare nothing. A field that says
+    // what it is (given-name, bday-month, ...) is never taken for something else.
+    return pattern ? candidates.find((el) => !purpose(el) && pattern.test(marks(el))) : undefined;
   };
 
   /** Write a value the way a framework-backed input will notice. */
@@ -66,8 +90,15 @@
     if (value === undefined || value === null || value === "") return false;
     const text = String(value);
     if (el.tagName === "SELECT") {
-      const wanted = text.toLowerCase();
-      const option = [...el.options].find((o) => o.value.toLowerCase() === wanted || o.text.toLowerCase() === wanted || o.text.toLowerCase().startsWith(wanted));
+      const wanted = text.trim().toLowerCase();
+      const options = [...el.options].filter((o) => !o.disabled);
+      // An exact value or label anywhere in the list beats a prefix: "CA" is
+      // Canada's code, not the start of "Cambodia".
+      let option = options.find((o) => o.value.trim().toLowerCase() === wanted) || options.find((o) => o.text.trim().toLowerCase() === wanted);
+      if (!option && wanted.length >= 3) {
+        const prefixed = options.filter((o) => o.text.trim().toLowerCase().startsWith(wanted));
+        if (prefixed.length === 1) option = prefixed[0];
+      }
       if (!option) return false;
       el.value = option.value;
     } else {
