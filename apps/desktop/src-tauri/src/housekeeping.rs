@@ -633,7 +633,12 @@ pub fn restore_scroll(app: AppHandle<Runtime>, tab: TabId) {
             "document.readyState === 'complete' ? location.href : ''",
         )
         .await;
-        tracing::debug!(%tab, ?ready, %url, "scroll restore: readiness");
+        tracing::debug!(
+            %tab,
+            matches = ready.as_ref().and_then(|v| v.as_str()) == Some(url.as_str()),
+            origin = %crate::diagnostics::loggable_url(&url),
+            "scroll restore: readiness"
+        );
         if ready.as_ref().and_then(|v| v.as_str()) == Some(url.as_str()) {
             let done = scroll_until_it_holds(&session, x, y).await;
             tracing::debug!(%tab, done, "scroll restore: scrolled at once");

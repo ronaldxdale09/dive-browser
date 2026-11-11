@@ -849,18 +849,18 @@ impl TabHost {
                 let schedule = app.clone();
                 if let Err(error) = app.run_on_main_thread(move || {
                     let Some(main) = MainThread::here() else {
-                        tracing::warn!(%url, "popup open reached the wrong thread");
+                        tracing::warn!(origin = %crate::diagnostics::loggable_url(url.as_str()), "popup open reached the wrong thread");
                         return;
                     };
                     let Some(workspace) = popup_workspace else {
-                        tracing::warn!(%url, "popup source has no workspace");
+                        tracing::warn!(origin = %crate::diagnostics::loggable_url(url.as_str()), "popup source has no workspace");
                         return;
                     };
                     let state = schedule.state::<AppState>();
                     if let Err(error) =
                         crate::commands::open_tab(&main, &schedule, &state, workspace, url.as_str())
                     {
-                        tracing::warn!(%url, %error, "opening popup as a tab failed");
+                        tracing::warn!(origin = %crate::diagnostics::loggable_url(url.as_str()), %error, "opening popup as a tab failed");
                     }
                 }) {
                     tracing::warn!(%error, "queueing popup tab failed");

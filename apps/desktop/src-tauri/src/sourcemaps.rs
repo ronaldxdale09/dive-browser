@@ -152,7 +152,7 @@ async fn fetch_capped(url: &url::Url) -> Option<Vec<u8>> {
     {
         Ok(bytes) => Some(bytes),
         Err(error) => {
-            tracing::debug!(%url, %error, "source map fetch refused or failed");
+            tracing::debug!(origin = %crate::diagnostics::loggable_url(url.as_str()), %error, "source map fetch refused or failed");
             None
         }
     }

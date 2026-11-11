@@ -163,6 +163,71 @@ fn newest_files(dir: &Path, n: usize) -> Vec<PathBuf> {
     files.into_iter().rev().take(n).collect()
 }
 
+/// How a page's address is written to the log: its origin, and a marker
+/// when anything followed it. Paths, queries and fragments are where reset
+/// links, sign-in codes and signed downloads keep their secrets, and a log
+/// is something people attach to public reports.
+pub(crate) fn loggable_url(raw: &str) -> String {
+    let Ok(url) = url::Url::parse(raw.trim()) else {
+        return format!("<address, {} chars>", raw.len());
+    };
+    match url.scheme() {
+        "http" | "https" | "ws" | "wss" => {
+            let mut out = url.origin().ascii_serialization();
+            if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+                out.push_str("/\u{2026}");
+            }
+            out
+        }
+        // A `file:` path holds the user's name; a `data:` URL can be megabytes.
+        scheme => format!("{scheme}:"),
+    }
+}
+
+/// One line with every web address cut to its site. Everything else is kept
+/// byte for byte.
+fn scrub_line(line: &str) -> String {
+    const SCHEMES: [&str; 4] = ["http://", "https://", "ws://", "wss://"];
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(at) = SCHEMES.iter().filter_map(|s| rest.find(s)).min() {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        // `,` `)` `]` are legal inside an address, so only whitespace and
+        // quoting characters end it; trailing punctuation is peeled after.
+        let end = tail
+            .find(|c: char| c.is_whitespace() || "\"'<>`".contains(c))
+            .unwrap_or(tail.len());
+        let span = &tail[..end];
+        let kept = span
+            .trim_end_matches([')', ']', ',', '.', ';', ':', '!', '?'])
+            .len();
+        out.push_str(&loggable_url(&span[..kept]));
+        out.push_str(&span[kept..]);
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Copy a text file line by line with its web addresses cut to their site,
+/// without holding the file in memory.
+fn copy_scrubbed(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::io::{BufRead, Write};
+    let mut reader = std::io::BufReader::new(std::fs::File::open(from)?);
+    let mut writer = std::io::BufWriter::new(std::fs::File::create(to)?);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        // Keep the line ending, so a file's bytes outside addresses survive.
+        if reader.read_until(b'\n', &mut buf)? == 0 {
+            break;
+        }
+        writer.write_all(scrub_line(&String::from_utf8_lossy(&buf)).as_bytes())?;
+    }
+    writer.flush()
+}
+
 /// Copy what a report needs from `root` into a new folder in `into`.
 fn gather(root: &Path, into: &Path, stamp: &str) -> std::io::Result<PathBuf> {
     let out = into.join(format!("Dive Diagnostics {stamp}"));
@@ -179,6 +244,7 @@ fn gather(root: &Path, into: &Path, stamp: &str) -> std::io::Result<PathBuf> {
         ),
     ];
     for (name, files) in parts {
+        let scrub = name != "responsiveness";
         if files.is_empty() {
             continue;
         }
@@ -186,14 +252,18 @@ fn gather(root: &Path, into: &Path, stamp: &str) -> std::io::Result<PathBuf> {
         std::fs::create_dir_all(&dir)?;
         for file in files {
             if let Some(file_name) = file.file_name() {
-                std::fs::copy(&file, dir.join(file_name))?;
+                if scrub {
+                    copy_scrubbed(&file, &dir.join(file_name))?;
+                } else {
+                    std::fs::copy(&file, dir.join(file_name))?;
+                }
             }
         }
     }
     std::fs::write(
         out.join("about.txt"),
         format!(
-            "Dive {}\n{} {}\nexported {stamp}\n",
+            "Dive {}\n{} {}\nexported {stamp}\nWeb addresses in these files are cut to their site.\n",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH
@@ -313,5 +383,74 @@ mod tests {
         assert!(out.join("responsiveness/current.jsonl").is_file());
         assert!(!out.join("responsiveness/stall.request").exists());
         assert!(out.join("about.txt").is_file());
+    }
+
+    #[test]
+    fn a_logged_address_keeps_only_its_site() {
+        assert_eq!(
+            loggable_url("https://user:pw@example.com:8443/reset?token=abc#x"),
+            "https://example.com:8443/\u{2026}"
+        );
+        assert_eq!(loggable_url("https://example.com/"), "https://example.com");
+        assert_eq!(
+            loggable_url("http://localhost:5173/app"),
+            "http://localhost:5173/\u{2026}"
+        );
+    }
+
+    #[test]
+    fn a_non_web_address_is_logged_by_its_scheme() {
+        assert_eq!(loggable_url("file:///Users/someone/a.html"), "file:");
+        assert_eq!(loggable_url("data:text/plain,hi"), "data:");
+    }
+
+    #[test]
+    fn an_address_that_does_not_parse_is_not_echoed() {
+        assert!(!loggable_url("not a url with secret").contains("secret"));
+    }
+
+    #[test]
+    fn scrubbing_a_line_cuts_every_address_and_keeps_the_rest() {
+        assert_eq!(
+            scrub_line(r#"opened "https://a.test/p?token=1" then (wss://b.test:9/x#y), done  ok"#),
+            "opened \"https://a.test/\u{2026}\" then (wss://b.test:9/\u{2026}), done  ok"
+        );
+        assert_eq!(scrub_line("nothing here"), "nothing here");
+    }
+
+    #[test]
+    fn a_comma_or_bracket_inside_an_address_does_not_end_it() {
+        let a = scrub_line("see https://api.test/x?fields=id,name&access_token=SECRET3 now");
+        assert!(!a.contains("SECRET3"), "{a}");
+        assert!(a.ends_with(" now"), "{a}");
+        let b = scrub_line("(https://a.test/p?q=a)b&token=SECRET4)");
+        assert!(!b.contains("SECRET4"), "{b}");
+        assert!(b.ends_with(')'), "{b}");
+    }
+
+    #[test]
+    fn an_export_cuts_addresses_in_logs_and_crash_records() {
+        let root = tempfile::tempdir().unwrap();
+        let into = tempfile::tempdir().unwrap();
+        for dir in ["logs", "crashes"] {
+            std::fs::create_dir_all(root.path().join(dir)).unwrap();
+        }
+        std::fs::write(
+            root.path().join("logs/dive.2026-09-01.log"),
+            "INFO opened https://example.com/reset?token=SECRET1 ok\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("crashes/panic-a.txt"),
+            "at https://example.org/a?code=SECRET2",
+        )
+        .unwrap();
+        let out = gather(root.path(), into.path(), "T").unwrap();
+        let log = std::fs::read_to_string(out.join("logs/dive.2026-09-01.log")).unwrap();
+        let crash = std::fs::read_to_string(out.join("crashes/panic-a.txt")).unwrap();
+        assert!(!log.contains("SECRET1") && log.contains("https://example.com/"));
+        assert!(!crash.contains("SECRET2") && crash.contains("https://example.org/"));
+        let about = std::fs::read_to_string(out.join("about.txt")).unwrap();
+        assert!(about.contains("cut to their site"));
     }
 }

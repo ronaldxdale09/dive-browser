@@ -863,8 +863,12 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
             continue;
         }
         match commands::open_tab(&main, app.handle(), &state, workspace, &url) {
-            Ok(tab) => tracing::info!(%tab.id, url, "opened startup tab"),
-            Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
+            Ok(tab) => {
+                tracing::info!(%tab.id, origin = %crate::diagnostics::loggable_url(&url), "opened startup tab");
+            }
+            Err(e) => {
+                tracing::warn!(origin = %crate::diagnostics::loggable_url(&url), "failed to open startup tab: {e}");
+            }
         }
     }
 }
@@ -990,8 +994,8 @@ fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
             }
             in_main = true;
             match commands::open_tab(&main, &handle, &state, workspace, &url) {
-                Ok(tab) => tracing::info!(%tab.id, url, "opened a link handed by the system"),
-                Err(e) => tracing::warn!(url, "could not open a handed link: {e}"),
+                Ok(tab) => tracing::info!(%tab.id, origin = %crate::diagnostics::loggable_url(&url), "opened a link handed by the system"),
+                Err(e) => tracing::warn!(origin = %crate::diagnostics::loggable_url(&url), "could not open a handed link: {e}"),
             }
         }
         // A launcher opens its app's own window; the main window comes
@@ -1292,10 +1296,10 @@ pub(crate) fn open_home(
         .and_then(|tabs| tabs.into_iter().find(|t| same_page(&t.url, &wanted)));
     if let Some(tab) = existing {
         commands::activate_tab(main, app, state, tab.id)?;
-        tracing::info!(%tab.id, url = tab.url, "returned to the open home page");
+        tracing::info!(%tab.id, origin = %crate::diagnostics::loggable_url(&tab.url), "returned to the open home page");
     } else {
         let tab = commands::open_tab(main, app, state, workspace, url)?;
-        tracing::info!(%tab.id, url = tab.url, "opened home page");
+        tracing::info!(%tab.id, origin = %crate::diagnostics::loggable_url(&tab.url), "opened home page");
     }
     Ok(())
 }
@@ -1352,7 +1356,9 @@ fn restore_session(app: &tauri::App<Runtime>) {
     }
     if let (Some(tab), Some(main)) = (candidate, engine::MainThread::here()) {
         match commands::activate_tab(&main, app.handle(), &state, tab.id) {
-            Ok(()) => tracing::info!(%tab.id, url = tab.url, "restored session tab"),
+            Ok(()) => {
+                tracing::info!(%tab.id, origin = %crate::diagnostics::loggable_url(&tab.url), "restored session tab");
+            }
             Err(e) => tracing::warn!("failed to restore session tab: {e}"),
         }
     }

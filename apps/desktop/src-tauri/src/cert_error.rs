@@ -192,7 +192,7 @@ pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Run
     let app = app.clone();
     let _ = view.with_webview(move |native| {
         native.set_certificate_error_handler(move |error, decision| {
-            tracing::warn!(%tab_id, error = %error.error, url = %error.url, "certificate refused");
+            tracing::warn!(%tab_id, error = %error.error, origin = %crate::diagnostics::loggable_url(&error.url), "certificate refused");
             // Without a decision the engine will not allow an exception;
             // the request is already refused and the error panel says why.
             let Some(decision) = decision else {
