@@ -18,10 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.0
+      # Prebuilt binaries; compiling them from source cost 6.5 minutes.
       - name: Install audit tools
-        run: |
-          cargo install cargo-audit --locked --version 0.22.2
-          cargo install cargo-deny --locked --version 0.20.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
       - run: cargo audit
       - name: Vendored runtime lockfile
         run: cargo audit --file vendor/tauri-runtime-cef/Cargo.lock

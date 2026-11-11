@@ -18,7 +18,7 @@ pnpm dev
 ```
 
 The first build downloads and compiles against CEF, which takes a while. CI
-caches it under `.cef` keyed on `Cargo.lock`; locally, set `CEF_PATH` to reuse
+caches it under `.cef` keyed on the CEF version in `Cargo.lock`; locally, set `CEF_PATH` to reuse
 a copy you already have.
 
 Lighter builds when you do not need the whole engine:
