@@ -324,6 +324,7 @@ describe("Library paging", () => {
     expect(countLabel(5000, "bookmark", "bookmarks", { more: false, capped: true, filtered: false })).toMatch(/^Newest 5,000 bookmarks — filter/);
   });
 
+  // Renders two full pages (400 rows) in jsdom; the 5 s default is too tight on CI runners.
   it("asks for the next page from the end of the list", async () => {
     const page = Array.from({ length: 200 }, (_, i) => ({ url: `https://s${i}.test/`, title: `Site ${i}`, last_visited_at: new Date().toISOString(), visits: 1, favicon: null }));
     const search = vi.spyOn(ipc, "historySearch").mockResolvedValue(page);
@@ -332,7 +333,7 @@ describe("Library paging", () => {
     expect(await screen.findByText("200+ pages")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show more" }));
     await waitFor(() => expect(search).toHaveBeenCalledWith("", 400));
-  });
+  }, 20_000);
 
   it("puts this session's rows over the kept ones for the same file", () => {
     const merged = mergeDownloads(

@@ -1598,7 +1598,11 @@ mod tests {
 
     #[test]
     fn a_download_folder_is_expanded_checked_and_never_relative() {
-        let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        let home = std::path::PathBuf::from(
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .expect("HOME or USERPROFILE is set"),
+        );
         assert_eq!(
             expand_home("~/Downloads/dive"),
             Some(home.join("Downloads/dive"))
