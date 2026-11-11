@@ -1663,7 +1663,7 @@ impl Browser for AppBrowser {
     async fn confirm(&self, step: dive_mcp::Sensitive) -> Result<dive_mcp::Approved, BrowserError> {
         // For a machine that runs a trusted client unattended -- CI, a test
         // rig -- the person can say yes ahead of time when starting Dive.
-        if std::env::var_os("DIVE_MCP_SKIP_CONFIRM").is_some() {
+        if env_switch("DIVE_MCP_SKIP_CONFIRM") {
             return Ok(dive_mcp::Approved::default());
         }
         let tab = match &step {
@@ -3743,7 +3743,7 @@ pub fn start(app: AppHandle<Runtime>) {
         }
     };
     let config = dive_mcp::Config {
-        allow_evaluate: std::env::var_os("DIVE_MCP_ALLOW_EVAL").is_some(),
+        allow_evaluate: env_switch("DIVE_MCP_ALLOW_EVAL"),
         token: Some(token),
     };
     let browser = Arc::new(AppBrowser::new(app));
@@ -3848,9 +3848,41 @@ fn write_token(path: &std::path::Path, token: &str) -> std::io::Result<()> {
     file.sync_all()
 }
 
+/// Whether an opt-in switch in the environment is on. Only `1` or `true`
+/// count: a launch script that writes `=0` to be explicit must get "off",
+/// not the riskier setting. Anything else set is logged and treated as off.
+fn env_switch(name: &str) -> bool {
+    env_switch_value(name, std::env::var_os(name).as_deref())
+}
+
+fn env_switch_value(name: &str, value: Option<&std::ffi::OsStr>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let text = value.to_string_lossy();
+    let text = text.trim();
+    if text == "1" || text.eq_ignore_ascii_case("true") {
+        return true;
+    }
+    tracing::warn!(switch = name, "ignored: only 1 or true turn this on");
+    false
+}
+
 #[cfg(test)]
 mod tool_session_tests {
     use super::*;
+
+    #[test]
+    fn only_one_or_true_turn_a_switch_on() {
+        let on = |v: &str| env_switch_value("X", Some(std::ffi::OsStr::new(v)));
+        assert!(!env_switch_value("X", None));
+        assert!(on("1"));
+        assert!(on("true"));
+        assert!(on(" TRUE "));
+        for off in ["0", "false", "", "yes"] {
+            assert!(!on(off), "{off:?} turned a switch on");
+        }
+    }
 
     fn step(action: dive_mcp::MouseAction, x: Option<f64>, y: Option<f64>) -> dive_mcp::MouseStep {
         dive_mcp::MouseStep {

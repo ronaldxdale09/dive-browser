@@ -99,7 +99,7 @@ claude mcp add --transport http dive http://127.0.0.1:7391/mcp `
   --header "Authorization: Bearer $(Get-Content $env:APPDATA\dive\mcp-token)"
 ```
 
-Cursor and other clients take the same URL and header. Settings › Developer shows the token path and the current port. `page_evaluate` stays off unless you start Dive with `DIVE_MCP_ALLOW_EVAL=1`.
+Cursor and other clients take the same URL and header. Settings › Developer shows the token path and the current port. `page_evaluate` stays off unless you start Dive with `DIVE_MCP_ALLOW_EVAL=1` (or `true`; any other value leaves it off).
 
 ## Build from source
 
