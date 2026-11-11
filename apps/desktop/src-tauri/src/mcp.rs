@@ -84,7 +84,7 @@ const SUGGESTION_FLOOR: f64 = 0.34;
 /// A frame that cannot be read (cross-origin with no debugger access, or gone
 /// between the two calls) is skipped rather than failing the read: some of the
 /// page is worth more than none of it.
-async fn frame_nodes(session: &CdpSession) -> Vec<crate::ax::AxNode> {
+async fn frame_nodes(session: &CdpSession, next_ref: &mut u32) -> Vec<crate::ax::AxNode> {
     let Ok(tree) = session.call("Page.getFrameTree", json!({})).await else {
         return Vec::new();
     };
@@ -104,7 +104,7 @@ async fn frame_nodes(session: &CdpSession) -> Vec<crate::ax::AxNode> {
         else {
             continue;
         };
-        let nodes = crate::ax::flatten(&subtree);
+        let nodes = crate::ax::flatten_from(&subtree, next_ref);
         if nodes.is_empty() {
             continue;
         }
@@ -123,7 +123,8 @@ async fn frame_nodes(session: &CdpSession) -> Vec<crate::ax::AxNode> {
 /// Each child frame as a row for `page_inspect`: what it is, and what an
 /// agent would find inside it.
 async fn frame_summaries(session: &CdpSession) -> Vec<Value> {
-    let nodes = frame_nodes(session).await;
+    let mut next_ref = 1;
+    let nodes = frame_nodes(session, &mut next_ref).await;
     let mut out: Vec<Value> = Vec::new();
     let mut current: Option<(String, Vec<crate::ax::AxNode>)> = None;
     for node in nodes {
@@ -517,10 +518,47 @@ impl From<locator::Failure> for BrowserError {
 /// readiness failures, and never retry a confirmed closed session.
 fn retry_wait_during_navigation(error: &locator::Failure, closed: bool) -> bool {
     !closed
-        && matches!(error, locator::Failure::Engine(message) if matches!(message.as_str(),
-        "cdp error -32000: Inspected target navigated or closed"
-        | "cdp error -32000: Not attached to an active page"
-        | "cdp error -32000: Execution context was destroyed."))
+        && matches!(error, locator::Failure::Engine(message) if NAVIGATION_RACES.contains(&message.as_str()))
+}
+
+/// CDP's answers when a call lands while the document is being replaced.
+const NAVIGATION_RACES: [&str; 3] = [
+    "cdp error -32000: Inspected target navigated or closed",
+    "cdp error -32000: Not attached to an active page",
+    "cdp error -32000: Execution context was destroyed.",
+];
+
+/// Whether a check that errored should count as "not yet" and be tried
+/// again: the element is not there yet, or the document was being replaced.
+/// An unparseable locator or anything else ends the call at once.
+fn expect_retryable(error: &BrowserError, closed: bool) -> bool {
+    !closed
+        && (matches!(error, BrowserError::TargetNotFound { .. })
+            || matches!(error, BrowserError::Other(m) if NAVIGATION_RACES.contains(&m.as_str())))
+}
+
+/// Ends an action on the timeline and the tab's "an agent is driving" glow
+/// when dropped, whether the work finished or was abandoned: Stop drops the
+/// future mid-await, and without this the tab glowed until it was closed.
+struct ActionGuard {
+    app: AppHandle<Runtime>,
+    tab: TabId,
+    id: String,
+    presence: Arc<crate::agent_presence::Registry>,
+    /// What to record when the guard drops: `None` once the work succeeded.
+    /// It starts as the "abandoned" reason and is replaced when the work
+    /// returns.
+    error: Option<String>,
+}
+
+impl Drop for ActionGuard {
+    fn drop(&mut self) {
+        self.app
+            .state::<AppState>()
+            .buffers
+            .end_action(self.tab, &self.id, self.error.take());
+        self.presence.end(&self.app, self.tab);
+    }
 }
 
 impl AppBrowser {
@@ -630,10 +668,15 @@ impl AppBrowser {
         // server, so this is where "something is driving this tab" is known.
         let presence = std::sync::Arc::clone(&self.state().agent_presence);
         presence.begin(&self.app, tab);
+        let mut guard = ActionGuard {
+            app: self.app.clone(),
+            tab,
+            id,
+            presence,
+            error: Some("stopped before it finished".into()),
+        };
         let outcome = work.await;
-        let error = outcome.as_ref().err().map(ToString::to_string);
-        self.state().buffers.end_action(tab, &id, error);
-        presence.end(&self.app, tab);
+        guard.error = outcome.as_ref().err().map(ToString::to_string);
         outcome
     }
 
@@ -1274,6 +1317,50 @@ fn plural(count: usize, word: &str) -> String {
 }
 
 /// The button a gesture step means, or why it is not one.
+/// The key presses and pause time a sequence asks for, or the reason it asks
+/// for too much. Summed with checked arithmetic: release builds wrap on
+/// overflow, which would turn a huge request into a small one.
+fn sequence_budget(steps: &[dive_mcp::KeyStep]) -> Result<(u32, u64), BrowserError> {
+    let presses = steps
+        .iter()
+        .map(|s| s.repeat.unwrap_or(1).max(1))
+        .try_fold(0u32, u32::checked_add)
+        .filter(|p| *p <= KEY_PRESS_CAP)
+        .ok_or_else(|| {
+            BrowserError::BadRequest(format!("that is over the {KEY_PRESS_CAP} key press limit"))
+        })?;
+    let delay = steps
+        .iter()
+        .filter_map(|s| s.delay_ms)
+        .try_fold(0u64, u64::checked_add)
+        .filter(|d| *d <= GESTURE_DELAY_CAP_MS)
+        .ok_or_else(|| {
+            BrowserError::BadRequest(format!(
+                "the pauses add up to more than {GESTURE_DELAY_CAP_MS}ms"
+            ))
+        })?;
+    Ok((presses, delay))
+}
+
+/// Every step's button and point, or the first step that is wrong, before
+/// anything is sent: a gesture that fails halfway leaves the page mid-drag.
+fn plan_gesture(
+    steps: &[dive_mcp::MouseStep],
+    view: locator::Viewport,
+) -> Result<Vec<(String, f64, f64)>, BrowserError> {
+    let mut at: Option<(f64, f64)> = None;
+    let mut planned = Vec::with_capacity(steps.len());
+    for (index, step) in steps.iter().enumerate() {
+        let button = mouse_button(step.button.as_deref())
+            .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
+        let (x, y) = gesture_point(step, at, view)
+            .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
+        at = Some((x, y));
+        planned.push((button, x, y));
+    }
+    Ok(planned)
+}
+
 fn mouse_button(named: Option<&str>) -> Result<String, String> {
     match named.unwrap_or("left") {
         button @ ("left" | "right" | "middle") => Ok(button.to_owned()),
@@ -2015,8 +2102,9 @@ impl Browser for AppBrowser {
             .call("Accessibility.getFullAXTree", json!({}))
             .await
             .map_err(other)?;
-        let mut nodes = crate::ax::flatten(&tree);
-        nodes.extend(frame_nodes(&session).await);
+        let mut next_ref = 1;
+        let mut nodes = crate::ax::flatten_from(&tree, &mut next_ref);
+        nodes.extend(frame_nodes(&session, &mut next_ref).await);
         let refs = nodes
             .iter()
             .filter_map(|n| {
@@ -3236,101 +3324,130 @@ impl Browser for AppBrowser {
                 "a gesture may have at most {GESTURE_STEP_CAP} steps"
             )));
         }
-        let total_delay: u64 = params.steps.iter().filter_map(|s| s.delay_ms).sum();
-        if total_delay > GESTURE_DELAY_CAP_MS {
-            return Err(BrowserError::BadRequest(format!(
-                "the pauses in this gesture add up to {total_delay}ms, over the {GESTURE_DELAY_CAP_MS}ms limit"
-            )));
+        let total_delay = params
+            .steps
+            .iter()
+            .filter_map(|s| s.delay_ms)
+            .try_fold(0u64, u64::checked_add);
+        match total_delay {
+            None => {
+                return Err(BrowserError::BadRequest(
+                    "the pauses in this gesture are too long".into(),
+                ));
+            }
+            Some(total) if total > GESTURE_DELAY_CAP_MS => {
+                return Err(BrowserError::BadRequest(format!(
+                    "the pauses in this gesture add up to {total}ms, over the {GESTURE_DELAY_CAP_MS}ms limit"
+                )));
+            }
+            Some(_) => {}
         }
         let session = self.action_session_for(tab).await?;
         let described = Some(format!("{} steps", params.steps.len()));
         let on_screen = self.on_screen(tab);
-        self.tracked(tab, "page_mouse", described, self.or_dialog(tab, async {
+        // The button currently down and where, shared with the code after the
+        // dialog race: a dialog drops the gesture future mid-step.
+        let held: Arc<std::sync::Mutex<Option<(String, f64, f64)>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let held_in = Arc::clone(&held);
+        let mut answer = self
+            .tracked(tab, "page_mouse", described, self.or_dialog(tab, async {
+            let held = held_in;
             let view = locator::viewport(&session).await?;
-            // The pointer has to start somewhere. Nothing is known about where
-            // it is when the gesture begins, so a step that gives no
-            // coordinates before any step has is a mistake worth naming.
-            let mut at: Option<(f64, f64)> = None;
-            let mut held: Option<String> = None;
-            for (index, step) in params.steps.iter().enumerate() {
-                let button = mouse_button(step.button.as_deref())
-                    .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
-                let (x, y) = gesture_point(step, at, view)
-                    .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
-                at = Some((x, y));
-                let buttons = i32::from(held.is_some());
-                let event = match step.action {
-                    MouseAction::Move => json!({
-                        "type": "mouseMoved", "x": x, "y": y,
-                        "button": held.clone().unwrap_or_else(|| "none".into()),
-                        "buttons": buttons, "pointerType": "mouse"
-                    }),
-                    MouseAction::Down => {
-                        held = Some(button.clone());
-                        json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"})
+            // Every step is checked before the first is sent, so a mistake in
+            // step 5 does not leave the page mid-drag from steps 1 to 4.
+            let planned = plan_gesture(&params.steps, view)?;
+            let dispatched: Result<(), BrowserError> = async {
+                for (step, (button, x, y)) in params.steps.iter().zip(planned.iter()) {
+                    let (button, x, y) = (button.clone(), *x, *y);
+                    let down = lock(&held).clone();
+                    let buttons = i32::from(down.is_some());
+                    let event = match step.action {
+                        MouseAction::Move => json!({
+                            "type": "mouseMoved", "x": x, "y": y,
+                            "button": down.map_or_else(|| "none".into(), |d| d.0),
+                            "buttons": buttons, "pointerType": "mouse"
+                        }),
+                        MouseAction::Down => {
+                            *lock(&held) = Some((button.clone(), x, y));
+                            json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"})
+                        }
+                        MouseAction::Up => {
+                            *lock(&held) = None;
+                            json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
+                        }
+                        MouseAction::Click => {
+                            // Down and up are sent as one step so the caller does
+                            // not have to remember to release; CEF needs a turn of
+                            // the event loop between them or Blink produces no
+                            // DOM click at all.
+                            session
+                                .call("Input.dispatchMouseEvent", json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"}))
+                                .await
+                                .map_err(|e| other(e.to_string()))?;
+                            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                            json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
+                        }
+                        MouseAction::Wheel => json!({
+                            "type": "mouseWheel", "x": x, "y": y,
+                            "deltaX": step.delta_x.unwrap_or(0.0),
+                            "deltaY": step.delta_y.unwrap_or(0.0),
+                            "button": "none", "buttons": buttons, "pointerType": "mouse"
+                        }),
+                    };
+                    // The page's own cursor follows the gesture, so a drag across
+                    // a canvas can be watched rather than only inferred from what
+                    // it left behind. Only for a tab someone is looking at: on a
+                    // background tab it is a round trip per step for nobody.
+                    if on_screen {
+                        automation::track_cursor(
+                            &session,
+                            tab,
+                            x,
+                            y,
+                            if matches!(step.action, MouseAction::Click | MouseAction::Down) {
+                                "click"
+                            } else {
+                                "move"
+                            },
+                        )
+                        .await;
                     }
-                    MouseAction::Up => {
-                        held = None;
-                        json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
+                    session
+                        .call("Input.dispatchMouseEvent", event)
+                        .await
+                        .map_err(|e| other(e.to_string()))?;
+                    if let Some(pause) = step.delay_ms {
+                        tokio::time::sleep(std::time::Duration::from_millis(pause)).await;
                     }
-                    MouseAction::Click => {
-                        // Down and up are sent as one step so the caller does
-                        // not have to remember to release; CEF needs a turn of
-                        // the event loop between them or Blink produces no
-                        // DOM click at all.
-                        session
-                            .call("Input.dispatchMouseEvent", json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"}))
-                            .await
-                            .map_err(|e| other(e.to_string()))?;
-                        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
-                        json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
-                    }
-                    MouseAction::Wheel => json!({
-                        "type": "mouseWheel", "x": x, "y": y,
-                        "deltaX": step.delta_x.unwrap_or(0.0),
-                        "deltaY": step.delta_y.unwrap_or(0.0),
-                        "button": "none", "buttons": buttons, "pointerType": "mouse"
-                    }),
-                };
-                // The page's own cursor follows the gesture, so a drag across
-                // a canvas can be watched rather than only inferred from what
-                // it left behind. Only for a tab someone is looking at: on a
-                // background tab it is a round trip per step for nobody.
-                if on_screen {
-                    automation::track_cursor(
-                        &session,
-                        tab,
-                        x,
-                        y,
-                        if matches!(step.action, MouseAction::Click | MouseAction::Down) {
-                            "click"
-                        } else {
-                            "move"
-                        },
-                    )
-                    .await;
                 }
-                session
-                    .call("Input.dispatchMouseEvent", event)
-                    .await
-                    .map_err(|e| other(e.to_string()))?;
-                if let Some(pause) = step.delay_ms {
-                    tokio::time::sleep(std::time::Duration::from_millis(pause)).await;
-                }
+                Ok(())
             }
+            .await;
             // A button left down would keep the page in a drag for as long as
-            // the tab lives, which no caller means to do.
-            if let Some(button) = held {
-                let (x, y) = at.unwrap_or((0.0, 0.0));
-                session
+            // the tab lives, which no caller means to do, so it is let go
+            // whether the gesture finished or failed. That call's own error
+            // adds nothing to what the caller is already being told.
+            let still_down = lock(&held).take();
+            if let Some((button, x, y)) = still_down {
+                let _ = session
                     .call("Input.dispatchMouseEvent", json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"}))
-                    .await
-                    .map_err(|e| other(e.to_string()))?;
+                    .await;
             }
-            let (x, y) = at.unwrap_or((0.0, 0.0));
+            dispatched?;
+            let (x, y) = planned.last().map_or((0.0, 0.0), |p| (p.1, p.2));
             Ok(json!({"played": params.steps.len(), "pointer": {"x": x, "y": y}}))
         }, |dialog| Ok(dialog_opened(dialog, "The gesture"))))
-        .await
+        .await?;
+        // A dialog dropped the gesture with the button down. The page answers
+        // no input until the dialog is closed, so releasing now would only
+        // time out; the caller is told to send an `up` after answering it.
+        if let Some((button, _, _)) = lock(&held).clone()
+            && let Some(object) = answer.as_object_mut()
+        {
+            object.insert("button_still_down".into(), json!(button));
+        }
+        Ok(answer)
     }
 
     async fn page_expect(
@@ -3357,7 +3474,15 @@ impl Browser for AppBrowser {
         loop {
             results = Vec::with_capacity(params.checks.len());
             for check in &params.checks {
-                results.push(run_check(&session, check).await?);
+                match run_check(&session, check).await {
+                    Ok(v) => results.push(v),
+                    // Not there yet, or the page is mid-navigation: that is
+                    // what waiting is for, so it counts as "not yet".
+                    Err(e) if expect_retryable(&e, session.is_closed()) => results.push(
+                        json!({"check": "a check", "passed": false, "actual": e.to_string()}),
+                    ),
+                    Err(e) => return Err(e),
+                }
             }
             if results.iter().all(|r| r["passed"] == Value::Bool(true))
                 || std::time::Instant::now() >= deadline
@@ -3495,22 +3620,7 @@ impl Browser for AppBrowser {
         }
         // Repeats and pauses both cost real time, and the call blocks for all
         // of it, so they are counted before anything is dispatched.
-        let presses: u32 = params
-            .steps
-            .iter()
-            .map(|s| s.repeat.unwrap_or(1).max(1))
-            .sum();
-        if presses > KEY_PRESS_CAP {
-            return Err(BrowserError::BadRequest(format!(
-                "that is {presses} key presses, over the {KEY_PRESS_CAP} limit"
-            )));
-        }
-        let total_delay: u64 = params.steps.iter().filter_map(|s| s.delay_ms).sum();
-        if total_delay > GESTURE_DELAY_CAP_MS {
-            return Err(BrowserError::BadRequest(format!(
-                "the pauses add up to {total_delay}ms, over the {GESTURE_DELAY_CAP_MS}ms limit"
-            )));
-        }
+        let (presses, _) = sequence_budget(&params.steps)?;
         let session = self.action_session_for(tab).await?;
         let described = Some(format!("{} steps", params.steps.len()));
         let target = Target {
@@ -3934,6 +4044,75 @@ mod tool_session_tests {
             gesture_point(&held, Some((10.0, 20.0)), VIEW),
             Ok((10.0, 20.0))
         );
+    }
+
+    #[test]
+    fn a_gesture_with_a_bad_later_step_is_refused_before_anything_is_sent() {
+        use dive_mcp::MouseAction::{Down, Move, Up};
+        let half = step(Move, Some(10.0), None);
+        let bad = [
+            step(Down, Some(10.0), Some(10.0)),
+            half,
+            step(Up, None, None),
+        ];
+        let Err(BrowserError::BadRequest(message)) = plan_gesture(&bad, VIEW) else {
+            panic!("a half coordinate should be refused");
+        };
+        assert!(message.contains("step 2"), "{message}");
+        let good = [
+            step(Down, Some(10.0), Some(10.0)),
+            step(Move, Some(50.0), Some(60.0)),
+            step(Up, None, None),
+        ];
+        let planned = plan_gesture(&good, VIEW).expect("valid gesture");
+        assert_eq!(planned.len(), 3);
+        assert_eq!((planned[2].1, planned[2].2), (50.0, 60.0));
+    }
+
+    fn key_step(repeat: Option<u32>, delay_ms: Option<u64>) -> dive_mcp::KeyStep {
+        dive_mcp::KeyStep {
+            key: Some("a".into()),
+            text: None,
+            modifiers: None,
+            repeat,
+            delay_ms,
+        }
+    }
+
+    #[test]
+    fn limits_cannot_be_wrapped() {
+        let presses = [key_step(Some(u32::MAX), None), key_step(Some(1), None)];
+        assert!(sequence_budget(&presses).is_err());
+        let pauses = [
+            key_step(None, Some(u64::MAX / 2 + 1)),
+            key_step(None, Some(u64::MAX / 2 + 1)),
+        ];
+        assert!(sequence_budget(&pauses).is_err());
+        let small = [key_step(Some(3), Some(10)), key_step(None, Some(20))];
+        assert!(matches!(sequence_budget(&small), Ok((4, 30))));
+    }
+
+    #[test]
+    fn expect_waits_through_not_found_and_navigation() {
+        let missing = BrowserError::TargetNotFound {
+            locator: "x".into(),
+        };
+        assert!(expect_retryable(&missing, false));
+        assert!(!expect_retryable(&missing, true));
+        for message in NAVIGATION_RACES {
+            let raced = BrowserError::Other(message.into());
+            assert!(expect_retryable(&raced, false));
+            assert!(!expect_retryable(&raced, true));
+        }
+        let invalid = BrowserError::InvalidSelector {
+            locator: "x".into(),
+            reason: "bad".into(),
+        };
+        assert!(!expect_retryable(&invalid, false));
+        assert!(!expect_retryable(
+            &BrowserError::Other("boom".into()),
+            false
+        ));
     }
 
     #[test]

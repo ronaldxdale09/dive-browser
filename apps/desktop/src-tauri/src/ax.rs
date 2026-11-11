@@ -63,19 +63,30 @@ impl AxNode {
     }
 }
 
-/// Flatten the CDP tree (`nodes` array) into ordered nodes with refs.
+/// Flatten the CDP tree (`nodes` array) into ordered nodes with refs. The
+/// app itself always numbers across frames with [`flatten_from`]; this is the
+/// single-tree form the tests read.
+#[cfg(test)]
 pub fn flatten(result: &Value) -> Vec<AxNode> {
+    let mut next = 1;
+    flatten_from(result, &mut next)
+}
+
+/// [`flatten`], continuing the ref numbering from `next_ref`. A page and its
+/// frames are read in separate calls but answered as one tree, so their refs
+/// must not start again at `e1`: the later frame would take over the earlier
+/// element's name.
+pub fn flatten_from(result: &Value, next_ref: &mut u32) -> Vec<AxNode> {
     let nodes = result["nodes"].as_array().cloned().unwrap_or_default();
     let by_id: std::collections::HashMap<&str, &Value> = nodes
         .iter()
         .filter_map(|n| n["nodeId"].as_str().map(|id| (id, n)))
         .collect();
     let mut out = Vec::new();
-    let mut next_ref = 1;
     let Some(root) = nodes.first() else {
         return out;
     };
-    walk(root, &by_id, 0, &mut out, &mut next_ref);
+    walk(root, &by_id, 0, &mut out, next_ref);
     out
 }
 
@@ -213,6 +224,27 @@ mod tests {
         assert!(text.contains(
             "- RootWebArea \"Example\"\n  - heading \"Hello\"\n  - link \"Learn more\" [ref=e1]"
         ));
+    }
+
+    #[test]
+    fn refs_continue_across_calls() {
+        let page = json!({"nodes": [
+            node("1", "RootWebArea", "Example", &["3"], 1),
+            node("3", "link", "Learn more", &[], 3),
+        ]});
+        let frame = json!({"nodes": [
+            node("1", "RootWebArea", "Frame", &["2"], 11),
+            node("2", "button", "Pay", &[], 12),
+        ]});
+        let mut next = 1;
+        let first = flatten_from(&page, &mut next);
+        let second = flatten_from(&frame, &mut next);
+        let refs: Vec<_> = first
+            .iter()
+            .chain(second.iter())
+            .filter_map(|n| n.reference.clone())
+            .collect();
+        assert_eq!(refs, ["e1", "e2"]);
     }
 
     #[test]
