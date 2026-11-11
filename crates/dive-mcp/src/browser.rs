@@ -47,6 +47,18 @@ pub enum Sensitive {
         /// The tab whose cookies would be read.
         tab: TabId,
     },
+    /// Read the tab's localStorage or sessionStorage, where many apps keep
+    /// the token that signs the person in.
+    ReadStorage {
+        /// The tab whose stored data would be read.
+        tab: TabId,
+    },
+    /// Install rules that answer or rewrite requests: a mock serves the
+    /// client's own body under the real site's name.
+    ChangeRules {
+        /// One line per added mock or header rule, e.g. `mock https://api.example/*`.
+        added: Vec<String>,
+    },
 }
 
 /// The engine surface the MCP tools need.

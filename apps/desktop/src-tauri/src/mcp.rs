@@ -1557,6 +1557,27 @@ fn confirm_text(step: &dive_mcp::Sensitive, url: &str) -> (String, String) {
                 "An agent connected over MCP wants to read the cookies {site} keeps, including the ones that keep you signed in. Whoever has them can act as you on {site}.\n\nAllow it for the next 10 minutes?"
             ),
         ),
+        dive_mcp::Sensitive::ReadStorage { .. } => (
+            "Hand over a site's stored data?".to_owned(),
+            format!(
+                "An agent connected over MCP wants to read what {site} keeps in this browser's storage. Many sites keep the token that signs you in there; whoever has it can act as you on {site}.\n\nAllow it for the next 10 minutes?"
+            ),
+        ),
+        dive_mcp::Sensitive::ChangeRules { added } => {
+            let listed: Vec<&str> = added.iter().take(5).map(String::as_str).collect();
+            let more = added.len().saturating_sub(listed.len());
+            let mut rules = listed.join("\n");
+            if more > 0 {
+                use std::fmt::Write as _;
+                let _ = write!(rules, "\nand {more} more");
+            }
+            (
+                "Let an agent change what sites send you?".to_owned(),
+                format!(
+                    "An agent connected over MCP wants to add rules that answer or rewrite requests:\n\n{rules}\n\nA mocked address shows whatever the agent wrote, under that site's name, including scripts that run as that site."
+                ),
+            )
+        }
     }
 }
 
@@ -1577,29 +1598,40 @@ impl Browser for AppBrowser {
             return Ok(());
         }
         let tab = match &step {
-            dive_mcp::Sensitive::Upload { tab, .. } | dive_mcp::Sensitive::ReadCookies { tab } => {
-                *tab
-            }
+            dive_mcp::Sensitive::Upload { tab, .. }
+            | dive_mcp::Sensitive::ReadCookies { tab }
+            | dive_mcp::Sensitive::ReadStorage { tab } => Some(*tab),
+            dive_mcp::Sensitive::ChangeRules { .. } => None,
         };
-        let url = {
-            let state = self.state();
-            let store = lock(&state.store);
-            store.tab(tab).map(|t| t.url).unwrap_or_default()
-        };
+        let url = tab
+            .and_then(|tab| {
+                let state = self.state();
+                let store = lock(&state.store);
+                store.tab(tab).ok().map(|t| t.url)
+            })
+            .unwrap_or_default();
         let origin = url::Url::parse(&url)
             .map_or_else(|_| url.clone(), |u| u.origin().ascii_serialization());
+        // Cookies and stored data are remembered per site; a cookie yes also
+        // covers stored data, since a full read returns both. Rule changes
+        // are asked every time.
         let cookies = matches!(step, dive_mcp::Sensitive::ReadCookies { .. });
+        let storage = matches!(step, dive_mcp::Sensitive::ReadStorage { .. });
+        let storage_key = format!("{origin} storage");
         let answered_yes = |answers: &std::collections::HashMap<String, std::time::Instant>| {
-            answers
-                .get(&origin)
-                .is_some_and(|at| at.elapsed() < COOKIE_ANSWER_TTL)
+            let fresh = |key: &str| {
+                answers
+                    .get(key)
+                    .is_some_and(|at| at.elapsed() < COOKIE_ANSWER_TTL)
+            };
+            (cookies && fresh(&origin)) || (storage && (fresh(&origin) || fresh(&storage_key)))
         };
-        if cookies && answered_yes(&lock(cookie_answers())) {
+        if answered_yes(&lock(cookie_answers())) {
             return Ok(());
         }
         let _turn = confirm_queue().lock().await;
         // Someone else's question may have been this one.
-        if cookies && answered_yes(&lock(cookie_answers())) {
+        if answered_yes(&lock(cookie_answers())) {
             return Ok(());
         }
         let (title, description) = confirm_text(&step, &url);
@@ -1619,10 +1651,11 @@ impl Browser for AppBrowser {
         };
         if !allowed {
             return Err(BrowserError::NotAllowed {
-                operation: if cookies {
-                    "reading cookies"
-                } else {
-                    "page_upload"
+                operation: match step {
+                    dive_mcp::Sensitive::ReadCookies { .. } => "reading cookies",
+                    dive_mcp::Sensitive::ReadStorage { .. } => "reading stored data",
+                    dive_mcp::Sensitive::ChangeRules { .. } => "changing rules",
+                    dive_mcp::Sensitive::Upload { .. } => "page_upload",
                 }
                 .into(),
                 reason: "the person using Dive did not allow it; do not retry, ask them instead"
@@ -1631,6 +1664,8 @@ impl Browser for AppBrowser {
         }
         if cookies {
             lock(cookie_answers()).insert(origin, std::time::Instant::now());
+        } else if storage {
+            lock(cookie_answers()).insert(storage_key, std::time::Instant::now());
         }
         Ok(())
     }
@@ -4011,6 +4046,19 @@ mod tool_session_tests {
         );
         assert!(body.contains("mail.example"), "{body}");
         assert!(body.contains("signed in"), "{body}");
+        let (_, body) = confirm_text(
+            &dive_mcp::Sensitive::ReadStorage { tab },
+            "https://mail.example/inbox",
+        );
+        assert!(body.contains("mail.example"), "{body}");
+        assert!(body.contains("signs you in"), "{body}");
+        let (_, body) = confirm_text(
+            &dive_mcp::Sensitive::ChangeRules {
+                added: vec!["mock https://api.example/*".into()],
+            },
+            "",
+        );
+        assert!(body.contains("mock https://api.example/*"), "{body}");
     }
 
     #[test]

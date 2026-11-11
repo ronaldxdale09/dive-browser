@@ -92,6 +92,8 @@ struct Fake {
     asked: Mutex<Vec<Sensitive>>,
     /// Whether the person says no.
     refuse: std::sync::atomic::AtomicBool,
+    /// The rules last set; null until then, which reads as an empty list.
+    rules: Mutex<serde_json::Value>,
 }
 
 #[async_trait]
@@ -324,9 +326,15 @@ impl Browser for Fake {
         Ok("## Bug report".into())
     }
     async fn rules(&self) -> Result<serde_json::Value, BrowserError> {
-        Ok(serde_json::json!([]))
+        let rules = self.rules.lock().unwrap().clone();
+        Ok(if rules.is_null() {
+            serde_json::json!([])
+        } else {
+            rules
+        })
     }
-    async fn set_rules(&self, _rules: serde_json::Value) -> Result<(), BrowserError> {
+    async fn set_rules(&self, rules: serde_json::Value) -> Result<(), BrowserError> {
+        *self.rules.lock().unwrap() = rules;
         Ok(())
     }
     async fn page_snapshot(&self, _tab: TabId) -> Result<String, BrowserError> {
@@ -997,7 +1005,8 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
         }))
         .await
         .unwrap();
-    // Storage without cookies holds nothing the page could not read itself.
+    // The client is not the page: it cannot run script here, and stored data
+    // often holds the token that signs the person in.
     server
         .page_storage(Parameters(crate::params::StorageGetParams {
             tab_id: None,
@@ -1006,11 +1015,12 @@ async fn uploads_and_cookie_reads_ask_the_person_first() {
         .await
         .unwrap();
     let asked = fake.asked.lock().unwrap().clone();
-    assert_eq!(asked.len(), 2, "{asked:?}");
+    assert_eq!(asked.len(), 3, "{asked:?}");
     assert!(
         matches!(&asked[0], Sensitive::Upload { paths, .. } if paths == &["/Users/me/Documents/cv.pdf"])
     );
     assert!(matches!(asked[1], Sensitive::ReadCookies { .. }));
+    assert!(matches!(asked[2], Sensitive::ReadStorage { .. }));
 
     fake.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
     let err = server
@@ -1035,4 +1045,136 @@ fn the_evaluate_description_names_the_switch_that_turns_it_on() {
         entry.description
     );
     assert!(!entry.description.contains("enabled it in Dive"));
+}
+
+async fn server_with_tab(fake: &Arc<Fake>) -> DiveServer<Fake> {
+    let server = DiveServer::new(Arc::clone(fake), Config::default());
+    server
+        .tab_open(Parameters(OpenParams {
+            context_id: None,
+            url: "https://a.dev".into(),
+        }))
+        .await
+        .unwrap();
+    server
+}
+
+async fn set_rules(
+    server: &DiveServer<Fake>,
+    rules: Vec<serde_json::Value>,
+) -> Result<CallToolResult, ErrorData> {
+    server
+        .rules_set(Parameters(crate::params::RulesParams { rules }))
+        .await
+}
+
+fn mock_rule(id: &str, body: &str) -> serde_json::Value {
+    json!({"id": id, "pattern": "https://api.example/*", "enabled": true,
+        "action": {"kind": "mock", "status": 200, "content_type": "text/plain", "body": body}})
+}
+
+fn header_rule() -> serde_json::Value {
+    json!({"id": "h", "pattern": "https://a.dev/*", "enabled": true,
+        "action": {"kind": "header", "name": "x-test", "value": "1"}})
+}
+
+#[tokio::test]
+async fn reading_no_storage_kinds_asks_nothing() {
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: Some(vec![]),
+        }))
+        .await
+        .unwrap();
+    assert!(fake.asked.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn block_rules_and_removals_do_not_ask() {
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    let block = json!({"id": "b", "pattern": "https://ads.example/*", "enabled": true,
+        "action": {"kind": "block"}});
+    set_rules(&server, vec![block]).await.unwrap();
+    set_rules(&server, vec![]).await.unwrap();
+    assert!(fake.asked.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn adding_a_mock_or_header_rule_asks_once_per_new_rule_set() {
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    set_rules(&server, vec![mock_rule("m", "hi")])
+        .await
+        .unwrap();
+    {
+        let asked = fake.asked.lock().unwrap();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(
+            matches!(&asked[0], Sensitive::ChangeRules { added } if added[0].starts_with("mock ")),
+            "{asked:?}"
+        );
+    }
+    set_rules(&server, vec![mock_rule("m", "hi")])
+        .await
+        .unwrap();
+    assert_eq!(fake.asked.lock().unwrap().len(), 1);
+    set_rules(&server, vec![mock_rule("m", "hi"), header_rule()])
+        .await
+        .unwrap();
+    assert_eq!(fake.asked.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_refused_rule_change_leaves_the_rules_as_they_were() {
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    fake.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    set_rules(&server, vec![mock_rule("m", "hi")])
+        .await
+        .expect_err("the person said no");
+    assert_eq!(fake.rules().await.unwrap(), json!([]));
+}
+
+#[tokio::test]
+async fn switching_a_stored_mock_on_asks_even_though_it_was_set_off() {
+    let fake = Arc::new(Fake::default());
+    let server = server_with_tab(&fake).await;
+    let mut off = mock_rule("m", "hi");
+    off["enabled"] = json!(false);
+    set_rules(&server, vec![off]).await.unwrap();
+    assert!(fake.asked.lock().unwrap().is_empty());
+    set_rules(&server, vec![mock_rule("m", "hi")])
+        .await
+        .unwrap();
+    let asked = fake.asked.lock().unwrap();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(
+        matches!(&asked[0], Sensitive::ChangeRules { .. }),
+        "{asked:?}"
+    );
+}
+
+#[test]
+fn added_rewrites_lists_only_new_enabled_mocks_and_headers() {
+    let current = json!([mock_rule("old", "hi")]);
+    let mut disabled = mock_rule("d", "other");
+    disabled["enabled"] = json!(false);
+    assert!(added_rewrites(&current, &[disabled]).is_empty());
+    // Only the id differs, so nothing new is being said.
+    assert!(added_rewrites(&current, &[mock_rule("renamed", "hi")]).is_empty());
+    let changed = added_rewrites(&current, &[mock_rule("old", "different")]);
+    assert_eq!(changed, vec!["mock https://api.example/*".to_owned()]);
+    // A rule that was off does not make the same rule, switched on, old news.
+    let mut off = mock_rule("x", "hi");
+    off["enabled"] = json!(false);
+    assert_eq!(
+        added_rewrites(&json!([off]), &[mock_rule("x", "hi")]),
+        vec!["mock https://api.example/*".to_owned()]
+    );
+    let header = added_rewrites(&json!([]), &[header_rule()]);
+    assert_eq!(header, vec!["header https://a.dev/* (x-test)".to_owned()]);
 }

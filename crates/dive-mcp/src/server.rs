@@ -505,7 +505,7 @@ impl<B: Browser> DiveServer<B> {
     /// Read stored state.
     #[tool(
         name = "page_storage",
-        description = "Everything this site keeps on this machine, in one call: its cookies, its localStorage and its sessionStorage. Reading cookies asks the person in Dive first. Pass include to narrow it. The shape it returns is the shape page_storage_set takes, so a signed-in session can be read once here and restored later or in another tab without going through the login again.",
+        description = "Everything this site keeps on this machine, in one call: its cookies, its localStorage and its sessionStorage. Reading cookies or stored data asks the person in Dive first. Pass include to narrow it. The shape it returns is the shape page_storage_set takes, so a signed-in session can be read once here and restored later or in another tab without going through the login again.",
         annotations(
             title = "Page storage",
             read_only_hint = true,
@@ -524,6 +524,17 @@ impl<B: Browser> DiveServer<B> {
             .is_none_or(|kinds| kinds.contains(&crate::params::StorageKind::Cookies));
         if cookies {
             self.browser.confirm(Sensitive::ReadCookies { tab }).await?;
+        } else if p.include.as_ref().is_some_and(|kinds| {
+            kinds.iter().any(|k| {
+                matches!(
+                    k,
+                    crate::params::StorageKind::Local | crate::params::StorageKind::Session
+                )
+            })
+        }) {
+            // The client is not the page: it has no other way to run script
+            // here, and stored data often holds the sign-in token.
+            self.browser.confirm(Sensitive::ReadStorage { tab }).await?;
         }
         json_result(&self.browser.page_storage_get(tab, p).await?)
     }
@@ -885,14 +896,21 @@ impl<B: Browser> DiveServer<B> {
     /// Rules set.
     #[tool(
         name = "rules_set",
-        description = "Replace the workspace's mock/rewrite rules. Use to simulate API failures or canned responses; pass an empty list to clear.",
-        annotations(title = "Rules set", read_only_hint = false, destructive_hint = false)
+        description = "Replace the workspace's mock/rewrite rules. Use to simulate API failures or canned responses; pass an empty list to clear. Adding mock or header rules asks the person in Dive first.",
+        annotations(title = "Rules set", read_only_hint = false, destructive_hint = true)
     )]
     async fn rules_set(
         &self,
         Parameters(p): Parameters<RulesParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let count = p.rules.len();
+        let current = self.browser.rules().await?;
+        let added = added_rewrites(&current, &p.rules);
+        if !added.is_empty() {
+            self.browser
+                .confirm(Sensitive::ChangeRules { added })
+                .await?;
+        }
         self.browser
             .set_rules(serde_json::Value::Array(p.rules))
             .await?;
@@ -1227,6 +1245,40 @@ impl<B: Browser> DiveServer<B> {
 
 /// The most calls one batch may carry.
 pub const MAX_BATCH_STEPS: usize = 20;
+
+/// The mock and header rules in `next` that `current` does not already have,
+/// as one line each. Block rules, disabled rules, and rules being removed
+/// are not listed: none of them can put words in a site's mouth. An old rule
+/// that was switched off does not count as already present, or a client could
+/// add it off and then switch it on without being asked.
+fn added_rewrites(current: &serde_json::Value, next: &[serde_json::Value]) -> Vec<String> {
+    let existing = current.as_array().map_or(&[][..], Vec::as_slice);
+    next.iter()
+        .filter_map(|rule| {
+            if rule["enabled"] == serde_json::Value::Bool(false) {
+                return None;
+            }
+            let kind = rule["action"]["kind"].as_str()?;
+            if kind != "mock" && kind != "header" {
+                return None;
+            }
+            let present = existing.iter().any(|old| {
+                old["enabled"] != serde_json::Value::Bool(false)
+                    && old["pattern"] == rule["pattern"]
+                    && old["action"] == rule["action"]
+            });
+            if present {
+                return None;
+            }
+            let pattern = rule["pattern"].as_str().unwrap_or("");
+            let name = match rule["action"]["name"].as_str() {
+                Some(name) if kind == "header" => format!(" ({name})"),
+                _ => String::new(),
+            };
+            Some(format!("{kind} {pattern}{name}"))
+        })
+        .collect()
+}
 
 /// The text a result carries, joined; images are named rather than inlined.
 fn text_of(result: &CallToolResult) -> String {
