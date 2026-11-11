@@ -57,8 +57,9 @@ These are the parts where a bug is a security bug rather than a defect:
 ## Out of scope
 
 - Vulnerabilities in Chromium itself. Report those to the
-  [Chromium project](https://issues.chromium.org/); we pick up fixes when we
-  bump CEF. Tell us anyway if our CEF pin is what leaves users exposed.
+  [Chromium project](https://issues.chromium.org/); we update CEF monthly, and
+  within a week of a Chromium release that fixes an exploited Critical or High
+  issue (see `RELEASING.md`, *Updating CEF*). Tell us anyway if our CEF pin is what leaves users exposed.
 - Ad and tracker filter lists missing a domain. That is a filter-list gap, so
   file it as an ordinary issue.
 - Findings that need the attacker to already run code as the user, or to have

@@ -189,6 +189,48 @@ decisions can be exercised without cutting a release.
 
 ---
 
+## Updating CEF
+
+Dive's rendering engine is Chromium through CEF, so browser security fixes only
+reach users when the `cef` crate moves. Dependabot cannot do it (the weekly
+`audit` workflow does not see Chromium CVEs either), so it is a scheduled chore.
+
+**Cadence.** Check for a new `cef` crate release on the first Monday of each
+month. Also check within 7 days whenever a Chrome stable release notes a
+Critical or High severity fix that is exploited in the wild ("Google is aware
+that an exploit ... exists in the wild"). Record each check (bumped, or
+deferred with the reason) in the release notes of the next release.
+
+**Where the version lives.** A bump must change all of these together:
+
+- `apps/desktop/src-tauri/Cargo.toml`: `cef`
+- `vendor/tauri-runtime-cef/Cargo.toml`: `cef` and `cef-dll-sys`
+- `vendor/tauri-runtime-cef/UPSTREAM.md`: the Chromium behaviour evidence
+- `vendor/tauri-runtime-cef/src/cef_impl/client/permission_context.rs`: the
+  Chromium registry comment
+
+**Why Dependabot ignores it.** The vendored runtime is patched against a
+specific CEF API, so a bump is a rebase, not a version edit.
+
+**Procedure.**
+
+1. Check whether upstream `feat/cef` moved its pin:
+   `curl -s https://raw.githubusercontent.com/tauri-apps/tauri/feat/cef/crates/tauri-runtime-cef/Cargo.toml | grep '^cef'`.
+   If yes, rebase the vendored runtime per `vendor/tauri-runtime-cef/UPSTREAM.md`
+   ("Rebasing onto a newer upstream"). If no, bump `cef` and `cef-dll-sys` in
+   the vendored manifest and the app manifest together, and fix the runtime
+   against the new API.
+2. Re-verify every Chromium-specific claim in `UPSTREAM.md` (permission registry
+   names, accessibility reveal behaviour, `CefString` NULL behaviour) against
+   the new Chromium sources.
+3. Run `pnpm check`.
+4. Run the live checks (`scripts/live-check.sh`,
+   `python3 scripts/native_lifecycle_check.py`, `scripts/benchmark-memory.sh`,
+   `scripts/benchmark-startup.sh`) on a debug bundle.
+5. Ship a release candidate (`rc` bump) before a stable release.
+
+---
+
 ## Adding a second architecture
 
 Dive currently ships `darwin-aarch64` only. To add Intel:
