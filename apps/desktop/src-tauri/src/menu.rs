@@ -155,9 +155,9 @@ fn item(app: &App<Runtime>, id: &str, text: &str, accel: &str) -> tauri::Result<
 fn open_window_from_menu(app: tauri::AppHandle<Runtime>, private: bool) {
     tauri::async_runtime::spawn(async move {
         let result = if private {
-            crate::commands::window_private(app).await
+            crate::commands::open_private_window(&app).await
         } else {
-            tauri::async_runtime::spawn_blocking(move || crate::commands::window_open(app))
+            tauri::async_runtime::spawn_blocking(move || crate::commands::open_window(&app))
                 .await
                 .map_err(crate::AppError::new)
                 .and_then(std::convert::identity)
@@ -502,7 +502,7 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
             return;
         }
         if id == "private.exit" {
-            let _ = crate::commands::window_exit_private(app.clone());
+            let _ = crate::commands::exit_private_session(app);
             return;
         }
         let Some(target) = chrome_for_command(app, &id) else {

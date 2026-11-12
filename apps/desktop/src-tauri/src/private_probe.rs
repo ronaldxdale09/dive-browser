@@ -133,7 +133,7 @@ async fn run(
             return Err(AppError::new("storage lost when all page tabs closed"));
         }
         on_main(app, move |app| {
-            commands::tab_detach(app.clone(), third, None)?;
+            commands::pop_out_tab(app, third, None)?;
             app.get_window(crate::MAIN_WINDOW)
                 .ok_or_else(|| AppError::new("main missing"))?
                 .close()?;

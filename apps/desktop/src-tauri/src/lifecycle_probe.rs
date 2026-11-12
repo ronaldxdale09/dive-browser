@@ -86,7 +86,7 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
     #[cfg(feature = "cef")]
     verify_optional_probes(app, ids[1]).await?;
     on_main(app, move |handle| {
-        commands::tab_detach(handle.clone(), ids[0], None)?;
+        commands::pop_out_tab(handle, ids[0], None)?;
         popout(handle, ids[0])
             .ok_or_else(|| AppError::new("detach did not create window"))?
             .close()?;
@@ -118,7 +118,7 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
     if mode == "quit" {
         // Quit while a detached window and its renderer are still alive.
         on_main(app, move |handle| {
-            commands::tab_detach(handle.clone(), ids[1], None)
+            commands::pop_out_tab(handle, ids[1], None)
         })
         .await?;
         println!("DIVE_LIFECYCLE_PROBE: quit requested with detached window");
@@ -348,7 +348,7 @@ async fn verify_ipc_boundary(app: &tauri::AppHandle<Runtime>) -> Result<(), AppE
             "local app content in a page tab received chrome authority",
         ));
     }
-    on_main(app, move |handle| commands::tab_close(handle.clone(), id)).await?;
+    on_main(app, move |handle| commands::close_tab_from_user(handle, id)).await?;
     println!("DIVE_LIFECYCLE_PROBE: chrome IPC boundary verified");
     Ok(())
 }
@@ -393,9 +393,15 @@ async fn verify_navigation(app: &tauri::AppHandle<Runtime>, id: TabId) -> Result
     crate::navigation::tab_history_navigate(app.state(), id, pushed.generation.clone(), middle.id)
         .await?;
     wait_history_index(app, &session, id, middle_index, Some(1)).await?;
-    on_main(app, move |handle| commands::tab_back(handle.state(), id)).await?;
+    on_main(app, move |handle| {
+        commands::go_back(&handle.state::<state::AppState>(), id)
+    })
+    .await?;
     wait_history_index(app, &session, id, initial.current_index, None).await?;
-    on_main(app, move |handle| commands::tab_forward(handle.state(), id)).await?;
+    on_main(app, move |handle| {
+        commands::go_forward(&handle.state::<state::AppState>(), id)
+    })
+    .await?;
     wait_history_index(app, &session, id, middle_index, Some(1)).await?;
     if crate::navigation::tab_history_navigate(app.state(), id, "replaced-view".into(), middle.id)
         .await
@@ -472,7 +478,7 @@ async fn verify_cross_workspace_reattach(
         .ok_or_else(|| AppError::new("missing reattach session"))?;
     read_probe_value(&session, "window.__diveReattachSentinel = { intact: true }").await?;
     on_main(app, move |handle| {
-        commands::tab_detach(handle.clone(), id, None)?;
+        commands::pop_out_tab(handle, id, None)?;
         let state = handle.state::<state::AppState>();
         let (owner, other) = {
             let store = state::lock(&state.store);
@@ -494,7 +500,7 @@ async fn verify_cross_workspace_reattach(
         state
             .bus
             .publish(dive_core::CoreEvent::WorkspaceUpserted(other.clone()));
-        commands::workspace_activate(handle.clone(), handle.state(), other.id)?;
+        commands::activate_workspace(handle, &state, other.id)?;
         let main = engine::MainThread::here().ok_or_else(|| AppError::new("not main thread"))?;
         commands::activate_tab(&main, handle, &state, id)?;
         if *state::lock(&state.active_workspace) != Some(other.id) {
@@ -502,7 +508,7 @@ async fn verify_cross_workspace_reattach(
                 "raising detached page changed main workspace",
             ));
         }
-        commands::tab_attach(handle.clone(), id)?;
+        commands::attach_tab(handle, id)?;
         let host = state::lock(&state.host);
         let store = state::lock(&state.store);
         if host
@@ -577,10 +583,7 @@ pub(crate) async fn verify_discarded_and_wake(
     })
     .await?;
     let id = tab.id;
-    on_main(app, move |handle| {
-        commands::tab_activate(handle.clone(), id)
-    })
-    .await?;
+    on_main(app, move |handle| commands::show_tab(handle, id)).await?;
     let session = state::lock(&app.state::<state::AppState>().host)
         .as_ref()
         .and_then(|host| host.cdp(id))

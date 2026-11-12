@@ -433,16 +433,13 @@ pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppErr
     .await?;
     let chrome = page(view, session).await?;
     // Activate only the target; the control remains a live background page.
-    on_main(app, move |app| {
-        commands::tab_activate(app.clone(), target_id)
-    })
-    .await?;
+    on_main(app, move |app| commands::show_tab(app, target_id)).await?;
     let result = exercise(app, target_id, &target, &sibling, &chrome).await;
     chrome.session.close();
     result?;
     on_main(app, move |app| {
-        commands::tab_close(app.clone(), target_id)?;
-        commands::tab_close(app.clone(), sibling_id)
+        commands::close_tab_from_user(app, target_id)?;
+        commands::close_tab_from_user(app, sibling_id)
     })
     .await?;
     println!(

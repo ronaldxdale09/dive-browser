@@ -1960,10 +1960,10 @@ impl Browser for AppBrowser {
         let workspace = self
             .on_main(move |app| {
                 let state = app.state::<AppState>();
-                crate::commands::workspace_create(
-                    app.clone(),
-                    state,
-                    crate::commands::WorkspaceDraft {
+                crate::commands::create_workspace(
+                    app,
+                    &state,
+                    &crate::commands::WorkspaceDraft {
                         name,
                         // A colour of its own, so a context an agent made is
                         // recognisable in the rail as one the person did not.
@@ -2019,7 +2019,7 @@ impl Browser for AppBrowser {
                     "that is the only context; there would be nowhere to browse",
                 ));
             }
-            crate::commands::workspace_delete(app.clone(), state, id).map_err(|e| other(e.message))
+            crate::commands::delete_workspace(app, &state, id).map_err(|e| other(e.message))
         })
         .await??;
         lock(agent_contexts()).remove(&id);

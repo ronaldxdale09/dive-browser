@@ -612,7 +612,7 @@ pub(crate) fn webapp_uninstall(app: AppHandle<Runtime>, app_id: String) -> AppRe
             .as_ref()
             .and_then(|h| h.tab_for_app(&app_id));
         if let Some(tab) = open_tab {
-            crate::commands::tab_attach(app.clone(), tab)?;
+            crate::commands::attach_tab(&app, tab)?;
         }
         lock(&state.store).remove_web_app(&app_id)?;
         (record, others)

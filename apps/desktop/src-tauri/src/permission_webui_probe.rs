@@ -256,7 +256,7 @@ async fn exercise_hidden(
     Ok(reply["result"]["value"].clone())
 }
 async fn close(app: &tauri::AppHandle<Runtime>, tab: TabId, view: Native) -> Result<(), AppError> {
-    on_main(app, move |app| commands::tab_close(app.clone(), tab)).await?;
+    on_main(app, move |app| commands::close_tab_from_user(app, tab)).await?;
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let view = view.clone();
@@ -293,7 +293,7 @@ pub(super) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppErr
     let view = match native(app, tab).await {
         Ok(view) => view,
         Err(error) => {
-            let cleanup = on_main(app, move |app| commands::tab_close(app.clone(), tab)).await;
+            let cleanup = on_main(app, move |app| commands::close_tab_from_user(app, tab)).await;
             return Err(AppError::new(format!(
                 "Native WebUI handle failed: {error}; cleanup: {cleanup:?}"
             )));

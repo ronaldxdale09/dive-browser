@@ -55,6 +55,12 @@ pub(crate) fn tab_info(state: State<'_, AppState>, id: TabId) -> AppResult<Tab> 
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn window_private(app: AppHandle<Runtime>) -> AppResult<()> {
+    open_private_window(&app).await
+}
+
+/// Open the private session's window off the calling thread.
+pub(crate) async fn open_private_window(app: &AppHandle<Runtime>) -> AppResult<()> {
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || crate::private_session::open(&app))
         .await
         .map_err(AppError::new)?
@@ -63,10 +69,15 @@ pub(crate) async fn window_private(app: AppHandle<Runtime>) -> AppResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn window_open(app: AppHandle<Runtime>) -> AppResult<()> {
+    open_window(&app)
+}
+
+/// Open a window: a normal one from a private session, else in this process.
+pub(crate) fn open_window(app: &AppHandle<Runtime>) -> AppResult<()> {
     if crate::private_session::is_private() {
         return crate::normal_window::open();
     }
-    window_open_local(app)
+    window_open_local(app.clone())
 }
 
 /// Create a window in this process, retaining its current privacy boundary.
@@ -88,6 +99,11 @@ pub(crate) fn window_open_local(app: AppHandle<Runtime>) -> AppResult<()> {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn window_exit_private(app: AppHandle<Runtime>) -> AppResult<()> {
+    exit_private_session(&app)
+}
+
+/// End the private session by exiting the process.
+pub(crate) fn exit_private_session(app: &AppHandle<Runtime>) -> AppResult<()> {
     if !crate::private_session::is_private() {
         return Err(AppError::new("This is not a private session"));
     }
@@ -429,7 +445,16 @@ pub(crate) fn tab_detach(
     id: TabId,
     at: Option<(f64, f64)>,
 ) -> AppResult<()> {
-    on_main(&app, move |main, app, state| {
+    pop_out_tab(&app, id, at)
+}
+
+/// `detach_tab` from any thread: hops to the main thread first.
+pub(crate) fn pop_out_tab(
+    app: &AppHandle<Runtime>,
+    id: TabId,
+    at: Option<(f64, f64)>,
+) -> AppResult<()> {
+    on_main(app, move |main, app, state| {
         detach_tab(main, app, state, id, at, None)
     })
 }
@@ -486,7 +511,12 @@ pub(crate) fn detach_tab(
 #[specta::specta]
 /// Bring `id` back from its own window and show it in the main one.
 pub(crate) fn tab_attach(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
-    on_main(&app, move |main, app, state| {
+    attach_tab(&app, id)
+}
+
+/// Bring `id` back from its own window, from any thread.
+pub(crate) fn attach_tab(app: &AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(app, move |main, app, state| {
         let workspace = {
             let mut host = lock(&state.host);
             let host = host

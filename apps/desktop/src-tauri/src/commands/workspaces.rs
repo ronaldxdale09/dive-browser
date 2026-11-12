@@ -20,6 +20,16 @@ pub(crate) fn workspace_activate(
     state: State<'_, AppState>,
     id: WorkspaceId,
 ) -> AppResult<()> {
+    activate_workspace(&app, &state, id)
+}
+
+/// Make `id` the active workspace: remember it, hide the old one's views and
+/// show the new one's tab. What the command, the probes and the MCP server share.
+pub(crate) fn activate_workspace(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: WorkspaceId,
+) -> AppResult<()> {
     // Host before store, and released before it: the main thread takes them
     // in that order.
     let detached = lock(&state.host)
@@ -38,7 +48,7 @@ pub(crate) fn workspace_activate(
     // Hiding the old workspace's views is native view work too, so it makes
     // the same hop as showing the new one; off the main thread it raced the
     // engine's own view changes.
-    on_main(&app, move |main, app, state| {
+    on_main(app, move |main, app, state| {
         if let Some(host) = lock(&state.host).as_mut() {
             host.deactivate_all()?;
         }
@@ -153,6 +163,16 @@ pub(crate) fn workspace_create(
     draft: WorkspaceDraft,
     separate_container: bool,
 ) -> AppResult<Workspace> {
+    create_workspace(&app, &state, &draft, separate_container)
+}
+
+/// Create a workspace in the profile you are in and switch to it.
+pub(crate) fn create_workspace(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    draft: &WorkspaceDraft,
+    separate_container: bool,
+) -> AppResult<Workspace> {
     let name = clean_name(&draft.name)?;
     // Validate every user field before creating a separate container. A bad
     // color or icon must not leave an orphan profile row behind.
@@ -181,7 +201,7 @@ pub(crate) fn workspace_create(
     state
         .bus
         .publish(CoreEvent::WorkspaceUpserted(workspace.clone()));
-    workspace_activate(app, state, workspace.id)?;
+    activate_workspace(app, state, workspace.id)?;
     Ok(workspace)
 }
 
@@ -216,6 +236,15 @@ pub(crate) fn workspace_delete(
     state: State<'_, AppState>,
     id: WorkspaceId,
 ) -> AppResult<()> {
+    delete_workspace(&app, &state, id)
+}
+
+/// Delete a workspace and its tabs; see `workspace_delete` for the rules.
+pub(crate) fn delete_workspace(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: WorkspaceId,
+) -> AppResult<()> {
     let (tab_ids, next, container) = {
         let store = lock(&state.store);
         let workspace = store.workspace(id)?;
@@ -238,7 +267,7 @@ pub(crate) fn workspace_delete(
             container,
         )
     };
-    close_views(&app, &state, &tab_ids);
+    close_views(app, state, &tab_ids);
     {
         let store = lock(&state.store);
         store.remove_workspace(id)?;
@@ -253,7 +282,7 @@ pub(crate) fn workspace_delete(
     state.bus.publish(CoreEvent::WorkspaceRemoved(id));
     let was_active = *lock(&state.active_workspace) == Some(id);
     if was_active && let Some(next) = next {
-        workspace_activate(app, state, next)?;
+        activate_workspace(app, state, next)?;
     }
     Ok(())
 }
@@ -427,7 +456,7 @@ pub(crate) fn profile_create(
     state
         .bus
         .publish(CoreEvent::WorkspaceUpserted(workspace.clone()));
-    workspace_activate(app, state, workspace.id)?;
+    activate_workspace(&app, &state, workspace.id)?;
     Ok(profile)
 }
 
@@ -477,7 +506,7 @@ pub(crate) fn profile_activate(
             .ok_or_else(|| AppError::new("this profile has no workspace"))?
     };
     state.bus.publish(CoreEvent::ProfileActivated(id));
-    workspace_activate(app, state, target)
+    activate_workspace(&app, &state, target)
 }
 
 /// Delete a profile with everything in it: its workspaces and tabs, its

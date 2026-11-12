@@ -221,8 +221,8 @@ pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppErr
     let other = open(app, other_scope.id).await?;
     verify_isolation(app, second, other).await?;
     on_main(app, move |app| {
-        commands::tab_close(app.clone(), first)?;
-        commands::tab_close(app.clone(), second)?;
+        commands::close_tab_from_user(app, first)?;
+        commands::close_tab_from_user(app, second)?;
         Ok(())
     })
     .await?;
@@ -264,8 +264,8 @@ pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppErr
     })
     .await?;
     on_main(app, move |app| {
-        commands::tab_close(app.clone(), reopened)?;
-        commands::tab_close(app.clone(), other)?;
+        commands::close_tab_from_user(app, reopened)?;
+        commands::close_tab_from_user(app, other)?;
         Ok(())
     })
     .await?;

@@ -33,28 +33,31 @@ mod tabs;
 mod windows;
 mod workspaces;
 
-pub use app::UpdateInfo;
-pub(crate) use app::updater_configured;
-pub use capture::capture_tab;
-use capture::stamped_capture;
-pub(crate) use capture::{capture_stem, captures_dir};
-pub(crate) use devtools::{reapply_interception, reapply_rules};
-pub use palette::register_builtin;
-pub(crate) use prefs_commands::prefs_set;
-pub use tabs::{activate_tab, close_tab, open_tab, open_tab_with};
+// Reachable from the rest of the crate as `commands::<name>`.
+pub(crate) use app::{UpdateInfo, updater_configured};
+pub(crate) use capture::{capture_stem, capture_tab, captures_dir};
+pub(crate) use devtools::reapply_rules;
+pub(crate) use palette::register_builtin;
 pub(crate) use tabs::{
-    focus_page, page_agreed_to_close, rebuild_failed_protocol, request_tab_close, tab_activate,
-    tab_back, tab_close, tab_forward, tab_navigate,
+    activate_tab, close_tab, close_tab_from_user, focus_page, go_back, go_forward, open_tab,
+    open_tab_with, page_agreed_to_close, rebuild_failed_protocol, request_tab_close, show_tab,
 };
-pub(crate) use windows::detach_tab;
 pub(crate) use windows::{
-    tab_attach, tab_detach, window_exit_private, window_open, window_open_local, window_private,
+    attach_tab, detach_tab, exit_private_session, open_private_window, open_window, pop_out_tab,
+    window_open_local,
 };
-pub use workspaces::WorkspaceDraft;
 pub(crate) use workspaces::{
-    active_profile, forget_tab_state, workspace_activate, workspace_create, workspace_delete,
+    WorkspaceDraft, activate_workspace, active_profile, create_workspace, delete_workspace,
 };
-use workspaces::{profile_workspace_key, workspace_tab_key, workspace_tab_to_show};
+
+// Shared between sibling modules.
+use capture::stamped_capture;
+use devtools::reapply_interception;
+use prefs_commands::prefs_set;
+use tabs::tab_navigate;
+use workspaces::{
+    forget_tab_state, profile_workspace_key, workspace_tab_key, workspace_tab_to_show,
+};
 
 /// Emitted whenever core state changes; carries the change itself.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

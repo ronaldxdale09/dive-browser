@@ -194,7 +194,12 @@ pub fn open_tab_with(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_close(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
-    on_main(&app, move |main, app, state| {
+    close_tab_from_user(&app, id)
+}
+
+/// `request_tab_close` from any thread: hops to the main thread first.
+pub(crate) fn close_tab_from_user(app: &AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(app, move |main, app, state| {
         request_tab_close(main, app, state, id)
     })
 }
@@ -318,7 +323,12 @@ pub fn close_tab(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_activate(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
-    on_main(&app, move |main, app, state| {
+    show_tab(&app, id)
+}
+
+/// `activate_tab` from any thread: hops to the main thread first.
+pub(crate) fn show_tab(app: &AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(app, move |main, app, state| {
         activate_tab(main, app, state, id)
     })
 }
@@ -549,13 +559,23 @@ pub(crate) fn tab_set_pinned(state: State<'_, AppState>, id: TabId, pinned: bool
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_back(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
-    with_view(&state, id, tauri::Webview::go_back)
+    go_back(&state, id)
+}
+
+/// Step a tab's page back in its history.
+pub(crate) fn go_back(state: &AppState, id: TabId) -> AppResult<()> {
+    with_view(state, id, tauri::Webview::go_back)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_forward(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
-    with_view(&state, id, tauri::Webview::go_forward)
+    go_forward(&state, id)
+}
+
+/// Step a tab's page forward in its history.
+pub(crate) fn go_forward(state: &AppState, id: TabId) -> AppResult<()> {
+    with_view(state, id, tauri::Webview::go_forward)
 }
 
 #[tauri::command]
