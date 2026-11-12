@@ -3877,6 +3877,18 @@ pub fn start(app: AppHandle<Runtime>) {
         allow_evaluate: env_switch("DIVE_MCP_ALLOW_EVAL"),
         token: Some(token),
     };
+    // Both switches widen what a connected client may do without the person
+    // saying so; a log line is the only place they announce themselves.
+    if env_switch("DIVE_MCP_SKIP_CONFIRM") {
+        tracing::warn!(
+            "DIVE_MCP_SKIP_CONFIRM is set: MCP clients upload files and read cookies without asking"
+        );
+    }
+    if config.allow_evaluate {
+        tracing::warn!(
+            "DIVE_MCP_ALLOW_EVAL is set: MCP clients may run arbitrary JavaScript in pages"
+        );
+    }
     let browser = Arc::new(AppBrowser::new(app));
     tauri::async_runtime::spawn(async move {
         match dive_mcp::serve(browser, config, ([127, 0, 0, 1], port).into()).await {
