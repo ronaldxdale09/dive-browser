@@ -137,7 +137,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
 }
 
 function Row({ item, onReveal, onOpen, onCancel, onResume }: { item: Item; onReveal: () => void; onOpen: () => void; onCancel?: (() => void) | undefined; onResume?: (() => void) | undefined }) {
-  let host = "";
+  let host: string;
   try {
     host = new URL(item.url).host;
   } catch {

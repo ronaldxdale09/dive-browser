@@ -36,7 +36,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@eslint/js": "^9",
+    "@eslint/js": "^10",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli-cef": "3.0.0-alpha.26",
     "@testing-library/react": "^16",
@@ -44,12 +44,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-plugin-react-hooks": "^7",
     "jsdom": "^27",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9",
-    "typescript-eslint": "^8.69.0",
+    "typescript-eslint": "^8.72.2",
     "vite": "^8",
     "vitest": "^4.1.11"
   }

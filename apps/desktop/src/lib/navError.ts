@@ -165,7 +165,7 @@ function portOf(url: string): string | null {
  * bar treats it as a query, not another host. Empty when there is no host.
  */
 export function searchTermFor(url: string): string {
-  let host = "";
+  let host: string;
   try {
     host = new URL(url).hostname;
   } catch {

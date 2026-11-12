@@ -976,7 +976,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await run(set, () => ipc.tabAttach(id));
   },
   closeIfOnlyDownload: async (id, url) => {
-    let history: NavigationHistory | null = null;
+    let history: NavigationHistory;
     try {
       history = await ipc.tabHistory(id);
     } catch {
