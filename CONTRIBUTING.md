@@ -121,6 +121,15 @@ npx skills add remotion-dev/skills
 npx skills add heygen-com/hyperframes
 ```
 
+## Debugging
+
+- **Logs**: `<data dir>/logs/dive.<date>.log`, one file a day, the last 7 kept. The data dir is `~/Library/Application Support/app.dive.browser` on macOS, `%APPDATA%\dive` on Windows and `~/.local/share/dive` on Linux; `DIVE_DATA_DIR` overrides it. The default filter is `info,dive=debug` in every build. Set `RUST_LOG=dive=trace` (or any `EnvFilter` string) for more. The console carries the same lines. Per-request lines belong at `trace`, never `debug`: the debug lines are the trail a freeze report is diagnosed from, so they stay off the hot paths.
+- **Crash reports**: a Rust panic is written to `<data dir>/crashes/` with the version and a backtrace.
+- **Private windows** write neither logs nor crash reports, so reproduce in a normal window.
+- **DevTools on the chrome and pages**: start Dive with `--remote-debugging-port=P`, or with `DIVE_CHROMIUM_FLAGS=remote-debugging-port=P`. Then open `chrome://inspect` in Chrome, or point a CDP client at `127.0.0.1:P`. A private window's process listens on `P + 1`.
+- **A throwaway instance**: `DIVE_DATA_DIR=$(mktemp -d) DIVE_USE_MOCK_KEYCHAIN=1 DIVE_SKIP_ONBOARDING=1 <binary>`, never a real profile.
+- **Calling one MCP tool from a shell**: `python3 scripts/mcp-call.py --data-dir DIR --port 7391 call tabs_list '{}'`. Every tool and its parameters: [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
+
 ## Commits and pull requests
 
 - Write the subject as what the change does for the user: `Subtitles: fix
