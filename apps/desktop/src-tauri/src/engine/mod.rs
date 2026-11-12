@@ -3,13 +3,12 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use dive_cdp::CdpSession;
 use dive_core::{Container, CoreEvent, Tab, TabId, VisitChange};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::webview::{DownloadEvent, WebviewBuilder};
+use tauri::webview::WebviewBuilder;
 use tauri::{App, AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, Window};
 use tauri_specta::Event;
 
@@ -21,6 +20,26 @@ const GROUND: tauri::utils::config::Color = tauri::utils::config::Color(0x11, 0x
 
 use crate::state::{AppState, lock};
 use crate::{CHROME_LABEL, MAIN_WINDOW, Runtime};
+
+mod downloads;
+mod popout;
+mod window_geometry;
+mod zoom;
+
+#[cfg(feature = "cef")]
+pub use downloads::watch_download_progress;
+pub use downloads::{DownloadNotice, DownloadProgress, downloads_dir, unique_path};
+pub use window_geometry::{
+    WINDOW_BOUNDS, WindowBounds, remember_window_bounds, remember_window_bounds_throttled,
+    visible_position, windowed_bounds,
+};
+pub use zoom::TabZoom;
+
+use downloads::handle_download;
+use popout::Popout;
+use window_geometry::screen_areas;
+#[cfg(feature = "cef")]
+use zoom::{SITE_ZOOM_ATTEMPTS, SiteZoomState, schedule_site_zoom};
 
 /// Ordinary bindings stay within main; detach explicitly selects its cross-window route.
 #[cfg(any(all(feature = "cef", target_os = "macos"), test))]
@@ -108,302 +127,6 @@ fn bind_detached_new_tab_shortcuts(
     }) {
         tracing::warn!(%error, "reading detached New Tab target failed");
     }
-}
-
-/// A download started or finished; shown as a toast.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, Event)]
-pub struct DownloadNotice {
-    /// The tab the download came from, when a page asked for it.
-    pub tab: Option<TabId>,
-    /// Source URL.
-    pub url: String,
-    /// Where the file is (or will be) written.
-    pub path: String,
-    /// `started` | `finished` | `failed` | `cancelled`.
-    pub status: String,
-    /// Why a download failed, when the engine said: Chromium's reason, such
-    /// as `FILE_NO_SPACE`, `FILE_ACCESS_DENIED` or `NETWORK_FAILED`.
-    #[specta(optional)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// The engine's id for the download, when known; resuming needs it.
-    #[specta(optional)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<u32>,
-    /// The network dropped, and the download can pick up where it stopped.
-    #[specta(optional)]
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub resumable: bool,
-}
-
-/// How far a download has got, while it is still going.
-///
-/// Separate from [`DownloadNotice`], which says only that something started or
-/// ended. This is the one the progress bar reads, and it arrives about four
-/// times a second per download.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
-pub struct DownloadProgress {
-    /// CEF's id, and the handle for cancelling.
-    pub id: u32,
-    /// Source URL, for matching against a row that has no path yet.
-    pub url: String,
-    /// Destination, once CEF has decided on one.
-    pub path: String,
-    /// Bytes written so far. A float because that is what JavaScript has, and
-    /// it counts whole bytes exactly far past any file anyone will download.
-    pub received: f64,
-    /// Total size when the server declared one. A chunked response has none.
-    pub total: Option<f64>,
-    /// Bytes per second.
-    pub speed: f64,
-    /// Whether it is paused.
-    pub paused: bool,
-    /// Set when the engine interrupted it, with Chromium's reason.
-    #[specta(optional)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupted: Option<String>,
-}
-
-/// How far the update download has got.
-///
-/// The updater reports every chunk; this is throttled by nothing because a
-/// single update is one download and the chrome coalesces renders anyway.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
-pub struct UpdateProgress {
-    /// Bytes downloaded so far.
-    pub received: f64,
-    /// Total size when the release declared one.
-    pub total: Option<f64>,
-    /// Set once the download is done and the install begins.
-    pub done: bool,
-}
-
-/// Forward the runtime's download progress to the chrome.
-///
-/// Registered once at startup. The runtime throttles to about four reports a
-/// second per download, so this is a cheap passthrough rather than a place
-/// that needs its own rate limit.
-#[cfg(feature = "cef")]
-pub fn watch_download_progress(app: &AppHandle<Runtime>) {
-    let app = app.clone();
-    tauri_runtime_cef::downloads::on_download_progress(move |p| {
-        let state = app.state::<AppState>();
-        let downloads = &state.downloads;
-        downloads.track(p.id, &p.url, &p.path);
-        // Reported before the engine's finish, which names only the address
-        // and path: this is where the finish learns why it failed.
-        if let Some(reason) = &p.interrupted {
-            downloads.interrupted(p.id, reason);
-        }
-        #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes; files are smaller.
-        let _ = DownloadProgress {
-            id: p.id,
-            url: p.url,
-            path: p.path,
-            received: p.received as f64,
-            total: p.total.map(|t| t as f64),
-            speed: p.speed as f64,
-            paused: p.paused,
-            interrupted: p.interrupted,
-        }
-        .emit(&app);
-    });
-}
-
-/// `~/Downloads`, or the temp dir when the home is unknown.
-pub fn downloads_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    home.map_or_else(std::env::temp_dir, |h| h.join("Downloads"))
-}
-
-/// Pick a path in `dir` for `suggested`, appending ` (n)` if taken.
-pub fn unique_path(dir: &std::path::Path, suggested: &str) -> PathBuf {
-    let name = std::path::Path::new(suggested)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("download");
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
-        _ => (name.to_owned(), String::new()),
-    };
-    let mut candidate = dir.join(name);
-    let mut n = 1;
-    // Created, not merely checked. Two downloads of the same name starting
-    // together both used to find the name free and both take it, so the second
-    // overwrote the first -- the one thing this function exists to prevent.
-    // Creating it exclusively means the winner holds the name.
-    loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            // Anything other than "taken" -- a read-only directory, a name the
-            // filesystem refuses -- is for the caller to report: hand back the
-            // candidate and let the write fail where it can be explained.
-            Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return candidate,
-            Ok(_) => return candidate,
-            Err(_) => {
-                candidate = dir.join(format!("{stem} ({n}){ext}"));
-                n += 1;
-            }
-        }
-    }
-}
-
-/// Shared by page views and chrome-owned editors. Blob exports from capture,
-/// recording and developer tools need the same destination and notices as pages.
-fn handle_download(
-    app: &AppHandle<Runtime>,
-    event: DownloadEvent<'_>,
-    source: Option<(TabId, &str)>,
-) -> bool {
-    let notice = match event {
-        DownloadEvent::Requested { url, destination } => {
-            let state = app.state::<AppState>();
-            let dir = state.prefs.get(&state).download_dir();
-            match download_destination(&dir, destination, &url) {
-                Ok(path) => *destination = path,
-                Err(error) => {
-                    tracing::warn!(%error, "preparing download destination failed");
-                    let _ = DownloadNotice {
-                        tab: source.map(|(tab, _)| tab),
-                        url: url.to_string(),
-                        path: String::new(),
-                        status: "failed".into(),
-                        ..DownloadNotice::default()
-                    }
-                    .emit(app);
-                    return false;
-                }
-            }
-            if let Some((tab, nonce)) = source {
-                state.activity.download(tab, nonce, url.as_str(), true);
-            }
-            let path = destination.to_string_lossy().into_owned();
-            state.downloads.placeholder(url.as_str(), &path);
-            DownloadNotice {
-                tab: source.map(|(tab, _)| tab),
-                url: url.to_string(),
-                path,
-                status: "started".into(),
-                ..DownloadNotice::default()
-            }
-        }
-        DownloadEvent::Finished { url, path, success } => {
-            let state = app.state::<AppState>();
-            if let Some((tab, nonce)) = source {
-                state.activity.download(tab, nonce, url.as_str(), false);
-            }
-            let path = path
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            // Asked for, not gone wrong: a download the person cancelled says
-            // so rather than claiming it failed, and one the engine interrupted
-            // says why.
-            let ended = state.downloads.end(url.as_str(), &path);
-            let cancelled = !success && ended.cancelled;
-            // The empty file that held the name is only worth keeping under
-            // a finished download, which wrote over it.
-            let placeholder = state.downloads.take_placeholder(url.as_str(), &path);
-            if !success && let Some(placeholder) = placeholder {
-                remove_placeholder(placeholder);
-            }
-            let reason = (!success && !cancelled).then_some(ended.reason).flatten();
-            DownloadNotice {
-                tab: source.map(|(tab, _)| tab),
-                url: url.to_string(),
-                path,
-                status: if success {
-                    "finished"
-                } else if cancelled {
-                    "cancelled"
-                } else {
-                    "failed"
-                }
-                .into(),
-                resumable: reason.as_deref().is_some_and(download_resumable),
-                id: ended.id,
-                reason,
-            }
-        }
-        _ => return true,
-    };
-    app.state::<AppState>().downloads.record(&notice);
-    persist_download(app, &notice);
-    let _ = notice.emit(app);
-    true
-}
-
-/// Whether a download that stopped for `reason` can pick up where it left
-/// off: only when the network went away. A full disk or a refused file would
-/// fail the same way again.
-fn download_resumable(reason: &str) -> bool {
-    #[cfg(feature = "cef")]
-    return tauri_runtime_cef::downloads::resumable(reason);
-    #[cfg(not(feature = "cef"))]
-    reason.starts_with("NETWORK_")
-}
-
-/// Delete the empty file [`unique_path`] made to hold a download's name,
-/// once that download failed or was cancelled. Only while it is still
-/// empty: anything with bytes in it is not ours to throw away. Off the
-/// engine's thread, since it touches the disk.
-fn remove_placeholder(path: PathBuf) {
-    tauri::async_runtime::spawn_blocking(move || {
-        if std::fs::metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
-            && let Err(error) = std::fs::remove_file(&path)
-        {
-            tracing::debug!(%error, path = %path.display(), "could not remove a download's placeholder");
-        }
-    });
-}
-
-/// Keep a download in the profile's list, so the Library still shows it
-/// after a restart. Off the thread that reported it -- CEF calls from its UI
-/// thread, and this touches the database and, for a finished file, the disk.
-/// A private session keeps nothing.
-fn persist_download(app: &AppHandle<Runtime>, notice: &DownloadNotice) {
-    if crate::private_session::is_private() {
-        return;
-    }
-    let app = app.clone();
-    let notice = notice.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let bytes = (notice.status == "finished")
-            .then(|| std::fs::metadata(&notice.path).ok().map(|m| m.len()))
-            .flatten();
-        let state = app.state::<AppState>();
-        if let Err(error) = crate::state::lock(&state.store).record_download(
-            &notice.url,
-            &notice.path,
-            &notice.status,
-            bytes,
-            dive_core::Timestamp::now(),
-        ) {
-            tracing::warn!(%error, "could not keep the download in the Library");
-        }
-    });
-}
-
-fn download_destination(
-    dir: &std::path::Path,
-    suggested: &std::path::Path,
-    url: &url::Url,
-) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(dir)?;
-    let name = suggested
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_else(|| {
-            url.path_segments()
-                .and_then(|mut parts| parts.next_back())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("download")
-        });
-    Ok(unique_path(dir, name))
 }
 
 /// Rectangle of the content area in logical pixels, relative to the window.
@@ -586,16 +309,6 @@ impl PopoutAddressFocus {
     }
 }
 
-/// A tab living in its own window.
-struct Popout {
-    window: Window<Runtime>,
-    bounds: Bounds,
-    /// Label of the chrome webview inside the window.
-    chrome: String,
-    address_focus: PopoutAddressFocus,
-    covered: bool,
-}
-
 /// Numbers popout windows so a tab torn off, brought back and torn off
 /// again never reuses a label the runtime may still be tearing down.
 static POPOUT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -629,27 +342,6 @@ fn main_content_bounds(width: f64, height: f64, expanded_rail: bool) -> Bounds {
         width: (width - rail).max(1.0),
         height: (height - 84.0).max(1.0),
     }
-}
-
-/// Destroys a window on drop unless disarmed: the popout builder's rollback.
-struct DestroyOnDrop(Option<Window<Runtime>>);
-
-impl DestroyOnDrop {
-    fn disarm(mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for DestroyOnDrop {
-    fn drop(&mut self) {
-        if let Some(window) = self.0.take() {
-            let _ = window.destroy();
-        }
-    }
-}
-
-fn scopeguard_destroy(window: Window<Runtime>) -> DestroyOnDrop {
-    DestroyOnDrop(Some(window))
 }
 
 /// How an installed web app's window differs from a torn-off tab's: it is
@@ -1592,185 +1284,6 @@ impl TabHost {
         Ok(())
     }
 
-    /// Tear `id` off into its own window at `at` (logical, relative to the
-    /// main window's origin), keeping the page exactly as it is: the native
-    /// view is reparented, not recreated.
-    #[allow(clippy::too_many_lines)] // One place builds the window, its chrome and the reparent, in the order that keeps a failure from stranding a view.
-    pub fn detach(
-        &mut self,
-        app: &AppHandle<Runtime>,
-        id: TabId,
-        title: &str,
-        at: Option<(f64, f64)>,
-        web_app: Option<&AppWindowSpec>,
-    ) -> tauri::Result<()> {
-        if self.popouts.contains_key(&id) {
-            return Ok(());
-        }
-        let view = self
-            .views
-            .get(&id)
-            .cloned()
-            .ok_or(tauri::Error::WebviewNotFound)?;
-        // An app window comes back at the frame it last had; a torn-off tab
-        // is sized from the page it came from.
-        let remembered = web_app.and_then(|spec| spec.bounds.as_ref());
-        let width = remembered.map_or_else(
-            || self.bounds.width.clamp(480.0, 1100.0),
-            |b| b.width.clamp(360.0, 2400.0),
-        );
-        let height = remembered.map_or_else(
-            || (self.bounds.height + POPOUT_CHROME_HEIGHT).clamp(360.0, 900.0),
-            |b| b.height.clamp(240.0, 1600.0),
-        );
-        let seq = POPOUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let chrome = popout_chrome_label(seq, id);
-        let mut builder = tauri::window::WindowBuilder::new(app, popout_label(seq, id))
-            .title(if let Some(spec) = web_app {
-                spec.name.as_str()
-            } else if crate::private_session::is_private() {
-                "Dive — Private Window"
-            } else if title.is_empty() {
-                "Dive"
-            } else {
-                title
-            })
-            .background_color(GROUND)
-            // Shown once its chrome has painted (below), so the window never
-            // appears as a bare band with the page hanging under it.
-            .visible(false)
-            .inner_size(width, height)
-            .min_inner_size(POPOUT_MIN_WIDTH, POPOUT_MIN_HEIGHT);
-        // The chrome draws its own title bar, with the tabs sitting beside
-        // the traffic lights. That is a macOS window style; Tauri does not
-        // offer it elsewhere; Windows gets the same
-        // effect from `decorations(false)` plus the chrome's own controls.
-        #[cfg(target_os = "macos")]
-        {
-            builder = builder
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true);
-        }
-        // Windows draws a title bar of its own above the chrome's, so the
-        // window ends up with two. The chrome is the title bar here as much
-        // as on macOS, so the frame goes and `WindowControls` supplies the
-        // minimise, maximise and close buttons in the corner Windows keeps
-        // them.
-        #[cfg(target_os = "windows")]
-        {
-            builder = builder.decorations(false);
-        }
-        builder = builder.resizable(true).prevent_overflow();
-        let screens = screen_areas(&self.window.available_monitors().unwrap_or_default());
-        if let Some((x, y)) = remembered.and_then(|b| visible_position(b, &screens)) {
-            builder = builder.position(x, y);
-        } else if let Some((x, y)) = at {
-            let scale = self.window.scale_factor()?;
-            let origin = self.window.outer_position()?.to_logical::<f64>(scale);
-            // The pointer sits on the tab pill it dragged; put the window so
-            // that pill lands under it rather than a corner.
-            builder = builder.position(
-                (origin.x + x - 120.0).max(0.0),
-                (origin.y + y - 20.0).max(0.0),
-            );
-        } else {
-            builder = builder.center();
-        }
-        let window = builder.build()?;
-        // Nothing may fail between here and the reparent without taking the
-        // window down again: an empty invisible window would keep the app
-        // from exiting once every other window is gone.
-        let window_guard = scopeguard_destroy(window.clone());
-        let chrome_dev_url = if cfg!(debug_assertions) {
-            app.config().build.dev_url.clone()
-        } else {
-            None
-        };
-        let chrome_popup_app = app.clone();
-        let chrome_download_app = app.clone();
-        let chrome_view = window.add_child(
-            private_chrome(WebviewBuilder::new(
-                chrome.clone(),
-                WebviewUrl::App(
-                    match web_app {
-                        Some(spec) => format!(
-                            "index.html?popout={id}&app={}",
-                            url::form_urlencoded::byte_serialize(spec.id.as_bytes())
-                                .collect::<String>()
-                        ),
-                        None => format!("index.html?popout={id}"),
-                    }
-                    .into(),
-                ),
-            ))
-            .on_navigation(move |url| {
-                crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
-            })
-            .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, Some(id), url))
-            .on_download(move |_, event| handle_download(&chrome_download_app, event, None))
-            .background_color(GROUND)
-            .on_page_load(|webview, payload| {
-                if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                    reveal(&webview.window());
-                }
-            })
-            .auto_resize(),
-            LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(width, height),
-        )?;
-        #[cfg(feature = "cef")]
-        {
-            crate::permissions::attach_chrome(&chrome_view)?;
-            watch_chrome_creation(&chrome_view, Some(id))?;
-        }
-        reveal_soon(window.clone());
-        crate::titlebar::keep_drags_in_chrome_soon(&window);
-        view.reparent(&window)?;
-        window_guard.disarm();
-        #[cfg(feature = "cef")]
-        crate::page_menu::set_detached(&view, true);
-        #[cfg(all(feature = "cef", target_os = "macos"))]
-        bind_detached_new_tab_shortcuts(&view, &chrome_view, &self.window);
-        let bounds = popout_content_bounds(width, height);
-        self.popouts.insert(
-            id,
-            Popout {
-                window,
-                bounds,
-                chrome,
-                address_focus: PopoutAddressFocus::default(),
-                covered: false,
-            },
-        );
-        // Chrome may finish native creation after the page was reparented.
-        // Queue its initial inactive mask on this exact chrome generation so
-        // it goes below the page before navigation; later overlays keep FIFO order.
-        if let Err(error) = self.update_overlay_mask(&self.popouts[&id].chrome, false) {
-            if let Err(rollback) = self.attach(id) {
-                tracing::error!(%rollback, "preserving page after initial popout mask failed");
-            } else if let Err(restore) = self.apply_visibility() {
-                tracing::error!(%restore, "restoring page visibility after popout rollback failed");
-            }
-            return Err(error);
-        }
-        if let Some(spec) = web_app {
-            self.app_windows.insert(id, spec.id.clone());
-        } else {
-            self.app_windows.remove(&id);
-        }
-        self.panes.retain(|p| p.tab != id);
-        if self.active == Some(id) {
-            self.active = None;
-        }
-        view.set_bounds(tauri::Rect {
-            position: bounds.position().into(),
-            size: bounds.size().into(),
-        })?;
-        view.show()?;
-        let _ = view.set_focus();
-        self.apply_visibility()
-    }
-
     /// Give the page itself the keyboard. Chromium will not open an
     /// eyedropper for a frame that is not focused, and a picker asked for
     /// from the dock arrives while the chrome webview holds focus, so the
@@ -1785,114 +1298,6 @@ impl TabHost {
             let _ = view.set_focus();
         }
         Ok(())
-    }
-
-    /// Bring `id` back from its own window into the main one. The caller
-    /// decides whether it becomes the active tab.
-    pub fn attach(&mut self, id: TabId) -> tauri::Result<()> {
-        if !self.popouts.contains_key(&id) {
-            return Ok(());
-        }
-        // Reparent before forgetting the popout, so a failed move leaves the
-        // tab where it was instead of in a window nobody tracks.
-        if let Some(view) = self.views.get(&id) {
-            view.reparent(&self.window)?;
-            #[cfg(feature = "cef")]
-            crate::page_menu::set_detached(view, false);
-            #[cfg(all(feature = "cef", target_os = "macos"))]
-            refresh_new_tab_shortcut(view, &self.window);
-            view.hide()?;
-        }
-        let Some(popout) = self.forget_popout(id) else {
-            return Ok(());
-        };
-        self.live_overlays.remove(&popout.chrome);
-        self.reveal_main()?;
-        let _ = popout.window.destroy();
-        let _ = self.window.set_focus();
-        self.layout()
-    }
-
-    /// The popout chrome reports where its page should sit.
-    pub fn set_popout_bounds(&mut self, id: TabId, bounds: Bounds) -> tauri::Result<()> {
-        if let Some(p) = self.popouts.get_mut(&id) {
-            p.bounds = bounds;
-        }
-        if let Some(view) = self.views.get(&id) {
-            view.set_bounds(tauri::Rect {
-                position: bounds.position().into(),
-                size: bounds.size().into(),
-            })?;
-        }
-        if let Some(popout) = self.popouts.get(&id)
-            && self.live_overlays.contains_key(&popout.chrome)
-        {
-            self.update_overlay_mask(&popout.chrome, true)?;
-        }
-        Ok(())
-    }
-
-    /// Whether `id` is shown in its own window.
-    /// Drop a popout's bookkeeping, including any app it was showing.
-    fn forget_popout(&mut self, id: TabId) -> Option<Popout> {
-        self.app_windows.remove(&id);
-        self.popouts.remove(&id)
-    }
-
-    /// The installed app a popout shows, when it is an app window.
-    pub fn app_for_tab(&self, id: TabId) -> Option<&str> {
-        self.app_windows.get(&id).map(String::as_str)
-    }
-
-    /// The tab currently showing installed app `app_id`, if it has a window.
-    pub fn tab_for_app(&self, app_id: &str) -> Option<TabId> {
-        self.app_windows
-            .iter()
-            .find(|(_, app)| app.as_str() == app_id)
-            .map(|(tab, _)| *tab)
-    }
-
-    pub fn is_detached(&self, id: TabId) -> bool {
-        self.popouts.contains_key(&id)
-    }
-
-    /// Tabs shown in their own windows.
-    pub fn detached(&self) -> Vec<TabId> {
-        self.popouts.keys().copied().collect()
-    }
-
-    /// Raise the window holding `id`.
-    /// Only the trusted new-window command grants this intent after detaching
-    /// its newly created about:blank tab. Ordinary detach never requests it.
-    pub fn request_popout_address_focus(&mut self, id: TabId) -> tauri::Result<()> {
-        let popout = self
-            .popouts
-            .get_mut(&id)
-            .ok_or(tauri::Error::WebviewNotFound)?;
-        popout.address_focus.request();
-        Ok(())
-    }
-
-    /// A receipt for this exact chrome generation. Successful focus is applied
-    /// once, while retries return the granted intent without stealing focus.
-    pub fn popout_ready(&mut self, id: TabId, caller_chrome: &str) -> tauri::Result<bool> {
-        let popout = self
-            .popouts
-            .get_mut(&id)
-            .ok_or(tauri::Error::WebviewNotFound)?;
-        if popout.chrome != caller_chrome {
-            return Err(tauri::Error::WebviewNotFound);
-        }
-        popout.address_focus.ready(|| {
-            let chrome = popout
-                .window
-                .webviews()
-                .into_iter()
-                .find(|view| view.label() == caller_chrome)
-                .ok_or(tauri::Error::WebviewNotFound)?;
-            popout.window.set_focus()?;
-            chrome.set_focus()
-        })
     }
 
     /// Focus the existing main launcher surface for menu/button fallbacks.
@@ -1928,30 +1333,6 @@ impl TabHost {
         }
     }
 
-    /// Raise a popout window and put the keyboard in its page. Shown and
-    /// unminimized first: an installed app relaunched from the Dock while
-    /// its window sits in the Dock should come back, not merely be focused.
-    pub fn focus_popout(&self, id: TabId) -> tauri::Result<()> {
-        if let Some(p) = self.popouts.get(&id) {
-            p.window.show()?;
-            p.window.unminimize()?;
-            p.window.set_focus()?;
-            if let Some(view) = self.views.get(&id) {
-                let _ = view.set_focus();
-            }
-        }
-        Ok(())
-    }
-
-    /// The tab whose popout window has keyboard focus, if any: menu commands
-    /// and shortcuts belong to it rather than to the main window.
-    pub fn focused_popout(&self) -> Option<TabId> {
-        self.popouts
-            .iter()
-            .find(|(_, p)| p.window.is_focused().unwrap_or(false))
-            .map(|(id, _)| *id)
-    }
-
     /// Label of the chrome webview that should receive a menu command: the
     /// focused popout's, else the main window's.
     pub fn chrome_for_menu(&self) -> String {
@@ -1975,19 +1356,6 @@ impl TabHost {
                 }
             }
             None => self.focus_chrome(),
-        }
-    }
-
-    /// Keep a popout's title in step with its page.
-    pub fn retitle_popout(&self, id: TabId, title: &str) {
-        if let Some(p) = self.popouts.get(&id) {
-            let _ = p.window.set_title(if crate::private_session::is_private() {
-                "Dive — Private Window"
-            } else if title.is_empty() {
-                "Dive"
-            } else {
-                title
-            });
         }
     }
 
@@ -2336,112 +1704,6 @@ fn label_for(id: TabId) -> String {
     format!("tab-{id}-{generation}")
 }
 
-/// Label of the chrome webview inside the `seq`th popout window, for `id`.
-fn popout_chrome_label(seq: u64, id: TabId) -> String {
-    format!("chrome-pop-{seq}-{id}")
-}
-
-/// The engine applied a zoom factor to a tab. The chrome badge reads this so
-/// a site-restored level is this tab's, not a leftover from a sibling.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
-pub struct TabZoom {
-    /// Tab whose view was zoomed.
-    pub tab_id: TabId,
-    /// Factor the engine set (`1.0` is 100%).
-    pub factor: f64,
-}
-
-/// One view's zoom bookkeeping, shared with the hops that apply it.
-#[cfg(feature = "cef")]
-#[derive(Clone, Default)]
-struct SiteZoomState {
-    /// Bumped on every address change; a hop for an older one stands aside.
-    epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    /// The [`crate::site_zoom::key_of`] the view was last put at.
-    applied: std::sync::Arc<Mutex<Option<String>>>,
-}
-
-/// How many loop turns a site zoom waits for a busy host before giving up.
-#[cfg(feature = "cef")]
-const SITE_ZOOM_ATTEMPTS: u32 = 30;
-/// Pause between those turns, so waiting is not a spin of the main loop.
-#[cfg(feature = "cef")]
-const SITE_ZOOM_RETRY: std::time::Duration = std::time::Duration::from_millis(20);
-
-/// Put `tab_id`'s view at `key`'s zoom on a later turn of the main loop,
-/// trying again on the next turns while the host is busy. The zoom used to be
-/// skipped then, and the page stayed at the last site's size with the badge
-/// saying so.
-#[cfg(feature = "cef")]
-fn schedule_site_zoom(
-    app: AppHandle<Runtime>,
-    tab_id: TabId,
-    key: String,
-    zoom: SiteZoomState,
-    epoch: u64,
-    attempts: u32,
-) {
-    tauri::async_runtime::spawn(async move {
-        if attempts < SITE_ZOOM_ATTEMPTS {
-            tokio::time::sleep(SITE_ZOOM_RETRY).await;
-        }
-        let hop = app.clone();
-        let _ = hop.run_on_main_thread(move || {
-            if zoom.epoch.load(std::sync::atomic::Ordering::Relaxed) != epoch {
-                return;
-            }
-            if apply_site_zoom(&app, tab_id, &key) {
-                *lock(&zoom.applied) = Some(key);
-            } else if let Some(left) = attempts.checked_sub(1) {
-                schedule_site_zoom(app, tab_id, key, zoom, epoch, left);
-            } else {
-                tracing::debug!(%tab_id, "site zoom not applied: the host stayed busy");
-            }
-        });
-    });
-}
-
-/// Put the view at the zoom the person last chose for the site `key` names,
-/// or the default -- which is also where a page without an origin (`file:`,
-/// `data:`) goes, rather than keeping the last site's zoom.
-///
-/// Returns `false` when the host or, the first time, the store is busy:
-/// this runs on the main thread, which must not wait on either, so the
-/// caller tries again on a later turn.
-#[cfg(feature = "cef")]
-fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, key: &str) -> bool {
-    let state = app.state::<AppState>();
-    // Read before the store is taken: on a cold cache the preferences load
-    // from the store, and asking for them under its guard locked the same
-    // mutex twice on one thread.
-    let default_zoom = state.prefs.snapshot(&state).default_zoom;
-    let factor = if key.is_empty() {
-        default_zoom
-    } else {
-        let level = crate::site_zoom::cache().level(key, || {
-            let store = state.store.try_lock().ok()?;
-            crate::site_zoom::stored(&store)
-        });
-        match level {
-            Ok(level) => level.unwrap_or(default_zoom),
-            Err(crate::site_zoom::StoreBusy) => return false,
-        }
-    };
-    let Ok(host) = state.host.try_lock() else {
-        return false;
-    };
-    let Some(host) = host.as_ref() else {
-        return true;
-    };
-    if let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor)) {
-        // The view is gone; there is nothing to try again.
-        tracing::debug!(%tab_id, "site zoom not applied: {e}");
-        return true;
-    }
-    let _ = TabZoom { tab_id, factor }.emit(app);
-    true
-}
-
 /// A late callback from a closing renderer must not overwrite its replacement.
 ///
 /// Blocking: it writes the store. Callers on the async runtime hand it to
@@ -2545,204 +1807,6 @@ fn visit_title(url_changed: bool, title: &str) -> &str {
     } else {
         title
     }
-}
-
-/// Settings key holding the main window's last position and size.
-pub const WINDOW_BOUNDS: &str = "window_bounds";
-
-/// The main window's frame, remembered across launches.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct WindowBounds {
-    /// Outer position, logical pixels.
-    pub x: f64,
-    /// Outer position, logical pixels.
-    pub y: f64,
-    /// Inner size, logical pixels.
-    pub width: f64,
-    /// Inner size, logical pixels.
-    pub height: f64,
-}
-
-impl WindowBounds {
-    /// Read the main window's `x,y,width,height`; anything malformed or
-    /// smaller than the main window allows is ignored.
-    pub fn parse(s: &str) -> Option<Self> {
-        Self::parse_at_least(s, 720.0, 480.0)
-    }
-
-    /// Read an app window's frame. App windows may be much smaller than the
-    /// main window -- a chat or a music player kept in a corner -- and
-    /// holding them to the main window's minimum threw such a frame away,
-    /// so the app came back at a default size every time.
-    pub fn parse_app(s: &str) -> Option<Self> {
-        Self::parse_at_least(s, POPOUT_MIN_WIDTH, POPOUT_MIN_HEIGHT)
-    }
-
-    fn parse_at_least(s: &str, min_width: f64, min_height: f64) -> Option<Self> {
-        let mut it = s.split(',').map(|p| p.trim().parse::<f64>().ok());
-        let (x, y, width, height) = (it.next()??, it.next()??, it.next()??, it.next()??);
-        if !(x.is_finite() && y.is_finite() && width >= min_width && height >= min_height) {
-            return None;
-        }
-        Some(Self {
-            x,
-            y,
-            width,
-            height,
-        })
-    }
-
-    /// The form [`WindowBounds::parse`] reads.
-    pub fn serialize(&self) -> String {
-        format!("{},{},{},{}", self.x, self.y, self.width, self.height)
-    }
-}
-
-/// The smallest frame a torn-off tab or app window may have.
-const POPOUT_MIN_WIDTH: f64 = 360.0;
-/// See [`POPOUT_MIN_WIDTH`].
-const POPOUT_MIN_HEIGHT: f64 = 240.0;
-
-/// One display's area in logical pixels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ScreenArea {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-/// The displays connected now, in logical pixels. Each is scaled by its own
-/// factor, which is how the platforms lay mixed displays out side by side.
-fn screen_areas(monitors: &[tauri::Monitor]) -> Vec<ScreenArea> {
-    monitors
-        .iter()
-        .map(|m| {
-            let scale = m.scale_factor();
-            let at = m.position().to_logical::<f64>(scale);
-            let size = m.size().to_logical::<f64>(scale);
-            ScreenArea {
-                x: at.x,
-                y: at.y,
-                width: size.width,
-                height: size.height,
-            }
-        })
-        .collect()
-}
-
-/// Where to put a window remembered at `bounds`, given the displays now
-/// connected: its own position when enough of its top edge -- the part it
-/// is dragged by -- is on one of them, otherwise `None` to centre it.
-///
-/// A position left of or above the primary display is ordinary with a second
-/// display there, and clamping it to zero pulled such windows back onto the
-/// wrong display; a remembered display that is no longer connected left the
-/// window somewhere no one could reach it. With no display list to go by,
-/// the remembered position is trusted.
-pub fn visible_position(bounds: &WindowBounds, screens: &[ScreenArea]) -> Option<(f64, f64)> {
-    const GRAB_WIDTH: f64 = 80.0;
-    const GRAB_HEIGHT: f64 = 24.0;
-    if screens.is_empty() {
-        return Some((bounds.x, bounds.y));
-    }
-    let reachable = screens.iter().any(|s| {
-        let left = bounds.x.max(s.x);
-        let right = (bounds.x + bounds.width).min(s.x + s.width);
-        let top = bounds.y.max(s.y);
-        let bottom = (bounds.y + GRAB_HEIGHT).min(s.y + s.height);
-        right - left >= GRAB_WIDTH && bottom - top >= GRAB_HEIGHT / 2.0
-    });
-    reachable.then_some((bounds.x, bounds.y))
-}
-
-/// Store the main window's frame at most every half second, for the bursts
-/// of resize and move events a drag produces, and once more when the burst
-/// ends: without that last write, the frame a drag ended on was kept only if
-/// the window was then blurred, closed or quit -- a crash lost it.
-pub fn remember_window_bounds_throttled(window: &Window<Runtime>) {
-    const EVERY: std::time::Duration = std::time::Duration::from_millis(500);
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    static TRAILING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let now = std::time::Instant::now();
-    {
-        let mut last = crate::state::lock(&LAST);
-        if last.is_some_and(|t| now.duration_since(t) < EVERY) {
-            drop(last);
-            if !TRAILING.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                let window = window.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(EVERY).await;
-                    TRAILING.store(false, std::sync::atomic::Ordering::Release);
-                    *crate::state::lock(&LAST) = Some(std::time::Instant::now());
-                    // Read the frame on the main thread, where the window's
-                    // getters answer inline instead of waiting on it.
-                    let on_main = window.clone();
-                    let _ = window.run_on_main_thread(move || remember_window_bounds(&on_main));
-                });
-            }
-            return;
-        }
-        *last = Some(now);
-    }
-    remember_window_bounds(window);
-}
-
-/// Store the main window's current frame so the next launch opens there.
-/// A window's frame in logical pixels, or `None` while it is full screen or
-/// minimized: neither is a frame to come back to.
-pub fn windowed_bounds(window: &Window<Runtime>) -> Option<WindowBounds> {
-    if window.is_fullscreen().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
-        return None;
-    }
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else {
-        return None;
-    };
-    let pos = pos.to_logical::<f64>(scale);
-    let size = size.to_logical::<f64>(scale);
-    Some(WindowBounds {
-        x: pos.x,
-        y: pos.y,
-        width: size.width,
-        height: size.height,
-    })
-}
-
-/// A full-screen frame is not one to come back to; the last windowed frame
-/// stays on record instead.
-pub fn remember_window_bounds(window: &Window<Runtime>) {
-    static PENDING: Mutex<Option<(AppHandle<Runtime>, String)>> = Mutex::new(None);
-    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    use std::sync::atomic::Ordering;
-    let Some(bounds) = windowed_bounds(window) else {
-        return;
-    };
-    // Even an uncontended Rust mutex can lead to SQLite's busy timeout. Keep
-    // disk work off the window callback and coalesce drag bursts to one worker.
-    *lock(&PENDING) = Some((window.app_handle().clone(), bounds.serialize()));
-    if RUNNING.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        loop {
-            let next = {
-                let mut pending = lock(&PENDING);
-                let next = pending.take();
-                if next.is_none() {
-                    // Hold PENDING until the flag is reset so a racing producer
-                    // either reaches this worker or starts the next one.
-                    RUNNING.store(false, Ordering::Release);
-                }
-                next
-            };
-            let Some((app, bounds)) = next else { break };
-            let state = app.state::<AppState>();
-            if let Err(e) = lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds) {
-                tracing::debug!("could not remember window bounds: {e}");
-            }
-        }
-    });
 }
 
 /// Build the main window with the chrome webview filling it.
@@ -3213,66 +2277,6 @@ mod tests {
     }
 
     #[test]
-    fn window_bounds_round_trip_and_reject_tiny_frames() {
-        let b = WindowBounds {
-            x: 12.0,
-            y: -3.5,
-            width: 1280.0,
-            height: 820.0,
-        };
-        assert_eq!(WindowBounds::parse(&b.serialize()), Some(b));
-        assert_eq!(WindowBounds::parse("1,2,100,100"), None);
-        // An app window may be smaller than the main window allows.
-        assert_eq!(
-            WindowBounds::parse_app("1,2,400,300").map(|b| b.width),
-            Some(400.0)
-        );
-        assert_eq!(WindowBounds::parse_app("1,2,100,100"), None);
-        assert_eq!(WindowBounds::parse("garbage"), None);
-    }
-
-    #[test]
-    fn a_remembered_frame_is_kept_only_while_a_display_can_reach_it() {
-        let primary = ScreenArea {
-            x: 0.0,
-            y: 0.0,
-            width: 1440.0,
-            height: 900.0,
-        };
-        // A second display to the left: negative x is on screen.
-        let left = ScreenArea {
-            x: -1920.0,
-            y: -180.0,
-            width: 1920.0,
-            height: 1080.0,
-        };
-        let frame = |x, y| WindowBounds {
-            x,
-            y,
-            width: 1000.0,
-            height: 700.0,
-        };
-        assert_eq!(
-            visible_position(&frame(-1500.0, 100.0), &[primary, left]),
-            Some((-1500.0, 100.0))
-        );
-        // The same frame once that display is unplugged: centre it instead.
-        assert_eq!(visible_position(&frame(-1500.0, 100.0), &[primary]), None);
-        // Only a sliver of the title bar showing is not reachable.
-        assert_eq!(visible_position(&frame(1420.0, 100.0), &[primary]), None);
-        assert_eq!(visible_position(&frame(200.0, 950.0), &[primary]), None);
-        assert_eq!(
-            visible_position(&frame(200.0, 100.0), &[primary]),
-            Some((200.0, 100.0))
-        );
-        // No display list at all: trust the frame.
-        assert_eq!(
-            visible_position(&frame(-5000.0, 0.0), &[]),
-            Some((-5000.0, 0.0))
-        );
-    }
-
-    #[test]
     fn popout_page_starts_below_full_dive_chrome() {
         assert_eq!(
             popout_content_bounds(900.0, 700.0),
@@ -3322,25 +2326,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editor_downloads_use_configured_directory_and_preserve_existing_files() {
-        let root = std::env::temp_dir().join(format!("dive-export-{}", TabId::new()));
-        let dir = root.join("custom-downloads");
-        let url = url::Url::parse("blob:https://tauri.localhost/test-export").unwrap();
-        let suggestion = std::path::Path::new("/ignored/example.png");
-        let first = download_destination(&dir, suggestion, &url).unwrap();
-        assert_eq!(first, dir.join("example.png"));
-        std::fs::write(&first, b"existing capture").unwrap();
-        assert_eq!(
-            download_destination(&dir, suggestion, &url).unwrap(),
-            dir.join("example (1).png")
-        );
-        assert_eq!(std::fs::read(&first).unwrap(), b"existing capture");
-        // A failed configured destination must not silently fall back elsewhere.
-        assert!(download_destination(&first.join("child"), suggestion, &url).is_err());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn only_sized_web_window_opens_are_popups() {
         let sized = |raw: &str| is_popup_window(&url::Url::parse(raw).unwrap(), true);
         let plain = |raw: &str| is_popup_window(&url::Url::parse(raw).unwrap(), false);
@@ -3376,20 +2361,5 @@ mod tests {
         ] {
             assert!(!link(refused), "{refused}");
         }
-    }
-
-    #[test]
-    fn unique_path_appends_counter() {
-        let dir = std::env::temp_dir().join(format!("dive-dl-{}", TabId::new()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let first = unique_path(&dir, "/tmp/report.tar.gz");
-        assert_eq!(first.file_name().unwrap(), "report.tar.gz");
-        std::fs::write(&first, b"x").unwrap();
-        assert_eq!(
-            unique_path(&dir, "report.tar.gz").file_name().unwrap(),
-            "report.tar (1).gz"
-        );
-        assert_eq!(unique_path(&dir, "noext").file_name().unwrap(), "noext");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -16,14 +16,30 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use tauri::{AppHandle, State};
 use tauri_plugin_updater::{Update, UpdaterExt as _};
-use tauri_specta::Event as _;
+use tauri_specta::Event;
 
 use crate::Runtime;
 use crate::commands::{UpdateInfo, updater_configured};
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
+
+/// How far the update download has got.
+///
+/// The updater reports every chunk; this is throttled by nothing because a
+/// single update is one download and the chrome coalesces renders anyway.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct UpdateProgress {
+    /// Bytes downloaded so far.
+    pub received: f64,
+    /// Total size when the release declared one.
+    pub total: Option<f64>,
+    /// Set once the download is done and the install begins.
+    pub done: bool,
+}
 
 /// How long a check may wait for the release server.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
@@ -187,7 +203,7 @@ pub(crate) async fn update_install(
                 );
                 let so_far = counter.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
                 #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes.
-                let _ = crate::engine::UpdateProgress {
+                let _ = UpdateProgress {
                     received: so_far as f64,
                     total: total.map(|t| t as f64),
                     done: false,
@@ -195,7 +211,7 @@ pub(crate) async fn update_install(
                 .emit(&progress_app);
             },
             move || {
-                let _ = crate::engine::UpdateProgress {
+                let _ = UpdateProgress {
                     received: 0.0,
                     total: None,
                     done: true,
