@@ -360,6 +360,7 @@ pub fn start(app: AppHandle<Runtime>) {
 /// `unwrap_or_default` fallback it had would have followed redirects.
 fn probe_client() -> Option<reqwest::Client> {
     static CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+        dive_agent::ensure_tls_provider();
         reqwest::Client::builder()
             .timeout(Duration::from_millis(1500))
             .danger_accept_invalid_certs(true)
@@ -802,6 +803,7 @@ fnot-a-tag
             .unwrap();
             stream.write_all(body).unwrap();
         });
+        dive_agent::ensure_tls_provider();
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .redirect(reqwest::redirect::Policy::none())

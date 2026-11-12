@@ -71,7 +71,8 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 gif = "0.13"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 adblock = { version = "0.13.3", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 
 # whisper.cpp builds through CMake, and ggml refuses to be built for ARM by

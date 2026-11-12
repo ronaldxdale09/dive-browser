@@ -79,7 +79,7 @@ async fn thirty_two_clients_call_tools_at_once_without_errors_or_tail_latency() 
         .await
         .expect("bind MCP server");
     let url = handle.url();
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
 
     if let Err(e) = client.post(&url).body("{}").send().await {
         crate::fixtures::loopback_blocked_or_fail(&e);

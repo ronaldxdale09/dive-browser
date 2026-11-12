@@ -89,6 +89,7 @@ pub async fn send(req: &ReplayRequest, cookie: Option<String>) -> AppResult<Repl
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AppError::new("only http and https can be replayed"));
     }
+    dive_agent::ensure_tls_provider();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())

@@ -21,7 +21,7 @@ use tauri_runtime::{
   },
   window::{WebviewEvent, WindowId},
 };
-use tauri_utils::{Theme, config::Color, html::normalize_script_for_csp};
+use tauri_utils::{Theme, config::Color, html2::normalize_script_for_csp};
 use url::Url;
 
 use crate::cef_impl::{client as browser_client, cookie, request_context, request_handler};

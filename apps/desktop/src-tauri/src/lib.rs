@@ -263,6 +263,8 @@ fn drain_export_exit(app: tauri::AppHandle<Runtime>, registry: screen::jobs::Reg
 /// entry point.
 #[cfg_attr(feature = "cef", tauri::cef_entry_point)]
 pub fn run() {
+    // reqwest has no bundled TLS provider; install `ring` before any client exists.
+    dive_agent::ensure_tls_provider();
     // Claim the normal profile before logging, SQLite, or CEF touches it.
     let normal_broker = if private_session::is_private() {
         None

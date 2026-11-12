@@ -67,7 +67,7 @@ async fn test_mcp_server_bearer_auth() {
         .await
         .expect("Failed to bind MCP server");
 
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
     let url = server_handle.url();
 
     // 1. Missing Authorization header -> 401 Unauthorized
@@ -115,7 +115,7 @@ async fn test_mcp_concurrency_50_parallel_requests() {
         .await
         .expect("Failed to bind MCP server");
 
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
     let url = server_handle.url();
 
     let probe = client.post(&url).body("{}").send().await;

@@ -10,12 +10,10 @@ use std::{
 
 use cef::{rc::*, *};
 use dioxus_debug_cell::RefCell;
-use html5ever::{LocalName, interface::QualName, namespace_url, ns};
 use http::{
   HeaderMap, HeaderName, HeaderValue,
   header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ORIGIN},
 };
-use kuchiki::NodeRef;
 use tauri_runtime::{
   UserEvent,
   webview::{NavigationHandler, UriSchemeProtocolHandler},
@@ -23,7 +21,7 @@ use tauri_runtime::{
 };
 use tauri_utils::{
   config::{Csp, CspDirectiveSources},
-  html::{parse as parse_html, serialize_node},
+  html2::{append_script_to_head, parse_doc, serialize_doc},
 };
 use url::Url;
 
@@ -93,30 +91,29 @@ fn inject_scripts_into_html_body(
   body: &[u8],
   initialization_scripts: &[CefInitScript],
 ) -> Option<Vec<u8>> {
+  let scripts: Vec<&str> = initialization_scripts
+    .iter()
+    .map(|init_script| init_script.script.as_str())
+    .collect();
+  prepend_scripts_to_head(body, &scripts)
+}
+
+/// Puts `scripts` at the start of the document's `<head>` (creating one when
+/// the document has none), in the order given. Script text is inserted
+/// verbatim: the CSP hash is computed over the unescaped script.
+fn prepend_scripts_to_head(body: &[u8], scripts: &[&str]) -> Option<Vec<u8>> {
   let Ok(body_str) = std::str::from_utf8(body) else {
     return None;
   };
 
-  let document = parse_html(body_str.to_string());
+  let document = parse_doc(body_str.to_string());
 
-  let head = if let Ok(ref head_node) = document.select_first("head") {
-    head_node.as_node().clone()
-  } else {
-    let head_node = NodeRef::new_element(
-      QualName::new(None, ns!(html), LocalName::from("head")),
-      None,
-    );
-    document.prepend(head_node.clone());
-    head_node
-  };
-
-  for init_script in initialization_scripts.iter().rev() {
-    let script_el = NodeRef::new_element(QualName::new(None, ns!(html), "script".into()), None);
-    script_el.append(NodeRef::new_text(init_script.script.as_str()));
-    head.prepend(script_el);
+  // `append_script_to_head` prepends, so walking in reverse keeps the order.
+  for script in scripts.iter().rev() {
+    append_script_to_head(&document, script);
   }
 
-  Some(serialize_node(&document))
+  Some(serialize_doc(&document))
 }
 
 wrap_request_handler! {
@@ -715,5 +712,43 @@ mod tests {
       "chrome-pop-3-01a08307-7720-7843-a80f-583734dbeecd"
     ));
     assert!(!is_page_view("mytab-1"));
+  }
+
+  fn inject(body: &str, scripts: &[&str]) -> String {
+    String::from_utf8(prepend_scripts_to_head(body.as_bytes(), scripts).unwrap()).unwrap()
+  }
+
+  #[test]
+  fn scripts_go_first_in_the_head_in_the_order_given() {
+    let out = inject(
+      "<!doctype html><html><head><title>t</title></head><body>x</body></html>",
+      &["a()", "b()"],
+    );
+    let a = out.find("<script>a()</script>").expect("a present");
+    let b = out.find("<script>b()</script>").expect("b present");
+    let title = out.find("<title>").expect("title present");
+    assert!(a < b && b < title, "{out}");
+    assert!(out.contains("<body>x</body>"), "{out}");
+  }
+
+  #[test]
+  fn script_text_is_inserted_byte_for_byte() {
+    let script = r#"if (a < b && c) { d("x") }"#;
+    let out = inject("<html><head></head><body></body></html>", &[script]);
+    assert!(out.contains(&format!("<script>{script}</script>")), "{out}");
+  }
+
+  #[test]
+  fn a_fragment_without_a_head_gets_one_before_its_content() {
+    let out = inject("<p>hi</p>", &["a()"]);
+    let head = out.find("<head>").expect("head created");
+    let script = out.find("<script>a()</script>").expect("script present");
+    let p = out.find("<p>hi</p>").expect("content kept");
+    assert!(head < script && script < p, "{out}");
+  }
+
+  #[test]
+  fn a_body_that_is_not_utf8_is_left_alone() {
+    assert!(prepend_scripts_to_head(&[0xff, 0xfe], &["a()"]).is_none());
   }
 }

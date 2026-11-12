@@ -12,7 +12,8 @@ dive-mcp = { path = "../../crates/dive-mcp" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 time = { workspace = true }
 url = { workspace = true }
 async-trait = "0.1"

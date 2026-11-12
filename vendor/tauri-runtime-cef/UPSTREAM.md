@@ -47,14 +47,14 @@ only real changes; `pnpm test:runtime` checks the formatting.
 | `src/cef_impl/ipc.rs` | IPC URL derived from the live native main frame, not the renderer message | [IPC caller provenance](#ipc-caller-provenance) |
 | `src/cef_impl/mod.rs` | Declares the `partial_response` module | [Range responses and scheme workers](#range-responses-and-scheme-workers) |
 | `src/cef_impl/request_context.rs` | Request context setup: built-in autofill disabled, permission context initialisation | [Native permission cache reconciliation](#native-permission-cache-reconciliation-and-current-limits) |
-| `src/cef_impl/request_handler.rs` | Navigation permission revocation, range responses, renderer unresponsive and certificate callbacks, asset scheme | [Native permission enforcement](#native-permission-enforcement) |
+| `src/cef_impl/request_handler.rs` | Navigation permission revocation, range responses, renderer unresponsive and certificate callbacks, asset scheme, HTML init-script injection through `dom_query` | [Native permission enforcement](#native-permission-enforcement); [HTML init-script injection](#html-init-script-injection) |
 | `src/lib.rs` | Declares and re-exports the added modules | [Files added by Dive](#files-added-by-dive) |
 | `src/platform/macos/mod.rs` | Declares `overlay_input` | [Overlay input](#overlay-input-macos-and-windows-modal) |
 | `src/platform/macos/webview.rs` | Corner radius, chrome overlay mask, reparenting and visibility hooks including the accessibility reapply | [Accessibility](#accessibility-for-browsers-created-after-assistive-clients-attach) |
 | `src/platform/windows/mod.rs` | Declares `modal_input`; Common Controls v6 harness test | [Overlay input](#overlay-input-macos-and-windows-modal) |
 | `src/platform/windows/webview.rs` | Z-order pinning, chrome modal overlay and overlay mask | [Overlay input](#overlay-input-macos-and-windows-modal) |
 | `src/runtime.rs` | Close/exit ordering, `CLOSE_ACK_GRACE`, exit code, native deadlines, accessibility request retention, no `--enable-media-stream` | [Shutdown and close acks](#vendored-tauri-cef-runtime) |
-| `src/webview.rs` | Permission and context handles, creation state machine, shortcut bindings, accessibility, many Dive webview operations | [Native permission enforcement](#native-permission-enforcement) |
+| `src/webview.rs` | Permission and context handles, creation state machine, shortcut bindings, accessibility, `html2::normalize_script_for_csp` import, many Dive webview operations | [Native permission enforcement](#native-permission-enforcement) |
 | `src/window.rs` | Raw window handle replies without native access while a window is closing | [Shutdown and close acks](#vendored-tauri-cef-runtime) |
 
 ### Manifest
@@ -134,6 +134,10 @@ Cmd+L has an independent binding and the fixed `dive-native-focus-address` event
 macOS `AccessibilityChanged` previously updated only the browsers present in the runtime registry. New windows and page browsers reverted to CEF's default and had no platform HTML accessibility tree, even while rendered controls were visible. The runtime context now retains the latest optional accessibility request. The shared browser attachment path copies that request after deferred creation and applies it before registration, releasing the mutex before calling CEF. No request preserves CEF defaults; both enabled and explicitly disabled requests propagate to later browsers. Existing-browser updates remain unchanged. This follows CEF's per-browser [SetAccessibilityState contract](https://github.com/chromiumembedded/cef/blob/master/include/cef_browser.h). Native UI run 28 reproduced the missing popout chrome and page tree on the preceding binary; post-change native qualification is recorded in the production-readiness report.
 
 Native runs 29/30 isolated a second issue: CEF's direct accessibility mode is overwritten by Chromium's [OnWebContentsRevealed](https://github.com/chromium/chromium/blob/151.0.7922.174/content/browser/accessibility/browser_accessibility_state_impl.cc#L605), which recomputes the mode from scoped clients. No macOS disable request occurred. A repeated enable request restored the page tree, while reattachment hid/revealed the page and lost it again. Each AppWebview now shares the same optional request and reapplies it after the runtime shows the native view. It does not disable hidden trees or force accessibility when there has been no request. Debug-level tracing uses `dive_native_accessibility` and contains only runtime view IDs and booleans.
+
+## HTML init-script injection
+
+HTML init-script injection uses tauri-utils `html-manipulation-2` (`dom_query`) instead of `html-manipulation` (`kuchikiki`), the parser `tauri-build` already compiles; this drops `kuchikiki`, the second `html5ever` and a second `selectors` from the build. `request_handler.rs` calls `html2::{parse_doc, append_script_to_head, serialize_doc}` (iterating in reverse, since the helper prepends) and `webview.rs` imports `html2::normalize_script_for_csp` (byte-identical to the `html` one). Behaviour is pinned by the `prepend_scripts_to_head` tests in `request_handler.rs`, including byte-exact script text, which the CSP hashes depend on. Upstream still uses `html-manipulation` at the pinned revision; keep this change when rebasing unless upstream has made the same move.
 
 ## Rebasing onto a newer upstream
 

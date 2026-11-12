@@ -130,6 +130,7 @@ fn client(
     pinned: &[SocketAddr],
     timeout: Duration,
 ) -> Result<reqwest::Client, String> {
+    dive_agent::ensure_tls_provider();
     let mut builder = reqwest::Client::builder()
         .connect_timeout(timeout.min(Duration::from_secs(5)))
         .timeout(timeout)

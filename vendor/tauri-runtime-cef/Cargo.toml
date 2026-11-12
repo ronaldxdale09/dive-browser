@@ -17,8 +17,6 @@ cef-dll-sys = { version = "=151.8.1", default-features = false }
 dirs = "6"
 dioxus-debug-cell = "0.1"
 http = "1"
-kuchiki = { package = "kuchikiki", version = "0.8.8-speedreader" }
-html5ever = "0.29"
 log = "0.4.21"
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
@@ -26,7 +24,7 @@ serde_json = "1"
 sha2 = "0.10"
 tauri-runtime = { version = "2.11.2", git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
 tauri-utils = { version = "2.9.2", git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d", features = [
-  "html-manipulation",
+  "html-manipulation-2",
 ] }
 url = "2"
 # The native API is pinned; Cargo otherwise accepts incompatible beta.3.

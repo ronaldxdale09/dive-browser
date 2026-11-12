@@ -62,6 +62,7 @@ fn no_proxy_list(bypass: &str) -> String {
 /// skips is worse than that request failing. A PAC script cannot be run
 /// here either; those requests follow the system's proxy variables.
 pub fn builder(config: &NetworkConfig) -> Result<reqwest::ClientBuilder, String> {
+    dive_agent::ensure_tls_provider();
     let builder = reqwest::Client::builder()
         .pool_idle_timeout(POOL_IDLE)
         .tcp_keepalive(KEEPALIVE);

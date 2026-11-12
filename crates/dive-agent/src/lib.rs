@@ -393,6 +393,12 @@ pub struct ModelInfo {
     pub output_per_mtok: Option<f64>,
 }
 
+/// reqwest is built without a bundled TLS provider; `ring` is the one this
+/// workspace compiles. Safe to call any number of times.
+pub fn ensure_tls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Client for one provider and one key.
 #[derive(Clone)]
 pub struct Client {
@@ -418,6 +424,7 @@ impl Client {
         base_url: Option<&str>,
         http: Result<reqwest::ClientBuilder, String>,
     ) -> Self {
+        ensure_tls_provider();
         let base_url = base_url
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -1309,6 +1316,7 @@ mod tests {
     async fn the_error_body_reader_cuts_at_the_limit_and_says_so() {
         let body = vec![b'x'; 200 * 1024];
         let (base_url, server) = serve_once(vec![response("500 Internal Server Error", "", &body)]);
+        ensure_tls_provider();
         let response = reqwest::Client::new().get(&base_url).send().await.unwrap();
         let message = read_error_body(response).await;
         let _ = server.join();

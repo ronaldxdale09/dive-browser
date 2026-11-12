@@ -80,6 +80,13 @@ impl Transport for MockCdpTransport {
 // ==============================================================================
 
 /// Create an in-memory SQLite store with a default container and workspace.
+/// A reqwest client for loopback requests. reqwest is built without a bundled
+/// TLS provider, so `ring` is installed first (idempotent).
+pub fn http_client() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::new()
+}
+
 /// Called when an HTTP request to a loopback server failed. Returns only when
 /// the failure is the sandbox blocking loopback TCP and we are not on CI (the
 /// caller then skips). Any other error, or any failure on CI, panics: a test

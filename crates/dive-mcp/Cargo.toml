@@ -22,7 +22,8 @@ tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 
 [lints]
 workspace = true

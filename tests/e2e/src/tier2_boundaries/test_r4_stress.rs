@@ -20,7 +20,7 @@ async fn test_mcp_invalid_bearer_token_variations() {
         .await
         .expect("Failed to bind MCP server");
 
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
     let url = server_handle.url();
 
     let invalid_headers = [
@@ -69,7 +69,7 @@ async fn test_mcp_untrusted_origin_rejection() {
         .await
         .expect("Failed to bind MCP server");
 
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
     let url = server_handle.url();
 
     let untrusted_origins = [

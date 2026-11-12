@@ -856,8 +856,16 @@ async fn server_binds_an_ephemeral_port() {
     handle.shutdown();
 }
 
+/// reqwest is built without a bundled TLS provider; install `ring` first.
+fn ensure_tls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 async fn status_of(url: &str, headers: &[(&str, &str)]) -> Result<u16, reqwest::Error> {
-    let client = reqwest::Client::new();
+    let client = {
+        ensure_tls_provider();
+        reqwest::Client::new()
+    };
     let mut req = client
         .post(url)
         .header("content-type", "application/json")
@@ -1457,7 +1465,10 @@ impl Session {
             .await
             .unwrap();
         let url = handle.url();
-        let client = reqwest::Client::new();
+        let client = {
+            ensure_tls_provider();
+            reqwest::Client::new()
+        };
         let body = json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {},

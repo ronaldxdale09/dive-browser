@@ -32,7 +32,7 @@ async fn test_scenario_full_developer_session_profiling() {
     .await
     .unwrap();
 
-    let client = reqwest::Client::new();
+    let client = crate::fixtures::http_client();
     let url = server_handle.url();
 
     // Verify authorized access
