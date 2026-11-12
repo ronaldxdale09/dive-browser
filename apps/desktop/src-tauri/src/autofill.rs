@@ -22,10 +22,6 @@ const SERVICE: &str = "app.dive.browser.cards";
 pub const PRIVATE_CARD_SAVE: &str =
     "Private windows do not keep cards. Add this card from a normal window to save it.";
 
-fn entry(id: &str) -> AppResult<keyring_core::Entry> {
-    keyring_core::Entry::new(SERVICE, id).map_err(AppError::new)
-}
-
 /// A card as it is saved: the number is here, on its way to the keychain,
 /// and nowhere else.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -196,11 +192,12 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
     };
     // The keychain first: a row whose number never made it is a card that
     // silently fails to fill, which is worse than a save that failed.
-    entry(&card.id)?
+    crate::secrets::entry(SERVICE, &card.id)?
         .set_password(&number)
         .map_err(AppError::new)?;
     if let Err(error) = lock(&state.store).upsert_card(&card) {
-        let _ = entry(&card.id).and_then(|e| e.delete_credential().map_err(AppError::new));
+        let _ = crate::secrets::entry(SERVICE, &card.id)
+            .and_then(|e| e.delete_credential().map_err(AppError::new));
         return Err(error.into());
     }
     Ok(card)
@@ -223,7 +220,7 @@ pub fn card_fill(
             .ok_or_else(|| AppError::new("no such card"))?
     };
     let number = if with_number {
-        entry(id)?
+        crate::secrets::entry(SERVICE, id)?
             .get_password()
             .map_err(|error| AppError::new(format!("the card number could not be read: {error}")))?
     } else {
@@ -262,7 +259,7 @@ pub fn delete_card(state: &AppState, profile: ProfileId, id: &str) -> AppResult<
 /// Remove the number behind card `id`, whose row is about to go with its
 /// profile. An item already gone counts as removed.
 pub fn delete_card_secret(id: &str) -> AppResult<()> {
-    match entry(id)?.delete_credential() {
+    match crate::secrets::entry(SERVICE, id)?.delete_credential() {
         Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
         Err(error) => Err(AppError::new(error)),
     }

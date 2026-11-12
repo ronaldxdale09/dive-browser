@@ -46,10 +46,6 @@ fn password_read_error(error: impl std::fmt::Display) -> String {
     )
 }
 
-fn entry(id: &str) -> AppResult<keyring_core::Entry> {
-    keyring_core::Entry::new(SERVICE, id).map_err(AppError::new)
-}
-
 /// `scheme://host[:port]` for a page URL or an origin, or an error when the
 /// text is not a web address: a login keyed on the wrong string never fills.
 pub fn origin_of(url: &str) -> AppResult<String> {
@@ -219,7 +215,8 @@ fn edit_in(
         crate::state::lock(store).rename_credential(id, username)?
     };
     if !password.is_empty() {
-        let written = entry(id).and_then(|e| e.set_password(password).map_err(AppError::new));
+        let written = crate::secrets::entry(SERVICE, id)
+            .and_then(|e| e.set_password(password).map_err(AppError::new));
         if let Err(error) = written {
             // Half an edit is a login whose name changed while its password
             // did not; put the name back so what is listed is what fills.
@@ -278,7 +275,8 @@ fn save_in(
         username,
         Timestamp::now(),
     )?;
-    let written = entry(&row.id).and_then(|e| e.set_password(password).map_err(AppError::new));
+    let written = crate::secrets::entry(SERVICE, &row.id)
+        .and_then(|e| e.set_password(password).map_err(AppError::new));
     if let Err(error) = written {
         // A new row with no password behind it would be listed but could
         // never fill, and every later sign-in would offer to "update" it.
@@ -293,10 +291,12 @@ fn save_in(
 /// The password behind a login, for filling or showing.
 pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<String> {
     owned_in(&state.store, profile, id)?;
-    entry(id)?.get_password().map_err(|e| match e {
-        keyring_core::Error::NoEntry => AppError::new(missing_password_error()),
-        e => AppError::new(password_read_error(e)),
-    })
+    crate::secrets::entry(SERVICE, id)?
+        .get_password()
+        .map_err(|e| match e {
+            keyring_core::Error::NoEntry => AppError::new(missing_password_error()),
+            e => AppError::new(password_read_error(e)),
+        })
 }
 
 /// Forget a login and its password.
@@ -310,7 +310,7 @@ fn delete_in(store: &Mutex<Store>, profile: ProfileId, id: &str) -> AppResult<bo
     // after a refused delete left the password in the OS store with nothing
     // in Dive that could ever name it again. An item already gone is what
     // forgetting wanted anyway.
-    match entry(id)?.delete_credential() {
+    match crate::secrets::entry(SERVICE, id)?.delete_credential() {
         Ok(()) | Err(keyring_core::Error::NoEntry) => {}
         Err(error) => {
             return Err(AppError::new(format!(
@@ -325,7 +325,7 @@ fn delete_in(store: &Mutex<Store>, profile: ProfileId, id: &str) -> AppResult<bo
 /// Remove the password behind login `id`, whose row is about to go with its
 /// profile. An item already gone counts as removed.
 pub fn delete_secret(id: &str) -> AppResult<()> {
-    match entry(id)?.delete_credential() {
+    match crate::secrets::entry(SERVICE, id)?.delete_credential() {
         Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
         Err(error) => Err(AppError::new(format!(
             "{} would not forget this password: {error}",
@@ -852,7 +852,7 @@ mod tests {
         assert!(origin_of("not a url at all").is_err());
     }
 
-    use crate::agent::test_keychain::with_mock_keychain;
+    use crate::secrets::test_keychain::with_mock_keychain;
     use dive_core::model::{Container, Profile};
 
     /// A store with two profiles, and the ids of both.
@@ -869,7 +869,7 @@ mod tests {
 
     /// Make the next call on login `id`'s keychain item fail, once.
     fn refuse_next(id: &str) {
-        let item = entry(id).unwrap();
+        let item = crate::secrets::entry(SERVICE, id).unwrap();
         item.as_any()
             .downcast_ref::<keyring_core::mock::Cred>()
             .expect("the mock store")
@@ -906,7 +906,13 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].id, "first-id");
             // The refusal was a one-off: the old password was never overwritten.
-            assert_eq!(entry("first-id").unwrap().get_password().unwrap(), "pw");
+            assert_eq!(
+                crate::secrets::entry(SERVICE, "first-id")
+                    .unwrap()
+                    .get_password()
+                    .unwrap(),
+                "pw"
+            );
         });
     }
 
@@ -932,7 +938,13 @@ mod tests {
             refuse_next(&login.id);
             assert!(delete_in(&store, profile, &login.id).is_err());
             assert_eq!(listed(&store, profile).len(), 1);
-            assert_eq!(entry(&login.id).unwrap().get_password().unwrap(), "pw");
+            assert_eq!(
+                crate::secrets::entry(SERVICE, &login.id)
+                    .unwrap()
+                    .get_password()
+                    .unwrap(),
+                "pw"
+            );
         });
     }
 
@@ -941,7 +953,10 @@ mod tests {
         with_mock_keychain(|| {
             let (store, profile, _) = two_profiles();
             let login = save_in(&store, profile, SITE, "alice", "pw", "gone-id").unwrap();
-            entry(&login.id).unwrap().delete_credential().unwrap();
+            crate::secrets::entry(SERVICE, &login.id)
+                .unwrap()
+                .delete_credential()
+                .unwrap();
             assert!(delete_in(&store, profile, &login.id).unwrap());
             assert!(listed(&store, profile).is_empty());
         });

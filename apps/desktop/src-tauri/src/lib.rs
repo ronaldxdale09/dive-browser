@@ -100,6 +100,7 @@ mod save_page;
 mod screen;
 mod screencast;
 mod search_suggest;
+mod secrets;
 mod site;
 mod site_zoom;
 mod snapshot;
@@ -293,7 +294,7 @@ pub fn run() {
     }
 
     engine::mark_main_thread();
-    agent::init_keychain();
+    secrets::init();
     let specta = commands::specta_builder();
 
     #[allow(unused_mut)]
