@@ -782,7 +782,7 @@ impl TabHost {
                     crate::credential_fill::attach(prefs_app.clone(), tab_id, s.clone()),
                     crate::form_fill::attach(prefs_app.clone(), tab_id, s.clone()),
                     crate::tab_audio::attach(prefs_app.clone(), tab_id, s.clone()),
-                    crate::prefs::apply(s, &prefs, chrome_scheme.as_deref()),
+                    crate::prefs_apply::apply(s, &prefs, chrome_scheme.as_deref()),
                 );
                 tracing::debug!(%tab_id, "page setup complete before navigation");
                 // A tab that was muted before it was discarded wakes up muted:

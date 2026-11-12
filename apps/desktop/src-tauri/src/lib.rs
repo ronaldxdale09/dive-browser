@@ -15,6 +15,7 @@ mod automation;
 mod ax;
 mod backup;
 mod browser_import;
+mod browsing_data;
 mod buffers;
 mod capture_scope;
 mod cdp_feed;
@@ -81,6 +82,7 @@ mod permission_probe;
 mod permissions;
 mod pip;
 mod prefs;
+mod prefs_apply;
 /// Dive-owned network privacy matching.
 pub mod privacy;
 #[cfg(feature = "cef")]
@@ -286,7 +288,7 @@ pub fn run() {
         private_session::sweep_stale();
     }
 
-    if let Err(error) = prefs::finish_pending_clear() {
+    if let Err(error) = browsing_data::finish_pending_clear() {
         tracing::error!(%error, "deferred browser-data cleanup failed");
     }
 

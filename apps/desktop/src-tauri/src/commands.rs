@@ -445,8 +445,8 @@ pub(crate) async fn pages_scheme(state: State<'_, AppState>, scheme: String) -> 
             .map_or_else(Vec::new, crate::engine::TabHost::sessions)
     };
     for (tab_id, session) in &sessions {
-        let page = page_scheme(&state, *tab_id, crate::prefs::PageScheme::Follow);
-        crate::prefs::apply_for(session, &prefs, Some(&scheme), page).await;
+        let page = page_scheme(&state, *tab_id, crate::prefs_apply::PageScheme::Follow);
+        crate::prefs_apply::apply_for(session, &prefs, Some(&scheme), page).await;
     }
     Ok(())
 }
@@ -457,12 +457,12 @@ pub(crate) async fn pages_scheme(state: State<'_, AppState>, scheme: String) -> 
 fn page_scheme(
     state: &AppState,
     tab_id: TabId,
-    wanted: crate::prefs::PageScheme,
-) -> crate::prefs::PageScheme {
+    wanted: crate::prefs_apply::PageScheme,
+) -> crate::prefs_apply::PageScheme {
     if state.buffers.media(tab_id) == crate::emulate::MediaOverrides::default() {
         wanted
     } else {
-        crate::prefs::PageScheme::Leave
+        crate::prefs_apply::PageScheme::Leave
     }
 }
 
@@ -484,13 +484,13 @@ pub(crate) async fn prefs_set(
         prefs.download_dir = crate::prefs::check_download_dir(&prefs.download_dir)?;
     }
     let stored = state.prefs.set(&state, prefs)?;
-    if crate::prefs::chrome_only_change(&previous, &stored) {
+    if crate::prefs_apply::chrome_only_change(&previous, &stored) {
         return Ok(stored);
     }
     let scheme = if previous.tell_pages_theme && !stored.tell_pages_theme {
-        crate::prefs::PageScheme::Withdraw
+        crate::prefs_apply::PageScheme::Withdraw
     } else {
-        crate::prefs::PageScheme::Follow
+        crate::prefs_apply::PageScheme::Follow
     };
     let sessions = {
         let host = lock(&state.host);
@@ -508,7 +508,7 @@ pub(crate) async fn prefs_set(
     let chrome_scheme = state.prefs.chrome_scheme();
     for (tab_id, session, document_url) in &sessions {
         let page = page_scheme(&state, *tab_id, scheme);
-        crate::prefs::apply_for(session, &stored, chrome_scheme.as_deref(), page).await;
+        crate::prefs_apply::apply_for(session, &stored, chrome_scheme.as_deref(), page).await;
         crate::privacy::refresh_page_policy(&state, *tab_id, session, &stored).await;
         if privacy_site_state_changed(&previous, &stored, document_url)
             && let Err(error) = session.call0("Page.reload").await
@@ -521,7 +521,7 @@ pub(crate) async fn prefs_set(
     // one trimmed. Settings asks before shortening it (see
     // `history_prune_count`), so this runs on a window the person agreed to.
     if previous.history_days != stored.history_days {
-        match crate::prefs::prune_history(&state) {
+        match crate::browsing_data::prune_history(&state) {
             Ok(0) => {}
             Ok(n) => tracing::info!(n, "pruned history past the retention window"),
             Err(e) => tracing::warn!("history prune failed: {e}"),
@@ -557,7 +557,7 @@ pub(crate) fn network_restart_needed(state: State<'_, AppState>) -> bool {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn history_prune_count(state: State<'_, AppState>, days: i32) -> AppResult<u32> {
-    let n = crate::prefs::count_prunable(&state, days)?;
+    let n = crate::browsing_data::count_prunable(&state, days)?;
     Ok(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
@@ -577,9 +577,9 @@ fn privacy_site_state_changed(
 #[specta::specta]
 pub(crate) async fn browsing_data_clear(
     state: State<'_, AppState>,
-    what: crate::prefs::ClearRequest,
-) -> AppResult<crate::prefs::ClearOutcome> {
-    crate::prefs::clear(&state, what).await
+    what: crate::browsing_data::ClearRequest,
+) -> AppResult<crate::browsing_data::ClearOutcome> {
+    crate::browsing_data::clear(&state, what).await
 }
 
 /// Show a download in the system file manager, or the downloads folder when `path` is `None`.

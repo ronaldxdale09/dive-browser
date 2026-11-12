@@ -153,7 +153,7 @@ pub fn start(app: AppHandle<Runtime>) {
 /// wears any more.
 fn prune(app: &AppHandle<Runtime>) {
     let state = app.state::<AppState>();
-    match crate::prefs::prune_history(&state) {
+    match crate::browsing_data::prune_history(&state) {
         Ok(0) => {}
         Ok(n) => tracing::info!(n, "pruned history past the retention window"),
         Err(e) => tracing::warn!("history prune failed: {e}"),
