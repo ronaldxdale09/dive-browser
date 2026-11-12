@@ -57,6 +57,7 @@ mod locator;
 mod main_hop;
 mod main_window;
 mod mcp;
+mod media_tools;
 mod memory_pressure;
 mod memory_probe;
 mod menu;

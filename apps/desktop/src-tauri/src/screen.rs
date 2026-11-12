@@ -18,10 +18,8 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::screencast::{
-    PREVIEW_DIR, PROBE_LIMIT, RecordingResult, ffmpeg_path, ffprobe_path, run_with_deadline,
-    write_companion,
-};
+use crate::media_tools::{PROBE_LIMIT, ffmpeg_path, ffprobe_path, run_with_deadline};
+use crate::screencast::{PREVIEW_DIR, RecordingResult, write_companion};
 use crate::state::AppState;
 
 /// A recording's facts the editor needs before it can draw anything.
