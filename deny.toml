@@ -33,8 +33,8 @@ ignore = [
     # a custom `log` logger that itself calls `rand::rng()`, which no build
     # script here does.
     "RUSTSEC-2026-0097",
-    # glib 0.18, transitive via gtk/muda. Linux windowing again: not compiled
-    # into the macOS binary Dive ships.
+    # glib 0.18, transitive via gtk/muda. Linux windowing again: Linux is not a
+    # shipped target (macOS and Windows are), so it is not in the binaries.
     "RUSTSEC-2024-0429",
 ]
 

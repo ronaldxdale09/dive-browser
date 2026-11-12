@@ -7,6 +7,36 @@ bump may change behaviour.
 
 ## [Unreleased]
 
+Since 0.1.31: a hardening pass over what MCP clients and the agent may do without asking, a privacy pass over profiles, backups, logs and private windows, an agent that fails in ways it can explain and retries safely, and a set of start-up and read-path speedups.
+
+### Added
+- One MCP call, agent run and step can be followed through the log, so a report can be traced from request to result.
+- Export phases of a screen recording can be timed, and an export that would pass the 2 GB limit is refused before rendering starts.
+
+### Changed
+- The agent caches its growing conversation, windows long page reads and sends screenshots as capped JPEG, which makes long runs cheaper and faster.
+- Start-up loads the chrome's code while saved UI state loads, and applies saved choices only once it has.
+- History reads look up each site's icon once, and backup export reads history a page at a time.
+- Errors keep their cause and carry a kind the chrome can act on; errors the chrome used to swallow now reach the log.
+- Logs and exported diagnostic bundles name a page by its site, not its full address.
+- On Windows, files and links open through the shell API, and the VM bootstrap pins and checks every download.
+
+### Fixed
+- MCP consent: the eval and skip-confirm switches turn on only for `1` or `true`; an approval holds only for the site that was shown; adding mock rules and reading stored data now ask the person first; a timed-out call no longer runs once the main thread recovers.
+- The agent: reading the person's pages and then carrying text to another site or the local network asks first; API keys stay off plain-http endpoints; a request that may have reached the provider is never sent twice; failures are classified by what would fix them; the in-browser agent waits its turn on a claimed tab.
+- Privacy: clearing browsing data leaves other profiles alone; a profile's backup carries only its own workspaces and a restored backup keeps this machine's network and safety settings; cards are not saved in private windows, and new commands are refused there until classified; deleting a workspace with its own cookies removes them.
+- Autofill and passwords: saved cards fill only on secure pages after the owner confirms and password export always asks; first and last name, phone and dropdown fields get the right values; switching workspace no longer declines a pending password save; a sign-in card appears only for the page's own site.
+- Profiles and data: history and bookmarks from before profiles go to the first profile; quitting on a damaged database leaves it in place, and a check that could not run is no longer called damage; an http allowance or "always open" choice survives the next settings change.
+- Tabs and the chrome: a failed reopen keeps the closed tab in the list; Enter and Escape while composing with an input method no longer send or close; recording, retention, key and notice state stay consistent; dock panels retry a read that lands while the page is loading.
+- MCP and automation: `page_pdf` streams and a failed protocol session recovers on navigate; refs stay unique across iframes and gestures always let go; an oversized CDP reply fails its call instead of the tab session; Playwright-style locators follow the same role rules in the chrome and the agent.
+- Screen recorder and exports: seeking works while the preview plays, exports draw what the preview shows, and undo records real edits only; exported tests toggle once, select options and check the real final URL; Copy as cURL quotes the method and HAR export redacts tokens.
+- Web apps and extensions: each installed web app owns its own launcher, so same-named apps never replace or delete each other's; a changed extension manifest is not loaded until the person loads it again.
+- Login dialogs and native page interaction are stable again; the RustSec advisories in TLS, MCP, SQLite and the updater are cleared; pressure notification hooks compile on macOS only.
+
+## [0.1.16 – 0.1.31] - 2026-09-08 to 2026-09-27
+
+Covers releases 0.1.16 through 0.1.31; per-release notes are on the GitHub releases page.
+
 A hundred hands-on passes over the daily surfaces, each driven live on a test profile. In short: profiles now keep their own history and bookmarks; reopened and woken tabs come back where they were scrolled; every copy in the chrome works whichever view has focus; the dock's Network, Console, A11y, Vitals and Rules panels say more and hide less; DevTools opens at a useful size; the tab strip, split view, popouts and the first run behave under keyboard and assistive tech; and the agent and MCP tools stop failing on a small model's imprecise arguments.
 
 ### Added
@@ -420,6 +450,7 @@ A hundred hands-on passes over the daily surfaces, each driven live on a test pr
 - Editor exports tracked as browser downloads; provider setup waits for
   confirmed activation.
 
-[Unreleased]: https://github.com/ronaldxdale09/dive-browser/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/ronaldxdale09/dive-browser/compare/v0.1.31...HEAD
+[0.1.16 – 0.1.31]: https://github.com/ronaldxdale09/dive-browser/compare/v0.1.15...v0.1.31
 [0.1.15]: https://github.com/ronaldxdale09/dive-browser/releases/tag/v0.1.15
 [0.1.4]: https://github.com/ronaldxdale09/dive-browser/releases/tag/v0.1.4

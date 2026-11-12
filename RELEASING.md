@@ -23,6 +23,11 @@ CI passed. Wait for CI on `main` to finish before running a release. Every
 action in `release.yml` is pinned to a commit SHA because those jobs hold the
 signing keys; Dependabot proposes the updates.
 
+Before tagging or running the workflow, move the `[Unreleased]` entries in
+`CHANGELOG.md` under a new `## [x.y.z] - YYYY-MM-DD` heading (and update its
+link references at the bottom). GitHub's release notes are generated from
+commits; the changelog is the curated record.
+
 ### From GitHub (the normal way)
 
 **Actions → `release` → Run workflow**, pick a bump, run it.

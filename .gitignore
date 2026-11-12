@@ -5,6 +5,9 @@ dist/
 .pnpm-store/
 *.tsbuildinfo
 apps/desktop/src-tauri/gen/
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Chromium Embedded Framework binaries (downloaded, never vendored)
 vendor/cef/

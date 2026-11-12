@@ -6,8 +6,9 @@ most of it.
 
 ## Prerequisites
 
-- macOS 13+ (Apple Silicon or Intel) — the only platform Dive builds on today
-- Node.js ≥ 20 and pnpm ≥ 10.33.0
+- macOS 13+ (Apple Silicon or Intel)
+- Windows 10/11 x64 — needs the MSVC toolchain, and cannot be built from a Mac; see [docs/WINDOWS.md](docs/WINDOWS.md)
+- Node.js 20.19+ or 22.12+ (CI uses 24) and pnpm ≥ 10.33.0
 - Rust 1.98+ (2024 edition)
 - CMake and Ninja, which `cef-dll-sys` needs to build `libcef_dll_wrapper`
 
@@ -42,17 +43,22 @@ token (`mcp-token`, user-readable only) and downloaded speech models
 | `DIVE_OPEN_URL` | Open this URL (or several, whitespace-separated) at launch, like passing them as arguments |
 | `--remote-debugging-port=P` (argument) | Chrome DevTools Protocol on `P` for the chrome and pages; a private window's process then listens on `P + 1` |
 
+Every other `DIVE_*` variable is listed in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+
 ## The check that has to pass
 
-One command runs everything CI runs, in the same order:
+One command is the local gate:
 
 ```bash
 pnpm check
 ```
 
-That is `cargo fmt --check`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, a
+That is `pnpm test:probes` (the Python probe tests; skipped on Windows),
+`cargo fmt --all -- --check`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, a
 production `vite build`, `cargo clippy --workspace --all-targets -- -D warnings`,
-and `cargo test --workspace`. Clippy runs at `pedantic` with warnings denied, so
+`cargo test --workspace`, and `pnpm test:runtime` (format check and tests of the
+vendored runtime; `scripts/vendor-runtime-diff.sh` shows what it changes
+against upstream). Clippy runs at `pedantic` with warnings denied, so
 a lint is a build failure, not a suggestion.
 
 The integration suites live in `tests/e2e` as the `dive-integration` crate
@@ -60,7 +66,11 @@ The integration suites live in `tests/e2e` as the `dive-integration` crate
 `cargo test -p dive-integration tier2_boundaries`); `cargo test --workspace`
 already includes them.
 
-CI additionally runs `cargo audit`, `pnpm audit`, and a `live` job that builds
+CI additionally runs: clippy on the build without the local transcription
+engine (`--no-default-features --features cef`), `cargo audit`, `cargo deny
+check`, a diff of the generated bindings, `pnpm audit --prod`, the Rust
+build, clippy and tests on Windows too (the frontend checks run on macOS only),
+the vendored runtime's format check and tests, and a `live` job that builds
 the real app bundle and drives it through its own MCP server
 (`scripts/live-check.sh`), plus the memory and startup benchmarks. Unit tests
 cannot see the things that job checks — renderer crash recovery, tab discard
@@ -127,13 +137,16 @@ npx skills add heygen-com/hyperframes
 - **Crash reports**: a Rust panic is written to `<data dir>/crashes/` with the version and a backtrace.
 - **Private windows** write neither logs nor crash reports, so reproduce in a normal window.
 - **DevTools on the chrome and pages**: start Dive with `--remote-debugging-port=P`, or with `DIVE_CHROMIUM_FLAGS=remote-debugging-port=P`. Then open `chrome://inspect` in Chrome, or point a CDP client at `127.0.0.1:P`. A private window's process listens on `P + 1`.
+- **Environment variables**: every `DIVE_*` switch is in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 - **A throwaway instance**: `DIVE_DATA_DIR=$(mktemp -d) DIVE_USE_MOCK_KEYCHAIN=1 DIVE_SKIP_ONBOARDING=1 <binary>`, never a real profile.
 - **Calling one MCP tool from a shell**: `python3 scripts/mcp-call.py --data-dir DIR --port 7391 call tabs_list '{}'`. Every tool and its parameters: [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
 
 ## Commits and pull requests
 
-- Write the subject as what the change does for the user: `Subtitles: fix
-  audio never reaching the transcriber`, not `fix bug`.
+- Use a conventional-commit subject (`type(scope): ...`) worded as what the
+  change does for the user: `fix(subtitles): audio reaches the transcriber
+  again`, or the real `fix(memory): compile pressure notification hooks on
+  macOS only`, not `fix bug`.
 - Explain *why* in the body when the reason is not obvious from the diff. The
   comments in this repo lean the same way — they say why, not what.
 - One concern per PR. A formatting sweep mixed into a behaviour change makes

@@ -4,6 +4,8 @@ Date: 2026-09-03. Stack: Tauri v2 (Rust) + CEF (Chromium Embedded Framework) + R
 
 Dive is a developer-focused, multi-workspace Chromium browser with a built-in dev toolkit and an AI agent that does more than chat.
 
+> Status: this is the plan Dive was built against (2026-09-03). The code has since diverged in places; corrections are marked *Updated <date>*. For the current layout see CONTRIBUTING.md; for open work see `plans/README.md` and the issue tracker.
+
 ---
 
 ## 1. Summary of decisions
@@ -14,10 +16,10 @@ Dive is a developer-focused, multi-workspace Chromium browser with a built-in de
 | Rendering model | "Everything CEF": the React chrome is one Alloy-style CEF webview, each tab is a sibling child CEF view | One engine, one process model, full Chrome DevTools Protocol (CDP) everywhere. Two engines (WKWebView + CEF) doubles memory and gives the worst overlay problems. |
 | Overlays | Anything that must draw over page content (omnibox dropdown, command palette, tab previews, agent cursor) renders in a dedicated transparent CEF child or OS popup window | Native child views cannot be painted over by HTML in a sibling. Off-screen rendering (OSR) into wgpu is phase 2 once CEF accelerated paint stabilizes. |
 | Workspaces | One `CefRequestContext` with its own `cache_path` per workspace | Native cookie/storage/service-worker isolation. Same mechanism gives the agent its own isolated profile. |
-| Extensions | Not supported at launch | CEF removed the Alloy extension API; Chrome extensions only work with Chrome-style windows that show Chrome's own UI. Replace the important ones (ad block, content scripts, React DevTools) with native features. |
+| Extensions | ~~Not supported at launch~~ *Updated 2026-11-11*: unpacked Chromium extensions are supported (`apps/desktop/src-tauri/src/extensions.rs`; see `docs/design/browser-essentials-and-extensions.md`) | The original reasoning: CEF removed the Alloy extension API, so Chrome extensions only work with Chrome-style windows that show Chrome's own UI. Dive loads them anyway; the important ones (ad block, content scripts, React DevTools) are still also native features. |
 | Ad blocking | Brave's `adblock` crate in `CefResourceRequestHandler::OnBeforeResourceLoad` | Rust-native, uBlock syntax, cosmetic filtering. Low effort. |
-| AI runtime | Rust core owns CDP tools, MCP client/server (`rmcp`), credentials and the agent loop. LLM calls go over raw HTTP to the Anthropic Messages API (streaming, Claude Opus 5, adaptive thinking), behind a provider trait so OpenAI-compatible and local Ollama endpoints plug in | Keeps keys and tool execution out of the renderer, avoids a 100 MB Node sidecar, and CEF gives direct in-process CDP which is exactly the latency win Browser Use and Stagehand chased. |
-| Data | `rusqlite` (bundled, WAL) behind typed Tauri commands, `keyring` for secrets, `tauri-plugin-store` for UI prefs | Simple, fast, no JS-exposed SQL surface. |
+| AI runtime | Rust core owns CDP tools, the MCP server (`rmcp`; *Updated 2026-11-11*: there is no MCP client), credentials and the agent loop. LLM calls go over raw HTTP to the Anthropic Messages API (streaming, Claude Opus 5, adaptive thinking), behind a provider trait so OpenAI-compatible and local Ollama endpoints plug in | Keeps keys and tool execution out of the renderer, avoids a 100 MB Node sidecar, and CEF gives direct in-process CDP which is exactly the latency win Browser Use and Stagehand chased. |
+| Data | `rusqlite` (bundled, WAL) behind typed Tauri commands, `keyring` for secrets. *Updated 2026-11-11*: there is no Tauri store plugin; the chrome's small UI state (panel sizes and the like) goes through the `ui_state_load`/`ui_state_set` commands into the profile store, behind a `Storage` shim in `apps/desktop/src/lib/uiStorage.ts` | Simple, fast, no JS-exposed SQL surface. |
 | UI stack | React 19, Tailwind v4, Zustand, TanStack Query/Table/Virtual, shadcn/ui, cmdk, react-resizable-panels, dnd-kit, tldraw for annotation | Proven for the exact widgets a browser chrome needs. Vivaldi has shipped a React chrome for a decade. |
 
 ---
@@ -104,19 +106,16 @@ Chrome bootstrap: browser process (Rust + Tauri + React chrome renderer), GPU pr
 
 ### Rust crates (workspace)
 
+*Updated 2026-11-11*: the layout as built, matching CONTRIBUTING.md "Where things live". The other crates and the `packages/` directory the original plan listed were never created; that functionality lives in `apps/desktop/src-tauri`.
+
 ```
-apps/desktop            Tauri app: window setup, commands, menus, updater
-crates/dive-core        Workspace/tab/container domain model, SQLite store, event bus, command registry
-crates/dive-cdp         CdpSession over CefBrowserHost::SendDevToolsMessage + observer: id map, oneshot results, event broadcast, UI-thread marshalling via CefPostTask
-crates/dive-net         CefResourceRequestHandler: adblock engine, mock/rewrite rules, HAR collector, throttling presets
-crates/dive-capture     Screenshot (CDP), tab recording (screencast / OSR paint), native screen capture per OS, ffmpeg-sidecar encoding, gif
-crates/dive-emulate     Device descriptors (vendored from DevTools EmulatedDevices), emulation presets, multi-pane sync bus
-crates/dive-agent       Agent loop, provider trait (Anthropic first), tool registry, policy engine, trace store, checkpoints
-crates/dive-mcp         MCP server (stdio + HTTP) exposing the browser, MCP client to user servers (GitHub, filesystem, Linear...)
-crates/dive-devtools    axe-core runner, web-vitals injector, storage editors, localhost scanner, tunnel/QR
-packages/ui             React chrome (Vite): shell, panels, palette, sidecar, dev dock
-packages/devices        Device JSON + bezels, refreshed from upstream by script
-packages/protocol       Shared TS types generated from Rust (ts-rs or specta)
+apps/desktop              Tauri app: React chrome (src/), Tauri host (src-tauri/): CEF lifecycle, CDP, commands, menus, updater
+crates/dive-core          SQLite (WAL), migrations, domain model, event bus
+crates/dive-cdp           In-process CDP client over CefBrowserHost::SendDevToolsMessage
+crates/dive-mcp           MCP server
+crates/dive-agent         Agent loop, provider dialects, tool dispatch
+tests/e2e                 dive-integration: tiered integration and stress suites
+vendor/tauri-runtime-cef  Patched Tauri CEF runtime (outside the workspace; see its UPSTREAM.md)
 ```
 
 ### IPC
@@ -253,6 +252,6 @@ OSR compositing for canvas mode and tab previews, local model tier, WebMCP, desi
 
 1. Reconcile and commit the active recording/menu/Library/Toolbar work, including generated bindings, without mixing ownership boundaries.
 2. Close the readiness ledger’s ownership-gated navigation/reorder rollback, Library windowing/error-state, and anchored-popover lifecycle deferrals test-first.
-3. Add a pinned `cargo-audit` job and require the full static/test/generated-binding gates in CI.
+3. ~~Add a pinned `cargo-audit` job and require the full static/test/generated-binding gates in CI.~~ *Updated*: see `plans/README.md`.
 4. Run the signed macOS notarization/install/update path and Windows/Linux CEF smoke matrix using CI-held release credentials.
 5. Rerun the private Probe live, memory and startup checks from the exact release candidate before promotion.
