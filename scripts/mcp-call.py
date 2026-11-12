@@ -5,54 +5,16 @@
     mcp-call.py --data-dir DIR --port PORT call TOOL '{"arg": 1}'
 
 The bearer token is read from DIR/mcp-token, which the app writes at start.
+Speaks the protocol through `mcp_client.py`.
 Exit status is 0 on success, 2 when the tool reported an error.
 """
 import argparse
 import json
+import os
 import sys
-import urllib.error
-import urllib.request
 
-COUNTER = [0]
-
-
-def rpc(url, token, sid, method, params):
-    COUNTER[0] += 1
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    if sid:
-        headers["Mcp-Session-Id"] = sid
-    req = urllib.request.Request(
-        url,
-        data=json.dumps({"jsonrpc": "2.0", "id": COUNTER[0], "method": method, "params": params}).encode(),
-        headers=headers,
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        sid = resp.headers.get("Mcp-Session-Id") or sid
-        body = resp.read().decode()
-    payload = None
-    for line in body.splitlines():
-        if line.startswith("data: ") and line[6:].strip():
-            payload = json.loads(line[6:])
-    if payload is None and body.strip():
-        payload = json.loads(body)
-    return sid, payload
-
-
-def notify(url, token, sid, method):
-    """A JSON-RPC notification: no id, so the server must not answer it."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-        "Mcp-Session-Id": sid,
-    }
-    req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "method": method}).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        resp.read()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mcp_client import McpClient  # noqa: E402
 
 
 def main():
@@ -63,21 +25,11 @@ def main():
     ap.add_argument("tool", nargs="?")
     ap.add_argument("arguments", nargs="?", default="{}")
     a = ap.parse_args()
-    token = open(f"{a.data_dir}/mcp-token").read().strip()
-    url = f"http://127.0.0.1:{a.port}/mcp"
-    sid, _ = rpc(url, token, None, "initialize", {
-        "protocolVersion": "2025-06-18", "capabilities": {},
-        "clientInfo": {"name": "live-check", "version": "1"},
-    })
-    try:
-        notify(url, token, sid, "notifications/initialized")
-    except urllib.error.HTTPError:
-        pass
+    client = McpClient(a.port, a.data_dir, name="live-check", timeout=60).connect()
     if a.verb == "list":
-        _, out = rpc(url, token, sid, "tools/list", {})
-        print(json.dumps([t["name"] for t in out["result"]["tools"]]))
+        print(json.dumps([t["name"] for t in client.list_tools()]))
         return 0
-    _, out = rpc(url, token, sid, "tools/call", {"name": a.tool, "arguments": json.loads(a.arguments)})
+    out = client.call_raw(a.tool, json.loads(a.arguments))
     if "error" in out:
         print(json.dumps(out["error"]))
         return 2

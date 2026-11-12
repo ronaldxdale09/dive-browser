@@ -6,6 +6,7 @@ number that matters for an agent is not only "did the tool work" but "what did
 knowing cost". Both live here so the two scripts cannot drift.
 """
 import json
+import urllib.error
 import urllib.request
 
 PROTOCOL = "2025-06-18"
@@ -18,10 +19,11 @@ class McpError(RuntimeError):
 class McpClient:
     """One session against a running Dive."""
 
-    def __init__(self, port, data_dir, name="dive-bench"):
+    def __init__(self, port, data_dir, name="dive-bench", timeout=90):
         self.url = f"http://127.0.0.1:{port}/mcp"
         self.token = open(f"{data_dir}/mcp-token").read().strip()
         self.name = name
+        self.timeout = timeout
         self.session = None
         self.counter = 0
         # Reset by the caller per task.
@@ -46,7 +48,7 @@ class McpClient:
         if params is not None:
             body["params"] = params
         request = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers=headers)
-        with urllib.request.urlopen(request, timeout=90) as response:
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
             self.session = response.headers.get("Mcp-Session-Id") or self.session
             text = response.read().decode()
         if notify:
