@@ -13,6 +13,9 @@ use crate::params::{
 };
 use crate::server::DiveServer;
 
+#[cfg(test)]
+mod reference;
+
 /// One tool as the server advertises it. The single source of the tool
 /// surface; the sidecar agent's catalog is checked against it.
 #[derive(Debug, Clone, PartialEq)]

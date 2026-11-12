@@ -6,6 +6,7 @@
 | [design/onboarding.md](design/onboarding.md) | The first-run flow and how to bring it back |
 | [design/diveprivacy.md](design/diveprivacy.md) | The in-engine ad, tracker and fingerprint blocking |
 | [design/browser-essentials-and-extensions.md](design/browser-essentials-and-extensions.md) | Everyday browser features and Chromium extension support |
+| [MCP-TOOLS.md](MCP-TOOLS.md) | Generated reference of every MCP tool; regenerate with `cargo test -p dive-mcp tool_reference` |
 | [performance/RESULTS.md](performance/RESULTS.md) | Measured startup, memory and readiness against Chrome and Brave |
 | [performance/upstream-references.md](performance/upstream-references.md) | Where the performance ideas come from |
 
