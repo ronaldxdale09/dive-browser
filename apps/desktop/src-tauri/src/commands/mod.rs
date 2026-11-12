@@ -42,10 +42,10 @@ pub(crate) use tabs::{
     activate_tab, close_tab, close_tab_from_user, focus_page, go_back, go_forward, open_tab,
     open_tab_with, page_agreed_to_close, rebuild_failed_protocol, request_tab_close, show_tab,
 };
-pub(crate) use windows::{
-    attach_tab, detach_tab, exit_private_session, open_private_window, open_window, pop_out_tab,
-    window_open_local,
-};
+pub(crate) use windows::{attach_tab, detach_tab, pop_out_tab, window_open_local};
+// Only the macOS native menu bar (menu.rs) calls these.
+#[cfg(not(target_os = "windows"))]
+pub(crate) use windows::{exit_private_session, open_private_window, open_window};
 pub(crate) use workspaces::{
     WorkspaceDraft, activate_workspace, active_profile, create_workspace, delete_workspace,
 };
