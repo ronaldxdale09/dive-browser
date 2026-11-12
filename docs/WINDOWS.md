@@ -34,7 +34,14 @@ lets you *see* the browser, and CEF publishes `windowsarm64` alongside
 VS Build Tools with clang, Rust via rustup, Node 24 with pnpm 10.33.0 (the
 major CI uses and the `packageManager` version; pnpm is installed with npm,
 because corepack is not bundled from Node 26 on), CMake, Ninja, Git, and a
-persisted `CEF_PATH`. Run it in an admin PowerShell. It does not clone the
+persisted `CEF_PATH`. Run it in an admin PowerShell. Every download is pinned
+to an exact version and checked against a SHA-256 (or, for the VS Build Tools
+bootstrapper, an Authenticode signature) before it is unpacked or run; the
+pins are the `$Pins` table at the top of the script. It also restricts `C:\dev`
+to Administrators, SYSTEM and the developer, and makes the unpacked tool
+directories read-and-execute for the developer. The developer defaults to the
+logged-on console user; pass `-DevUser DOMAIN\user` when nobody is logged on
+(for example under `prlctl exec`). It does not clone the
 repo: you do, or `scripts/windows/first-build.ps1` does. CEF is downloaded by
 the first build (several hundred MB, about 1 GB unpacked), the same as on
 macOS.
@@ -117,6 +124,12 @@ Other things that cost time and are not obvious:
 - The VM allows **one `prlctl exec` session at a time**. A long build in the
   foreground blocks every other call, so builds run detached via the Task
   Scheduler and the log is polled.
+- Copy `rebuild.ps1` and `first-build.ps1` to `C:\dev`, not `C:\`, and create
+  the task as the logged-on developer with `/it`, never `/ru SYSTEM`:
+  `schtasks /create /tn DiveRebuild /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\rebuild.ps1" /sc once /st 00:00 /ru <DOMAIN\user> /it /f`.
+  A SYSTEM task running scripts that a lower-privileged account can write is a
+  privilege escalation; `C:\dev` is writable only by Administrators, SYSTEM and
+  the developer. `/it` needs the developer logged on.
 - The logged-on user is **not elevated**: a task writing to `C:\` root exits 1
   with no output.
 - `$home` is **read-only** in PowerShell. Assigning to it fails without

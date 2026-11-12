@@ -3,7 +3,14 @@
 #
 # Run it after bootstrap.ps1, detached, so no `prlctl exec` session has to
 # stay open for the length of a CEF download. Copy this file into the VM (for
-# example to C:\dev\first-build.ps1), then:
+# example to C:\dev\first-build.ps1), then either run it as a task that
+# belongs to the developer, never SYSTEM (the script must live under C:\dev,
+# whose ACL bootstrap.ps1 restricts; /it needs the developer logged on):
+#
+#   schtasks /create /tn DiveFirstBuild /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\first-build.ps1" /sc once /st 00:00 /ru <DOMAIN\user> /it /f
+#   schtasks /run /tn DiveFirstBuild
+#
+# or, from the developer's own shell:
 #
 #   Start-Process powershell -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","C:\dev\first-build.ps1" -WindowStyle Hidden
 #

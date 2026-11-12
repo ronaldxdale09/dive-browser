@@ -3,8 +3,14 @@
 # Detached, so a release build outlives any `prlctl exec` session (which the
 # VM allows only one of at a time):
 #
-#   schtasks /create /tn DiveRebuild /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\rebuild.ps1" /sc once /st 00:00 /ru SYSTEM /f
+#   schtasks /create /tn DiveRebuild /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\rebuild.ps1" /sc once /st 00:00 /ru <DOMAIN\user> /it /f
 #   schtasks /run /tn DiveRebuild
+#
+# The task runs as the developer, in their logged-on session (/it, no stored
+# password), never as SYSTEM: a SYSTEM task running scripts a lower-privileged
+# account can write is a privilege escalation. So this script must live under
+# C:\dev (not C:\), whose ACL bootstrap.ps1 restricts to Administrators,
+# SYSTEM and the developer. The developer must be logged on for /it to start.
 #
 # then poll C:\dev\logs\rebuild.log for DONE (FAILED appears before it when a
 # step failed).
